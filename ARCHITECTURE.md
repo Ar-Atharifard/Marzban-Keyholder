@@ -1,0 +1,22 @@
+# Keyholder boundaries
+
+`api/public.py` resolves a random bearer token by SHA-256 digest, checks local status, resolves the stored customer mapping, fetches upstream configurations, and renders a subscription. Neither upstream identities nor panel-generated subscription URLs form part of the stable customer URL. Rotation is the only ordinary operation that intentionally changes that URL.
+
+`api/admin.py` authenticates a high-entropy environment bearer key with constant-time digest comparison. It manages local customers, mappings, policy, revocation and ECH application data. Raw tokens are returned once at creation/rotation and never stored. Revocation is terminal. Local disable/revoke does not withdraw already-downloaded upstream credentials.
+
+`models.py` and `db.py` hold SQLAlchemy persistence. Customer identity, backend references and mappings are distinct records. JSON policy is validated through Pydantic at API boundaries. Alembic owns schema evolution; startup does not auto-create tables. SQLite-specific connection setup stays in the engine factory. PostgreSQL requires a driver plus data migration, not changes to API or renderer contracts.
+
+`backends/base.py` defines the read-only `BackendAdapter` protocol and sanitized errors. `backends/marzban.py` owns HTTP authentication and the version-sensitive Marzban schema. The only panel operations are login and fetching a mapped user. It uses one connection-pooled bounded client, verifies TLS, refuses redirects, ignores proxy environment variables, and never reads panel storage. The MVP registry exposes `marzban-default`; additional providers and environment-backed panel references need explicit trusted registry entries. Database configuration references must not become user-supplied fetch URLs.
+
+`rendering/profiles.py` parses supported upstream VLESS links into immutable provider-neutral profiles and reconstructs allowed fields. It enforces profile-specific transport, flow, mode and ALPN rather than copying query strings or arbitrary JSON. Its profile generator derives ECH variants from existing CDN profiles and operator-maintained static application data. New generators can derive F&F or IPv6 variants here without panel writes; define validated policy fields and fixtures first.
+
+`rendering/renderers.py` renders those profiles as base64 URI lines or an Xray client JSON array. Renderer selection is a separate seam for explicit formats and tested User-Agent rules. ECH is delivered only in Xray JSON, avoiding unverified URI import semantics. Add other client formats by implementing `Renderer`; never bypass normalization. Exact client and installed panel compatibility are deployment gates described in README.
+
+`rate_limit.py` defines a replaceable synchronous limiter contract. The bounded single-process implementation limits `/s/{token}` by its SHA-256 digest independently of reverse proxy peer addresses. Admin limits use a separate peer bucket; arbitrary forwarded IP headers are ignored. Raw tokens and bucket digests are never logged; Redis-backed implementations and trusted proxy identity belong here when scaling. Run one worker today. `main.py` owns lifecycle, secret-safe error responses, no-store headers, and route-template logging. A future ingress must redact public tokens too.
+
+The public domain and database are durable identity infrastructure. Preserve both through panel migration. No adapter retries indefinitely or serves stale credentials after upstream errors. Tests use fake adapters and `httpx.MockTransport`; they prove local behavior without touching production services.
+
+
+For this same-VPS Linux deployment, Compose uses host networking and Uvicorn binds explicitly to `127.0.0.1:18000`. The Marzban adapter connects to the existing `127.0.0.1:8000` listener. No panel exposure or changes to existing services are needed.
+
+Moving Keyholder to an Iranian VPS requires a future synchronization boundary: authenticated background fetching into durable local configuration snapshots, with the public endpoint rendering from those snapshots rather than waiting synchronously for Marzban. Define refresh/retry policy, atomic publication, freshness/expiry rules, upstream status and revocation propagation, credential protection, and fail-closed behavior before that move. Use a secured synchronization channel without publicly exposing the panel. Today every public subscription request still depends synchronously on Marzban; no caching/synchronization architecture has been implemented.

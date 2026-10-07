@@ -1,0 +1,51 @@
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from sqlalchemy import select, text
+
+from keyholder.api.dependencies import DB
+from keyholder.backends.base import UpstreamError, UpstreamUnavailable
+from keyholder.models import ApplicationData, Customer
+from keyholder.rendering.profiles import generate_profiles
+from keyholder.rendering.renderers import select_renderer
+from keyholder.schemas import Policy
+from keyholder.security import hash_token, valid_token, verify_token
+
+router = APIRouter()
+
+
+@router.get("/health")
+def health(db: DB) -> dict[str, str]:
+    db.execute(text("SELECT 1"))
+    return {"status": "ok"}
+
+
+@router.get("/s/{token}")
+async def subscription(
+    token: str,
+    request: Request,
+    db: DB,
+    output: Annotated[Literal["uri", "xray"] | None, Query(alias="format")] = None,
+) -> Response:
+    if not valid_token(token):
+        raise HTTPException(404, "Subscription not found")
+    customer = db.scalar(select(Customer).where(Customer.token_hash == hash_token(token)))
+    if not customer or not verify_token(token, customer.token_hash) or customer.status != "active":
+        raise HTTPException(404, "Subscription not found")
+    adapter = request.app.state.backends.get(customer.mapping.backend_id)
+    if adapter is None:
+        raise HTTPException(503, "Backend unavailable")
+    try:
+        links = await adapter.configurations(customer.mapping.upstream_username)
+        ech_data = db.get(ApplicationData, "ech")
+        ech = ech_data.value.get("ech_config_list", "") if ech_data else ""
+        profiles = generate_profiles(links, Policy.model_validate(customer.policy), ech)
+        renderer = select_renderer(output, request.headers.get("user-agent", ""))
+        content = renderer.render(profiles)
+    except UpstreamUnavailable:
+        raise HTTPException(404, "Subscription unavailable") from None
+    except UpstreamError:
+        raise HTTPException(502, "Upstream unavailable") from None
+    except ValueError:
+        raise HTTPException(503, "No compatible subscription profiles") from None
+    return Response(content, media_type=renderer.media_type)
