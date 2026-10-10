@@ -242,3 +242,18 @@ Public browser management is now served by the existing HTTPS Nginx gateway at
 this simple model because Cloudflare Zero Trust is unavailable. The previous
 private bookmark/tunnel candidate is inactive. No cloudflared service runs.
 See `MANAGEMENT.md` for TLS/cache requirements, verification and rollback.
+
+## Java homepages and staged titan pilot
+
+The apex and titan/sealord/Keyholder/edge homepages now serve the lightweight
+Java-learning site from the existing static mount. Origin and public Cloudflare
+checks returned 200 with the expected content. The panel stays at `/dashboard/`;
+its login/API/static paths and customer `/s/` delivery were preserved. Existing
+sealord routing is unchanged. See `MANAGEMENT.md` for page/config rollback.
+
+The WS/XHTTP titan expansion is staged, not activated. The owner selected test1
+for a pilot before wider rollout. 89 tests, strict mypy, Ruff, Nginx syntax,
+installed Marzban/Xray candidate validation, isolated transport HTTPS rehearsals,
+and a private candidate-API database-clone rehearsal passed. No live core restart
+or other-customer policy changes have occurred. See `TRANSPORTS.md` for the explicit
+activation approval gate, immutable image, compatibility scope and rollback.

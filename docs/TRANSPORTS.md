@@ -59,8 +59,17 @@ from issued URI and JSON output.
 The code-only image was built locally from the verified deployed base using
 `deploy/Dockerfile.code-update`; both dependency manifests exactly matched. The
 base image ID is `9d90728e7cebccebffe0bec1027bb22102e89f58497fc9e4311b1cd07978726a`
-and candidate image ID is `dcd10c0e0beca17eec1bef25e4e81d5f124324ed4e4b3b7feddc5b78adb6618e`.
-Image import/renderer checks passed offline. No dependencies were installed on VPS.
+and candidate image ID is `5bde9df5a0f81e43c33914b3d57ff274f6fb06993ff3690caace9f19879c143c`.
+Image import/renderer checks passed offline. The candidate API also passed a
+private consistent production-database-clone rehearsal: identities/mappings and
+all five existing upstream profiles remained valid in both formats. Compose
+comparison confirmed that only the image changes; volume, environment, networking
+and hardening match the deployed service. Marzban control API read prerequisites
+passed. The image is staged, not running. No dependencies were installed on VPS.
+
+Use `KEYHOLDER_ENV_FILE=/srv/keyholder/.env` explicitly with Compose; supplying
+`--env-file` alone does not resolve the service `env_file` selector. Keep all
+configuration output captured privately rather than printing resolved credentials.
 
 Prepare a consistent Keyholder/Marzban backup,
 and fresh gateway/config/host-settings snapshots before activation. Recheck source

@@ -20,8 +20,8 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from keyholder.main import create_app
-from keyholder.policies import SUPPORTED_KINDS
 from keyholder.rendering.profiles import normalize
+from keyholder.schemas import default_profiles
 
 
 def receive(connection: socket.socket, size: int) -> bytes:
@@ -104,7 +104,7 @@ async def validate() -> None:
         assert db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         for (policy,) in db.execute("SELECT policy FROM customers"):
-            assert json.loads(policy)["profiles"] == list(SUPPORTED_KINDS)
+            assert json.loads(policy)["profiles"] == default_profiles()
         row = db.execute("SELECT id FROM customers WHERE status='active' LIMIT 1").fetchone()
         assert row is not None
         # Only the clone receives a synthetic token. Live identities are untouched.
@@ -126,7 +126,7 @@ async def validate() -> None:
             links = base64.b64decode(uri.text, validate=True).decode().splitlines()
             profiles = [normalize(link) for link in links]
             assert len(profiles) == 5 and all(p is not None for p in profiles)
-            assert {p.kind for p in profiles if p is not None} == set(SUPPORTED_KINDS)
+            assert {p.kind for p in profiles if p is not None} == set(default_profiles())
             for link in links:
                 query = parse_qs(urlsplit(link).query)
                 if query.get("type") == ["xhttp"]:
