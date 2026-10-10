@@ -1,10 +1,10 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:9e01bf1ae5db7649a236da7be1e94ffbbbdd7a93f867dd0d8d5720d9e1f89fab
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN groupadd --gid 10001 keyholder && useradd --uid 10001 --gid 10001 --no-create-home keyholder
 COPY pyproject.toml uv.lock ./
 COPY src ./src
-RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev --no-editable
+RUN pip install --no-cache-dir uv==0.13.0 && uv sync --frozen --no-dev --no-editable
 COPY alembic.ini ./
 COPY migrations ./migrations
 RUN mkdir /data && chown 10001:10001 /data

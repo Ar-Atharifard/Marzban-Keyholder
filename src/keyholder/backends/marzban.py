@@ -59,6 +59,8 @@ class MarzbanBackend:
                     },
                 )
                 data = r.json()
+                if not isinstance(data, dict):
+                    raise ValueError
                 token = data.get("access_token")
                 if not isinstance(token, str) or not token or len(token) > 16384:
                     raise ValueError
@@ -72,10 +74,11 @@ class MarzbanBackend:
         await self.login()
         for attempt in range(2):
             try:
+                used_token = self.token
                 r = await self.request(
                     "GET",
                     f"/api/user/{username}",
-                    headers={"Authorization": f"Bearer {self.token}"},
+                    headers={"Authorization": f"Bearer {used_token}"},
                 )
                 user = UserResponse.model_validate(r.json())
                 if user.status != "active":
@@ -84,7 +87,8 @@ class MarzbanBackend:
             except PermissionError:
                 if attempt or self.settings.marzban_token.get_secret_value():
                     raise UpstreamError("Upstream authentication failed") from None
-                self.token = ""
+                if self.token == used_token:
+                    self.token = ""
                 await self.login()
             except (ValueError, ValidationError):
                 raise UpstreamError("Upstream schema mismatch") from None

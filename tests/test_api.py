@@ -1,13 +1,17 @@
+import asyncio
+import base64
+import json
 import logging
 from typing import cast
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from keyholder.backends.base import UpstreamError
 from keyholder.models import Customer
-from tests.conftest import ADMIN_KEY
+from tests.conftest import ADMIN_KEY, ALL, KINDS
 
 HEADERS = {"Authorization": f"Bearer {ADMIN_KEY}"}
 
@@ -97,45 +101,13 @@ def test_validation_and_upstream_errors(client: TestClient) -> None:
     cast(FastAPI, client.app).state.backends = {"marzban-default": Broken()}
     response = client.get(f"/s/{token}")
     assert response.status_code == 502 and "secret" not in response.text
-    assert (
-        client.put(
-            "/admin/settings/ech", headers=HEADERS, json={"ech_config_list": "bad"}
-        ).status_code
-        == 422
-    )
+    assert client.get("/admin/settings/ech", headers=HEADERS).status_code == 404
 
 
 def test_rate_limit(client: TestClient) -> None:
     cast(FastAPI, client.app).state.limiter.limit = 1
     assert client.get("/s/invalid").status_code == 404
     assert client.get("/s/invalid").status_code == 429
-
-
-def test_ech_application_data_updates_without_token_change(client: TestClient) -> None:
-    import base64
-
-    result = create(client)
-    customer = result["customer"]
-    assert isinstance(customer, dict)
-    cid = customer["id"]
-    token = result["token"]
-    client.patch(f"/admin/customers/{cid}", headers=HEADERS, json={"policy": {"ech_enabled": True}})
-    assert client.get(f"/s/{token}?format=xray").status_code == 503
-    for payload in [b"\x00\x04\xfe\x0d\x00\x00", b"\x00\x05\xfe\x0d\x00\x01\x01"]:
-        ech = base64.b64encode(payload).decode()
-        assert (
-            client.put(
-                "/admin/settings/ech", headers=HEADERS, json={"ech_config_list": ech}
-            ).status_code
-            == 200
-        )
-        assert client.get("/admin/settings/ech", headers=HEADERS).json()["ech_config_list"] == ech
-        response = client.get(f"/s/{token}?format=xray")
-        assert response.status_code == 200
-        assert (
-            response.json()[1]["outbounds"][0]["streamSettings"]["tlsSettings"]["echConfigList"]
-            == ech
-        )
 
 
 def test_subscription_limits_are_per_token_and_ignore_forwarded_ips(
@@ -219,3 +191,90 @@ def test_mapping_and_rotation_update_timestamp(client: TestClient, monkeypatch: 
         row = db.get(Customer, cid)
         assert row is not None
         assert row.updated_at.replace(tzinfo=UTC) == rotation_time
+
+
+@pytest.mark.parametrize("output", ["uri", "xray"])
+def test_legacy_policy_delivers_reality_without_ech(client: TestClient, output: str) -> None:
+    result = create(client)
+    token = str(result["token"])
+    legacy = {
+        "profiles": ["xhttp_reality", "tcp_reality", "xhttp_cdn", "ws_cdn"],
+        "ech_enabled": True,
+        "include_base_cdn": False,
+    }
+    with cast(FastAPI, client.app).state.sessions() as db:
+        row = db.scalar(select(Customer))
+        assert row is not None
+        row.policy = legacy
+        db.commit()
+    response = client.get(f"/s/{token}?format={output}")
+    assert response.status_code == 200
+    content = base64.b64decode(response.text).decode() if output == "uri" else response.text
+    assert "extra" not in content and "ech" not in content
+    view = client.get("/admin/customers", headers=HEADERS).json()[0]
+    assert view["policy"] == {"profiles": ["xhttp_reality", "tcp_reality"]}
+    with cast(FastAPI, client.app).state.sessions() as db:
+        row = db.scalar(select(Customer))
+        assert row is not None and row.policy == legacy  # GET never silently migrates data.
+
+
+@pytest.mark.parametrize("policy", [{"profiles": ["ws_cdn"]}, {"profiles": []}, "invalid"])
+def test_unsupported_stored_policy_fails_closed(client: TestClient, policy: object) -> None:
+    result = create(client)
+    with cast(FastAPI, client.app).state.sessions() as db:
+        row = db.scalar(select(Customer))
+        assert row is not None
+        row.policy = policy
+        db.commit()
+    response = client.get(f"/s/{result['token']}")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "No compatible subscription profiles"}
+
+
+def test_ech_api_and_policy_are_retired(client: TestClient) -> None:
+    for method in [client.get, client.put]:
+        assert method("/admin/settings/ech", headers=HEADERS).status_code == 404
+    response = client.post(
+        "/admin/customers",
+        headers=HEADERS,
+        json={"name": "Fixture", "upstream_username": "alice", "policy": {"ech_enabled": True}},
+    )
+    assert response.status_code == 422
+
+
+def test_upstream_total_deadline_is_sanitized(client: TestClient) -> None:
+    class SlowBackend:
+        async def configurations(self, username: str) -> list[str]:
+            await asyncio.sleep(60)
+            return []
+
+    app = cast(FastAPI, client.app)
+    token = create(client)["token"]
+    app.state.settings.upstream_timeout = 0.01
+    app.state.backends = {"marzban-default": SlowBackend()}
+    response = client.get(f"/s/{token}")
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Upstream unavailable"}
+
+
+@pytest.mark.parametrize("output", ["uri", "xray"])
+def test_all_current_families_through_subscription_api(client: TestClient, output: str) -> None:
+    class CurrentBackend:
+        async def configurations(self, username: str) -> list[str]:
+            return ALL
+
+    result = client.post(
+        "/admin/customers",
+        headers=HEADERS,
+        json={"name": "Fixture", "upstream_username": "alice", "policy": {"profiles": KINDS}},
+    ).json()
+    cast(FastAPI, client.app).state.backends = {"marzban-default": CurrentBackend()}
+    response = client.get(f"/s/{result['token']}?format={output}")
+    assert response.status_code == 200
+    if output == "uri":
+        links = base64.b64decode(response.text).decode().splitlines()
+        assert len(links) == 5 and sum(link.startswith("ss://") for link in links) == 1
+    else:
+        configs = json.loads(response.text)
+        assert len(configs) == 5
+        assert sum(c["outbounds"][0]["protocol"] == "shadowsocks" for c in configs) == 1

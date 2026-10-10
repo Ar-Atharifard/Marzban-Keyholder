@@ -1,26 +1,25 @@
-import base64
-import binascii
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ProfileKind = Literal["xhttp_reality", "tcp_reality", "xhttp_cdn", "ws_cdn"]
+from keyholder.policies import stored_policy
+
+ProfileKind = Literal[
+    "tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"
+]
 
 
 def default_profiles() -> list[ProfileKind]:
-    return ["xhttp_reality", "tcp_reality", "xhttp_cdn", "ws_cdn"]
+    return ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
 
 
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profiles: list[ProfileKind] = Field(
         default_factory=default_profiles,
-        max_length=4,
+        max_length=5,
     )
-    ech_enabled: bool = False
-    include_base_cdn: bool = True
-    # Future generators add validated policy fields; no arbitrary Xray overrides.
 
 
 class MappingInput(BaseModel):
@@ -52,6 +51,11 @@ class CustomerView(BaseModel):
     revoked_at: datetime | None
     mapping: MappingInput
 
+    @field_validator("policy", mode="before")
+    @classmethod
+    def normalize_stored_policy(cls, value: object) -> object:
+        return stored_policy(value) if not isinstance(value, Policy) else value
+
 
 class TokenResult(BaseModel):
     customer: CustomerView
@@ -59,19 +63,5 @@ class TokenResult(BaseModel):
     token: str
 
 
-class ECHSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ech_config_list: str = Field(max_length=16384)
-
-    @field_validator("ech_config_list")
-    @classmethod
-    def validate_ech(cls, value: str) -> str:
-        if not value:
-            return value
-        try:
-            raw = base64.b64decode(value, validate=True)
-        except (ValueError, binascii.Error) as exc:
-            raise ValueError("ECH must be standard base64") from exc
-        if len(raw) < 4 or int.from_bytes(raw[:2], "big") != len(raw) - 2:
-            raise ValueError("Invalid ECHConfigList length framing")
-        return value
+class ErrorResponse(BaseModel):
+    detail: str

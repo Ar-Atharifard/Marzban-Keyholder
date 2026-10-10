@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -5,13 +6,20 @@ from sqlalchemy import select, text
 
 from keyholder.api.dependencies import DB
 from keyholder.backends.base import UpstreamError, UpstreamUnavailable
-from keyholder.models import ApplicationData, Customer
+from keyholder.models import Customer
+from keyholder.policies import stored_policy
 from keyholder.rendering.profiles import generate_profiles
 from keyholder.rendering.renderers import select_renderer
-from keyholder.schemas import Policy
+from keyholder.schemas import ErrorResponse, Policy
 from keyholder.security import hash_token, valid_token, verify_token
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        422: {"model": ErrorResponse, "description": "Invalid request"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    }
+)
 
 
 @router.get("/health")
@@ -20,7 +28,25 @@ def health(db: DB) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/s/{token}")
+@router.get(
+    "/s/{token}",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Normalized subscription in the selected format",
+            "content": {
+                "text/plain": {"schema": {"type": "string", "description": "Base64 URI lines"}},
+                "application/json": {"schema": {"type": "array", "items": {"type": "object"}}},
+            },
+        },
+        404: {"model": ErrorResponse, "description": "Subscription not found or unavailable"},
+        502: {"model": ErrorResponse, "description": "Upstream unavailable"},
+        503: {
+            "model": ErrorResponse,
+            "description": "No compatible profiles or backend unavailable",
+        },
+    },
+)
 async def subscription(
     token: str,
     request: Request,
@@ -36,15 +62,14 @@ async def subscription(
     if adapter is None:
         raise HTTPException(503, "Backend unavailable")
     try:
-        links = await adapter.configurations(customer.mapping.upstream_username)
-        ech_data = db.get(ApplicationData, "ech")
-        ech = ech_data.value.get("ech_config_list", "") if ech_data else ""
-        profiles = generate_profiles(links, Policy.model_validate(customer.policy), ech)
+        async with asyncio.timeout(request.app.state.settings.upstream_timeout):
+            links = await adapter.configurations(customer.mapping.upstream_username)
+        profiles = generate_profiles(links, Policy.model_validate(stored_policy(customer.policy)))
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)
     except UpstreamUnavailable:
         raise HTTPException(404, "Subscription unavailable") from None
-    except UpstreamError:
+    except (UpstreamError, TimeoutError):
         raise HTTPException(502, "Upstream unavailable") from None
     except ValueError:
         raise HTTPException(503, "No compatible subscription profiles") from None

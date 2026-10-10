@@ -4,18 +4,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 
 from keyholder.api.dependencies import DB, admin
-from keyholder.models import ApplicationData, Backend, Customer, CustomerMapping, now
+from keyholder.models import Backend, Customer, CustomerMapping, now
 from keyholder.schemas import (
     CustomerCreate,
     CustomerUpdate,
     CustomerView,
-    ECHSettings,
+    ErrorResponse,
     MappingInput,
     TokenResult,
 )
 from keyholder.security import generate_token, hash_token
 
-router = APIRouter(prefix="/admin", dependencies=[Depends(admin)])
+router = APIRouter(
+    prefix="/admin",
+    dependencies=[Depends(admin)],
+    responses={
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        422: {"model": ErrorResponse, "description": "Invalid request or unknown backend"},
+        429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
+)
 
 
 def find(db: DB, customer_id: str) -> Customer:
@@ -60,12 +69,23 @@ def listing(
     )
 
 
-@router.get("/customers/{customer_id}", response_model=CustomerView)
+@router.get(
+    "/customers/{customer_id}",
+    response_model=CustomerView,
+    responses={404: {"model": ErrorResponse, "description": "Customer not found"}},
+)
 def retrieve(customer_id: str, db: DB) -> Customer:
     return find(db, customer_id)
 
 
-@router.patch("/customers/{customer_id}", response_model=CustomerView)
+@router.patch(
+    "/customers/{customer_id}",
+    response_model=CustomerView,
+    responses={
+        404: {"model": ErrorResponse, "description": "Customer not found"},
+        409: {"model": ErrorResponse, "description": "Revoked customers are terminal"},
+    },
+)
 def update(customer_id: str, body: CustomerUpdate, db: DB) -> Customer:
     customer = find(db, customer_id)
     if customer.status == "revoked":
@@ -83,7 +103,14 @@ def update(customer_id: str, body: CustomerUpdate, db: DB) -> Customer:
     return customer
 
 
-@router.put("/customers/{customer_id}/mapping", response_model=CustomerView)
+@router.put(
+    "/customers/{customer_id}/mapping",
+    response_model=CustomerView,
+    responses={
+        404: {"model": ErrorResponse, "description": "Customer not found"},
+        409: {"model": ErrorResponse, "description": "Revoked customers are terminal"},
+    },
+)
 def mapping(customer_id: str, body: MappingInput, db: DB) -> Customer:
     customer = find(db, customer_id)
     if customer.status == "revoked":
@@ -97,7 +124,14 @@ def mapping(customer_id: str, body: MappingInput, db: DB) -> Customer:
     return customer
 
 
-@router.post("/customers/{customer_id}/rotate-token", response_model=TokenResult)
+@router.post(
+    "/customers/{customer_id}/rotate-token",
+    response_model=TokenResult,
+    responses={
+        404: {"model": ErrorResponse, "description": "Customer not found"},
+        409: {"model": ErrorResponse, "description": "Revoked customers are terminal"},
+    },
+)
 def rotate(customer_id: str, request: Request, db: DB) -> TokenResult:
     customer = find(db, customer_id)
     if customer.status == "revoked":
@@ -107,20 +141,3 @@ def rotate(customer_id: str, request: Request, db: DB) -> TokenResult:
     customer.updated_at = now()
     db.commit()
     return token_result(request, customer, token)
-
-
-@router.get("/settings/ech", response_model=ECHSettings)
-def read_ech(db: DB) -> ECHSettings:
-    row = db.get(ApplicationData, "ech")
-    return ECHSettings.model_validate(row.value if row else {"ech_config_list": ""})
-
-
-@router.put("/settings/ech", response_model=ECHSettings)
-def write_ech(body: ECHSettings, db: DB) -> ECHSettings:
-    row = db.get(ApplicationData, "ech")
-    if row:
-        row.value = body.model_dump()
-    else:
-        db.add(ApplicationData(key="ech", value=body.model_dump()))
-    db.commit()
-    return body

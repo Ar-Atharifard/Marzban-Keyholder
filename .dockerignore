@@ -1,4 +1,5 @@
 .git
+.audit
 .env
 .env.*
 .venv

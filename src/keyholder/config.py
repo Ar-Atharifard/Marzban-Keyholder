@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     upstream_timeout: float = Field(default=10, ge=1, le=60)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
 
+    @field_validator("admin_key")
+    @classmethod
+    def reject_placeholder(cls, value: SecretStr) -> SecretStr:
+        if value.get_secret_value().startswith("replace-with-"):
+            raise ValueError("Generate an admin key before deployment")
+        return value
+
     @field_validator("public_base_url", "marzban_url")
     @classmethod
     def validate_url(cls, value: str) -> str:

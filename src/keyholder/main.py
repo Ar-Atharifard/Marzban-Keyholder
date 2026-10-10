@@ -27,6 +27,9 @@ if not logger.handlers:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()  # type: ignore[call-arg]  # Loaded from environment.
+    # HTTP libraries may log URLs at INFO; keep adapter diagnostics secret-safe.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     engine, sessions = make_database(settings.database_url)
 
     @asynccontextmanager
