@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from keyholder.main import create_app
+from keyholder.policies import SUPPORTED_KINDS
 from keyholder.rendering.profiles import normalize
 from keyholder.schemas import default_profiles
 
@@ -71,6 +72,7 @@ def check_connectivity(path: Path) -> None:
                 result = http.client.HTTPResponse(secure)
                 result.begin()
                 assert result.status == 200
+                assert result.read(65536), "Empty HTTPS body"
     finally:
         process.terminate()
         try:
@@ -85,9 +87,11 @@ async def validate() -> None:
     assert (directory / ".release-rehearsal").read_text() == "isolated-clone\n"
     assert os.environ["KEYHOLDER_DATABASE_URL"] == "sqlite:////data/keyholder.db"
     database = directory / "keyholder.db"
+    expected = list(SUPPORTED_KINDS) if "--pilot-expansion" in sys.argv else default_profiles()
     with closing(sqlite3.connect(database)) as db:
         before = db.execute("SELECT id,status,token_hash FROM customers ORDER BY id").fetchall()
         mappings = db.execute("SELECT * FROM customer_mappings ORDER BY customer_id").fetchall()
+        policies = db.execute("SELECT id,policy FROM customers ORDER BY id").fetchall()
     result = subprocess.run(
         ["/app/.venv/bin/alembic", "upgrade", "head"], capture_output=True, timeout=30
     )
@@ -103,15 +107,18 @@ async def validate() -> None:
         )
         assert db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-        for (policy,) in db.execute("SELECT policy FROM customers"):
-            assert json.loads(policy)["profiles"] == default_profiles()
+        assert db.execute("SELECT id,policy FROM customers ORDER BY id").fetchall() == policies
         row = db.execute("SELECT id FROM customers WHERE status='active' LIMIT 1").fetchone()
         assert row is not None
         # Only the clone receives a synthetic token. Live identities are untouched.
         token = secrets.token_urlsafe(32)
         db.execute(
-            "UPDATE customers SET token_hash=? WHERE id=?",
-            (hashlib.sha256(token.encode()).hexdigest(), row[0]),
+            "UPDATE customers SET token_hash=?,policy=? WHERE id=?",
+            (
+                hashlib.sha256(token.encode()).hexdigest(),
+                json.dumps({"profiles": expected}),
+                row[0],
+            ),
         )
         db.commit()
     print("migration_clone_identity_mapping_status_and_integrity_ok", flush=True)
@@ -125,15 +132,15 @@ async def validate() -> None:
             assert uri.status_code == xray.status_code == 200
             links = base64.b64decode(uri.text, validate=True).decode().splitlines()
             profiles = [normalize(link) for link in links]
-            assert len(profiles) == 5 and all(p is not None for p in profiles)
-            assert {p.kind for p in profiles if p is not None} == set(default_profiles())
+            assert len(profiles) == len(expected) and all(p is not None for p in profiles)
+            assert {p.kind for p in profiles if p is not None} == set(expected)
             for link in links:
                 query = parse_qs(urlsplit(link).query)
                 if query.get("type") == ["xhttp"]:
                     assert "extra" not in query
             configs = xray.json()
-            assert isinstance(configs, list) and len(configs) == 5
-            print("real_marzban_canary_both_formats_all_five_profiles_ok", flush=True)
+            assert isinstance(configs, list) and len(configs) == len(expected)
+            print("real_marzban_canary_both_formats_profiles_ok", len(expected), flush=True)
             path = directory / "xray-validation.json"
             try:
                 for config in configs:
@@ -147,7 +154,7 @@ async def validate() -> None:
                         timeout=15,
                     )
                     assert result.returncode == 0
-                print("installed_xray_accepts_all_five_generated_configs", flush=True)
+                print("installed_xray_accepts_generated_configs", len(expected), flush=True)
                 if "--connectivity" in sys.argv:
                     failed = False
                     for profile, config in zip(profiles, configs, strict=True):

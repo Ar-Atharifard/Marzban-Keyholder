@@ -190,3 +190,12 @@ Rules use 2053, which Nginx retains alongside 443. Public Python/v2rayNG/browser
 routing checks pass after the scoped Browser Integrity Check exception. These
 results do not certify every customer client version; the owner should refresh
 and import their own subscription without sharing its private URL.
+
+## Activated titan pilot
+
+The deployed release now supports all seven documented policy values. Defaults
+remain the original five. Only the two existing active subscriptions mapped to
+test1 opt into WS/XHTTP TLS CDN. Both formats and all seven installed-Xray client
+configs passed actual verified HTTPS requests, including the new Cloudflare paths.
+Customer IDs, statuses, hashes and mappings were verified preserved. Legacy CDN
+profile names remain rejected. This is not proof of connectivity on every ISP.

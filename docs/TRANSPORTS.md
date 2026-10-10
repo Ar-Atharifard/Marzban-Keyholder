@@ -1,6 +1,6 @@
-# Titan transport expansion: prepared, not activated
+# Titan transport expansion: activated test1 pilot
 
-The original five live inbounds remain unchanged. The candidate adds two VLESS
+The original five live inbounds remain unchanged. The activated release adds two VLESS
 transport combinations; it does not claim seven unrelated wire protocols.
 
 | Profile | Public route | Private origin | Purpose |
@@ -35,7 +35,7 @@ no unofficial fork, arbitrary fragmentation, ECH or heavyweight service is added
 Client support must be checked on the actual apps. XHTTP `extra` remains removed
 from issued URI and JSON output.
 
-## Readiness and activation gate
+## Activation and validation record
 
 - Candidate files are private in `/opt/braavos-panel/transport-expansion`.
 - The installed Marzban parser, host-settings schema and Xray startup-config test
@@ -46,15 +46,25 @@ from issued URI and JSON output.
   establish ISP or Cloudflare delivery.
 - All 89 local tests pass; renderer/API tests retain old fixtures/defaults and reject literal-origin
   addresses for the new CDN profiles. New names avoid retired-policy collisions.
-- Activation still requires explicit approval for Marzban's core-update operation,
-  which restarts Xray and can briefly disconnect current users. The Marzban container
-  and Docker daemon do not need restarting.
-- The owner selected `test1` for the initial pilot; no other Keyholder customer
-  policy should change. If test1 has a Keyholder mapping, preserve its URL and prior selections. It is
-  an active Marzban account with all five existing issued families, but the initial
-  Keyholder lookup found no unambiguous mapping. Recheck before attaching; issue
-  one new pilot Keyholder URL only if no mapping exists. No Marzban user creation
-  or quota/expiry change is needed.
+- The owner approved activation. Only Keyholder was replaced; Marzban applied
+  the new core configuration through its own API, restarting Xray once. The
+  gateway was gracefully reloaded. The Marzban container and Docker daemon were
+  not restarted.
+- The owner selected both existing active Keyholder subscriptions attached to
+  Marzban test1. The initial ambiguous username lookup was not proof of absence:
+  inspection found two mappings, and the owner explicitly selected both. No new
+  customer or URL was created and no token rotated. Only their policies gained
+  the two new families. All customer IDs, statuses, token hashes and mappings
+  compare unchanged against the snapshot; all other policies compare unchanged.
+- A fresh guarded database-clone rehearsal verified both subscription formats,
+  accepted all seven configs in installed Xray, and completed actual verified
+  HTTPS requests with nonempty response bodies through each profile. Both new
+  CDN transports passed through Cloudflare. Temporary containers were removed.
+- The public panel HTML/assets and real authentication passed through Cloudflare.
+  The owner confirmed the panel loaded. Workstation direct IPv4/IPv6 checks failed
+  while VPS browser-style checks passed, so network-specific reachability is not
+  guaranteed. Cloudflare BIC still rejects Python-style panel requests; this does
+  not affect the validated browser login or Keyholder delivery.
 
 The code-only image was built locally from the verified deployed base using
 `deploy/Dockerfile.code-update`; both dependency manifests exactly matched. The
@@ -65,14 +75,15 @@ private consistent production-database-clone rehearsal: identities/mappings and
 all five existing upstream profiles remained valid in both formats. Compose
 comparison confirmed that only the image changes; volume, environment, networking
 and hardening match the deployed service. Marzban control API read prerequisites
-passed. The image is staged, not running. No dependencies were installed on VPS.
+passed. The image is deployed and healthy. No dependencies were installed on VPS.
 
 Use `KEYHOLDER_ENV_FILE=/srv/keyholder/.env` explicitly with Compose; supplying
 `--env-file` alone does not resolve the service `env_file` selector. Keep all
 configuration output captured privately rather than printing resolved credentials.
 
-Prepare a consistent Keyholder/Marzban backup,
-and fresh gateway/config/host-settings snapshots before activation. Recheck source
+Fresh consistent Keyholder/Marzban snapshots and original gateway/core/host
+settings are retained root-only under `/var/backups/keyholder-pilot/<activation-time>`.
+For a future rollout, take fresh snapshots and recheck source
 hashes to avoid applying a stale candidate. Use Marzban's authenticated core-config
 API rather than editing the active file behind its cached state. Its installed
 implementation validates, writes the file, includes database users, restarts the
@@ -81,20 +92,21 @@ Adding VLESS inbounds can make them available to existing Marzban VLESS users by
 its exclusion-list semantics; Keyholder still delivers them only to opted-in
 customers. Do not alter users' quotas, passwords, expiry or exclusions incidentally.
 
-Activation order: preserve snapshots; deploy the tested backward-compatible API
-image; apply Marzban candidate and only the two new titan host templates; load
-Nginx routes with a graceful reload; add the two families only to test1's current
-policy; validate both formats, old token hash and all seven actual HTTPS paths.
+The completed activation followed this order: preserve snapshots; deploy the tested
+backward-compatible API image; apply Marzban candidate and only the two new titan host templates; load
+Nginx routes with a graceful reload; add the two families only to both test1's current
+policies; validate both formats, old token hash and all seven actual HTTPS paths.
 Existing customer identities, mappings and tokens must compare unchanged.
 
-Rollback: restore test1's prior selection, restore the gateway file in place and
+Rollback: restore the two policies from `pilot-before-both.json` in the private
+activation backup, restore the gateway file in place and
 reload after syntax validation; restore the original core through the same API
 (which again briefly reconnects users). Restore only host rows belonging to the
 new tags if necessary; never overwrite the live user database merely to remove
 these additions. The previous API image remains compatible with original policies.
 No migration is needed. Both rollout and rollback leave customer URLs intact.
 
-After origin/Cloudflare checks, the owner should refresh test1's existing
-subscription and try WS/XHTTP on MCI, Irancell and AUT. Record app/core version,
+The owner should now refresh both existing test1 subscriptions and try WS/XHTTP on
+MCI, Irancell and AUT. Record app/core version,
 success/failure and approximate latency. This is a short acceptance test, not a
 request for prolonged ISP troubleshooting. Expand only after that result.

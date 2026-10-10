@@ -2,7 +2,7 @@
 
 Keyholder provides stable customer subscriptions at `/s/{token}` while an operator can change the upstream mapping. It reads Marzban through HTTP; it never provisions panel users, reads the panel database, or changes proxy services.
 
-This release targets the five currently configured Marzban families:
+This release supports seven configured Marzban profile families:
 
 | Policy profile | Accepted upstream configuration |
 |---|---|
@@ -11,10 +11,12 @@ This release targets the five currently configured Marzban families:
 | `grpc_cdn` | VLESS gRPC with TLS, supplied through the external gateway |
 | `tcp_reality_ipv6` | IPv6 VLESS TCP or RAW with REALITY |
 | `shadowsocks_ipv6` | IPv6 Shadowsocks `aes-128-gcm` |
+| `ws_tls_cdn` | VLESS WebSocket + TLS on titan, explicit opt-in |
+| `xhttp_tls_cdn` | VLESS XHTTP + TLS on titan, explicit opt-in |
 
-All five current Marzban families are enabled by default. Administrators can still select a smaller per-customer policy. No endpoints are synthesized and no new upstream protocols, nodes or plans are provisioned. A TLS gRPC link does not independently prove CDN routing; operators must validate the external gateway/domain setup.
+The original five Marzban families remain enabled by default. Both existing test1 subscriptions also enable the two new titan CDN families for the approved pilot. Administrators can still select a smaller per-customer policy. No endpoints are synthesized and no new upstream protocols, nodes or plans are provisioned. A TLS gRPC link does not independently prove CDN routing; operators must validate the external gateway/domain setup.
 
-ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in this deployed release. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. A policy with no remaining compatible profiles returns 503 until an administrator chooses a supported profile.
+ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy names remain retired. The new TLS CDN profiles use distinct opt-in names; old stored policies do not reactivate them. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. A policy with no remaining compatible profiles returns 503 until an administrator chooses a supported profile.
 
 ## Documentation
 
@@ -23,7 +25,8 @@ ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in
 - [Architecture](ARCHITECTURE.md): application boundaries and limitations.
 - [Operator CLI](scripts/admin/README.md): installed commands for daily management.
 - [Compatibility policy](docs/COMPATIBILITY.md): permanent links and frozen contracts.
-- [Management plan](docs/MANAGEMENT.md): protected browser panel and prioritized improvements.
+- [Management](docs/MANAGEMENT.md): public browser panel, Java homepage and daily workflow.
+- [Transport pilot](docs/TRANSPORTS.md): activated titan profiles, validation and rollback.
 
 The Marzban-only backend is deployed with database revision `0002`. Hiddify has
 been removed. Nginx owns public 80/443 and retains 2053 for existing Cloudflare
@@ -92,11 +95,11 @@ Disable/revoke stops Keyholder delivery only. It does not revoke already-downloa
 Each subscription fetch awaits Marzban with a bounded deadline. The database read
 transaction is closed first so slow upstream requests cannot exhaust its pool. Only active users are accepted. There is no stale cache, snapshot store, background synchronization or automatic failover. The adapter verifies HTTPS, refuses redirects, ignores proxy environment variables, limits decompressed responses to 1 MiB and accepts at most 128 links. Password-login authentication allows one refresh/retry after a 401.
 
-Normalization reconstructs recognized fields. XHTTP `extra` is omitted from URI query output and Xray `xhttpSettings`; host/path and supported upstream modes are retained. ECH and upstream MUX settings are not imported; JSON MUX is disabled. Unsupported or malformed links are omitted and empty output fails closed with 503. TCP/RAW flow is preserved when supported; XHTTP and gRPC never receive Vision flow.
+Normalization reconstructs recognized fields. XHTTP `extra` is omitted from URI query output and Xray `xhttpSettings`; host/path and supported upstream modes are retained. ECH and upstream MUX settings are not imported; JSON MUX is disabled. Unsupported or malformed links are omitted and empty output fails closed with 503. TCP/RAW flow is preserved when supported; XHTTP, WebSocket and gRPC never receive Vision flow.
 
 Request logs contain route templates, method, status and duration, without tokens, raw paths, query strings, bodies or upstream responses. HTTP library INFO logging is suppressed. Responses use `no-store`. Validation errors do not echo input values.
 
 The rate limiter is bounded and in-memory. Run one worker. Subscription buckets use token hashes; admin buckets use the immediate peer, ignoring forwarded headers. This is a local abuse guard, not distributed DDoS protection. SQLite uses foreign keys, WAL and a five-second busy timeout. `/health` checks the DB, not subscriptions.
 
-All five profiles passed real HTTPS connectivity through installed Xray clients.
+All seven profiles passed real HTTPS connectivity through installed Xray clients, including the new titan routes through Cloudflare.
 Owner client import/refresh remains the final compatibility check. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. Billing, user provisioning, multi-node orchestration and additional protocols are future work, not features of this release.

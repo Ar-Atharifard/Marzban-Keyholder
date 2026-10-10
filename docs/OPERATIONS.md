@@ -12,15 +12,16 @@ remain private on the VPS. Shared OS packages and network tuning were retained.
 - `/srv/keyholder` still has its original unfinished changes (14 modified and
   two untracked files), branch `master`, HEAD `5236238`. Do not reset or build it.
 - Releases live separately in `/srv/keyholder-releases/<commit>` and use the
-  existing root-only `/srv/keyholder/.env`. The active code release is `f692e52`; the initial cutover was `b2fb14c`.
+  existing root-only `/srv/keyholder/.env`. The active code release is `bf5487e`; previous compatible release `f692e52`
+  is retained for rollback, and the initial cutover was `b2fb14c`.
   Check the active container's Compose labels and the release `deployment.json`
   for the current commit and immutable image, rather than trusting a mutable tag.
-- Production SQLite revision is `0002`; all existing customer policies enable
-  the five approved profiles. IDs, statuses, token hashes and mappings survived.
+- Production SQLite revision is `0002`; defaults retain the five original profiles; the two
+  approved test1 pilot policies now contain all seven. IDs, statuses, token hashes and mappings survived.
 - Keyholder: loopback 18000, one worker, nonroot, read-only root filesystem,
   dropped capabilities, no-new-privileges, and rotated Docker logs.
-- Marzban API: loopback 8000, panel 0.8.4, Xray 26.9.30. Its running container,
-  proxy inbounds, users and configuration were preserved.
+- Marzban API: loopback 8000, panel 0.8.4, Xray 26.9.30. Its running container and original five proxy inbounds/users were preserved;
+  the approved core update added two loopback titan CDN inbounds.
 - Nginx: public 80/443 and retained 2053; gRPC forwards to loopback 12084.
   Only `/s/` is exposed for Keyholder; admin and health routes stay private.
 - All five profiles passed real HTTPS connectivity through temporary Xray
@@ -29,7 +30,7 @@ remain private on the VPS. Shared OS packages and network tuning were retained.
   Integrity Check exception were reported by the owner. Python, v2rayNG and
   browser probes now reach Keyholder without a challenge, returning the expected
   JSON 404 for `/s/invalid`, `no-store` and `DYNAMIC`. See `CLOUDFLARE.md`.
-- Final resource snapshot: 410 MiB available RAM, 164 MiB swap used, 8.9 GiB
+- Latest pilot resource snapshot: 404 MiB available RAM, 145 MiB swap used, 8.8 GiB
   free disk. These are observations, not guaranteed capacity.
 - Existing failed Cloudzy agent / netfilter-persistence state remains outside
   this cutover. It does not establish whether active firewall rules are absent.
@@ -63,7 +64,7 @@ Offline OpenAPI export is tested with injected fixture environment values: it
 does not create the supplied database or include those secret values. The schema
 describes both subscription media types and sanitized error bodies.
 
-Latest local verification: 83 tests passed, Ruff lint/format, strict mypy and
+Latest local verification: 89 tests passed, Ruff lint/format, strict mypy and
 `git diff --check` passed. A regression reproduces connection-pool exhaustion
 under slow upstream requests and verifies concurrent subscriptions and health
 remain responsive after releasing the read transaction before awaiting Marzban.
@@ -251,9 +252,19 @@ checks returned 200 with the expected content. The panel stays at `/dashboard/`;
 its login/API/static paths and customer `/s/` delivery were preserved. Existing
 sealord routing is unchanged. See `MANAGEMENT.md` for page/config rollback.
 
-The WS/XHTTP titan expansion is staged, not activated. The owner selected test1
-for a pilot before wider rollout. 89 tests, strict mypy, Ruff, Nginx syntax,
-installed Marzban/Xray candidate validation, isolated transport HTTPS rehearsals,
-and a private candidate-API database-clone rehearsal passed. No live core restart
-or other-customer policy changes have occurred. See `TRANSPORTS.md` for the explicit
-activation approval gate, immutable image, compatibility scope and rollback.
+The WS/XHTTP titan expansion is activated for both existing test1 subscriptions.
+The owner explicitly approved the core restart/container replacement and selected
+both mappings after inspection revealed the ambiguous username. All seven profiles
+passed real verified HTTPS requests through Xray, including both new CDN routes
+through Cloudflare. Both formats passed; no URL was created or rotated. All token
+hashes/identities/mappings and nonpilot policies compare unchanged. Fresh private
+snapshots and rollback records are under `/var/backups/keyholder-pilot`.
+The API and gateway are healthy; Marzban is running; only the three production
+containers remain. Database integrity/FKs pass and revision remains `0002`.
+
+Panel browser HTML/assets and public authenticated login checks pass; the owner
+confirmed the panel loaded. Python-style requests still receive Cloudflare 403
+for this browser-only hostname. Workstation direct connectivity timed out while
+VPS browser checks succeeded: avoid interpreting origin success as proof of
+universal ISP reachability. Use the existing SSH panel command if needed.
+See `TRANSPORTS.md` for the pilot acceptance test and rollback.

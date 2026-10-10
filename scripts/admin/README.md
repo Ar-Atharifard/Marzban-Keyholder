@@ -78,8 +78,10 @@ after installation. Do not create customers or rotate tokens as smoke tests.
 
 ## New CDN profile pilot
 
-The candidate CLI accepts `ws_tls_cdn` and `xhttp_tls_cdn` in explicit `--profiles`
-or `profiles` selections. Defaults remain the original five. Activate the tested
-backend/core release before using these names. The approved initial pilot is
-`test1`; wider rollout needs real-network results and owner approval. Preserve all
+The installed CLI accepts `ws_tls_cdn` and `xhttp_tls_cdn` in explicit `--profiles`
+or `profiles` selections. Defaults remain the original five. The backend/core release is active and all
+seven profiles passed actual HTTPS tests through the deployed routes. The approved initial pilot covers both existing subscriptions mapped to
+`test1`; wider rollout needs Iranian-network results and owner approval.
+Since test1 has two mappings, use a customer ID from `keyholder list` for
+`show`, `check` or policy edits; username selection intentionally refuses ambiguity. Preserve all
 existing selections when adding new ones; `profiles` replaces the selection.
