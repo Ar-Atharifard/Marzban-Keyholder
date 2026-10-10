@@ -47,6 +47,8 @@ class URIRenderer:
                 q["alpn"] = ",".join(p.alpn)
             if p.transport == "xhttp":
                 q.update(host=p.host, path=p.path, mode=p.mode)
+            if p.transport == "ws":
+                q.update(host=p.host, path=p.path)
             if p.transport == "grpc":
                 q.update(serviceName=p.service_name, mode=p.mode)
                 if p.authority:
@@ -102,6 +104,11 @@ class XrayRenderer:
                     stream["tlsSettings"] = tls
                 if p.transport == "xhttp":
                     stream["xhttpSettings"] = {"host": p.host, "path": p.path, "mode": p.mode}
+                elif p.transport == "ws":
+                    ws: dict[str, Any] = {"path": p.path}
+                    if p.host:
+                        ws["headers"] = {"Host": p.host}
+                    stream["wsSettings"] = ws
                 elif p.transport == "grpc":
                     grpc: dict[str, Any] = {
                         "serviceName": p.service_name,

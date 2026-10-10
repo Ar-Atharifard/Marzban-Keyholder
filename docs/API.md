@@ -33,8 +33,8 @@ Only `marzban-default` has a runtime adapter. A backend row does not automatical
 enable a provider. Mapping changes do not contact Marzban or validate user existence;
 missing users or permission failures surface when fetching the subscription.
 
-`Policy` has one field, `profiles`: a list of at most five supported profile names.
-The defaults include all five supported profiles. An empty list is allowed
+`Policy` has one field, `profiles`: a list of at most seven supported profile names.
+The defaults retain the original five profiles for compatibility. An empty list is allowed
 and disables compatible output, producing 503. Supported choices are:
 
 - `tcp_reality`
@@ -42,6 +42,8 @@ and disables compatible output, producing 503. Supported choices are:
 - `grpc_cdn`
 - `tcp_reality_ipv6`
 - `shadowsocks_ipv6`
+- `ws_tls_cdn` (new, explicit opt-in)
+- `xhttp_tls_cdn` (new, explicit opt-in)
 
 Unknown request fields/profile names are rejected. `ech_enabled`,
 `include_base_cdn`, `xhttp_cdn` and `ws_cdn` are no longer accepted API inputs.

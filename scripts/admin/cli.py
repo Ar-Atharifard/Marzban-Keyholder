@@ -11,7 +11,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
+DEFAULT_KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
+KINDS = [*DEFAULT_KINDS, "ws_tls_cdn", "xhttp_tls_cdn"]
 REMOTE = "python3 /usr/local/lib/keyholder-admin/host.py"
 
 

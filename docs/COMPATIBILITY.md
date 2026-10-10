@@ -51,6 +51,17 @@ retain old and new hosts during validation, preserve domain/path and TLS, check 
 formats and actual proxy delivery, then change DNS. Never instruct customers to use
 raw Marzban subscription addresses as a replacement for the stable Keyholder URL.
 
+## Reviewed additive CDN expansion
+
+The candidate adds `ws_tls_cdn` and `xhttp_tls_cdn` with a policy capacity of seven.
+The original five values and defaults, all routes, tokens and existing rendered
+fixtures stay unchanged. Retired `ws_cdn`/`xhttp_cdn` names remain rejected and
+filtered from legacy stored policies; reusing those names would silently reactivate
+old selections. Tests permit only this explicit enum/capacity expansion rather than
+regenerating the original OpenAPI snapshot. Existing customers do not gain the new
+families without a deliberate policy update. Production activation is tracked in
+`TRANSPORTS.md`.
+
 ## Remaining guarantees to operationalize
 
 Encrypted off-host backups and recovery drills are essential: backups on the same

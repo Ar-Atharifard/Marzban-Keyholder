@@ -10,7 +10,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
+DEFAULT_KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
+KINDS = [*DEFAULT_KINDS, "ws_tls_cdn", "xhttp_tls_cdn"]
 
 
 class OperatorError(Exception):
@@ -98,7 +99,7 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
         matches = [c for c in customers() if c["mapping"]["upstream_username"] == username]
         if matches:
             raise OperatorError("This Marzban username is already attached; show its customer.")
-        profiles = args.get("profiles") or KINDS
+        profiles = args.get("profiles") or DEFAULT_KINDS
         check = asyncio.run(upstream(username, profiles))
         if check["missing_profiles"]:
             raise OperatorError("Selected profiles are missing in Marzban; check user inbounds.")

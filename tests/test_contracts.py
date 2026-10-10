@@ -27,7 +27,16 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
         for method, operation in operations.items():
             assert schema["paths"][path][method] == operation
     for name, model in baseline["schemas"].items():
-        assert schema["components"]["schemas"][name] == model
+        actual = json.loads(json.dumps(schema["components"]["schemas"][name]))
+        if name == "Policy":
+            # Reviewed additive expansion only: existing defaults/values stay frozen.
+            old = model["properties"]["profiles"]
+            new = actual["properties"]["profiles"]
+            assert new["items"]["enum"] == old["items"]["enum"] + ["ws_tls_cdn", "xhttp_tls_cdn"]
+            assert new["maxItems"] == 7 and old["maxItems"] == 5
+            new["items"]["enum"] = old["items"]["enum"]
+            new["maxItems"] = old["maxItems"]
+        assert actual == model
 
 
 def test_frozen_subscription_formats() -> None:

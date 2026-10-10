@@ -174,3 +174,42 @@ def test_malformed_or_obsolete_profiles_rejected(link: str) -> None:
     if link == SS + "?plugin=bad":
         link = SS.replace("#", "?plugin=bad#")
     assert normalize(link) is None
+
+
+@pytest.mark.parametrize("transport,kind", [("ws", "ws_tls_cdn"), ("xhttp", "xhttp_tls_cdn")])
+def test_new_cdn_transports_roundtrip_without_changing_old_defaults(
+    transport: str, kind: str
+) -> None:
+    link = (
+        f"vless://{UUID}@titan.example:443?security=tls&type={transport}"
+        "&sni=titan.example&host=titan.example&path=%2Flearn%2Ftransport"
+        "&mode=packet-up&extra=%7B%22unsafe%22%3Atrue%7D#CDN"
+    )
+    p = normalize(link)
+    assert p is not None and p.kind == kind
+    assert generate_profiles([link], Policy()) == []  # Existing policies never expand implicitly.
+    policy = Policy.model_validate({"profiles": [kind]})
+    uris, configs = rendered([link], policy)
+    assert normalize(uris[0]) == p
+    stream = configs[0]["outbounds"][0]["streamSettings"]  # type: ignore[index]
+    assert stream["tlsSettings"]["allowInsecure"] is False
+    assert stream["network"] == transport
+    if transport == "ws":
+        assert stream["wsSettings"] == {
+            "path": "/learn/transport",
+            "headers": {"Host": "titan.example"},
+        }
+    else:
+        assert stream["xhttpSettings"] == {
+            "path": "/learn/transport",
+            "host": "titan.example",
+            "mode": "packet-up",
+        }
+        assert "extra" not in parse_qs(urlsplit(uris[0]).query)
+        assert "extra" not in stream["xhttpSettings"]
+
+
+@pytest.mark.parametrize("transport", ["ws", "xhttp"])
+@pytest.mark.parametrize("address", ["192.0.2.5", "[2001:db8::5]"])
+def test_cdn_profiles_refuse_literal_origin_addresses(transport: str, address: str) -> None:
+    assert normalize(f"vless://{UUID}@{address}:443?security=tls&type={transport}") is None

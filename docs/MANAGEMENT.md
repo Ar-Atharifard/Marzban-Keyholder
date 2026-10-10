@@ -3,8 +3,8 @@
 ## Public Marzban panel
 
 The owner selected a simple public panel after reporting Cloudflare Zero Trust
-unavailable. The URL is **https://edge.javatechpack.ir/dashboard/**; `/` redirects
-there. Sign in with the existing Marzban administrator credentials. The login
+unavailable. The panel URL is **https://edge.javatechpack.ir/dashboard/**. The hostname
+homepage now serves the Java-learning site. Sign in with the existing Marzban administrator credentials. The login
 screen is public; Marzban authentication protects administrative API operations.
 There is no Access application, extra Nginx password or private bookmark gate.
 The previous Access/tunnel preparation remains inactive and is superseded.
@@ -58,6 +58,27 @@ file would leave Docker reading the old inode. Rollback removes browser access;
 customer delivery and private SSH access continue. No Marzban restart is needed.
 `/opt/braavos-panel/access.json` now records the standard public URL and activation
 state; previous tunnel configuration is not used and no tunnel token is required.
+
+## Java-learning homepage
+
+`deploy/site/index.html` supplies a small Java-learning page with local CSS and no
+external assets or scripts. The former `/opt/hiddify` and `/opt/hiddify-manager`
+directories are absent. A targeted search of non-package HTML in the recovery
+archive found the old Java Tech Pack placeholder, not the requested lesson page;
+the new page is a replacement, not a recovered original.
+
+The apex and subdomain homepages use `/opt/braavos-gateway/html/index.html`, already
+mounted read-only in Nginx. A wildcard/apex HTTPS fallback covers configured DNS
+names; it does not create DNS records. Explicit subscription, panel and proxy hosts
+have precedence. `/dashboard/`, `/api/`, `/statics/` on edge and `/s/` on Keyholder
+retain their routing. Keyholder administrator routes remain public 404. Sealord's
+existing proxy route is retained; no new proxy routes are assigned to it.
+
+Rollback for the homepage change uses the private `decoy-backup-*` directory under
+`/opt/braavos-panel`, restoring both `nginx.conf` and `index.html` in place, checking
+syntax and gracefully reloading Nginx. The static directory can later host a web
+application; reserve existing service paths when defining its routing. The wildcard
+Origin CA certificate requires Cloudflare-proxied DNS and HTTPS origin settings.
 
 ## Daily workflow
 

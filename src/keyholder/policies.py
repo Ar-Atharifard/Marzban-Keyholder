@@ -8,6 +8,8 @@ SUPPORTED_KINDS = (
     "grpc_cdn",
     "tcp_reality_ipv6",
     "shadowsocks_ipv6",
+    "ws_tls_cdn",
+    "xhttp_tls_cdn",
 )
 LEGACY_DEFAULTS = ("xhttp_reality", "tcp_reality")
 

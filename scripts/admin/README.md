@@ -75,3 +75,11 @@ Do not grant broader Docker/sudo privileges to other users to run this tool.
 Update only these operator files after tests. No running container needs replacement.
 Run read-only `status`, `health`, `list`, and an approved existing user's `check`
 after installation. Do not create customers or rotate tokens as smoke tests.
+
+## New CDN profile pilot
+
+The candidate CLI accepts `ws_tls_cdn` and `xhttp_tls_cdn` in explicit `--profiles`
+or `profiles` selections. Defaults remain the original five. Activate the tested
+backend/core release before using these names. The approved initial pilot is
+`test1`; wider rollout needs real-network results and owner approval. Preserve all
+existing selections when adding new ones; `profiles` replaces the selection.

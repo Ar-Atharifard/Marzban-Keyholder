@@ -89,6 +89,14 @@ def normalize(link: str) -> Profile | None:
             kind = "xhttp_reality"
         elif security == "tls" and transport == "grpc":
             kind = "grpc_cdn"
+        elif security == "tls" and transport in {"ws", "xhttp"}:
+            # CDN profiles must use DNS names, never a literal origin IP.
+            try:
+                ipaddress.ip_address(u.hostname)
+            except ValueError:
+                kind = "ws_tls_cdn" if transport == "ws" else "xhttp_tls_cdn"
+            else:
+                return None
         else:
             return None
         sni = get("sni", u.hostname)
@@ -132,8 +140,8 @@ def normalize(link: str) -> Profile | None:
             short_id=short_id,
             flow=flow,
             alpn=alpn,
-            host=get("host") if transport == "xhttp" else "",
-            path=get("path", "/") if transport == "xhttp" else "/",
+            host=get("host") if transport in {"xhttp", "ws"} else "",
+            path=get("path", "/") if transport in {"xhttp", "ws"} else "/",
             mode=mode or grpc_mode,
             service_name=get("serviceName") if transport == "grpc" else "",
             authority=get("authority") if transport == "grpc" else "",

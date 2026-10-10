@@ -6,7 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from keyholder.policies import stored_policy
 
 ProfileKind = Literal[
-    "tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"
+    "tcp_reality",
+    "xhttp_reality",
+    "grpc_cdn",
+    "tcp_reality_ipv6",
+    "shadowsocks_ipv6",
+    "ws_tls_cdn",
+    "xhttp_tls_cdn",
 ]
 
 
@@ -18,7 +24,7 @@ class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profiles: list[ProfileKind] = Field(
         default_factory=default_profiles,
-        max_length=5,
+        max_length=7,
     )
 
 
