@@ -9,14 +9,25 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KEYHOLDER_", env_file=".env", extra="ignore")
     database_url: str = "sqlite:///./data/keyholder.db"
     admin_key: SecretStr = Field(min_length=32)
+    token_encryption_key: SecretStr = SecretStr("")
     public_base_url: str = "https://keyholder.javatechpack.ir"
     marzban_url: str = "http://127.0.0.1:8000"
     marzban_username: SecretStr = SecretStr("")
     marzban_password: SecretStr = SecretStr("")
     marzban_token: SecretStr = SecretStr("")
+    allowed_cdn_hosts: tuple[str, ...] = ()
     profile_source: Literal["policy", "marzban"] = "policy"
     upstream_timeout: float = Field(default=10, ge=1, le=60)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
+
+    @field_validator("token_encryption_key")
+    @classmethod
+    def validate_encryption_key(cls, value: SecretStr) -> SecretStr:
+        if value.get_secret_value():
+            from cryptography.fernet import Fernet
+
+            Fernet(value.get_secret_value().encode("ascii"))
+        return value
 
     @field_validator("admin_key")
     @classmethod

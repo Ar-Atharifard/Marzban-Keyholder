@@ -38,7 +38,9 @@ class FakeBackend:
 @pytest.fixture
 def client(tmp_path: object) -> Iterator[TestClient]:
     settings = Settings(
-        admin_key=SecretStr(ADMIN_KEY), database_url=f"sqlite:///{tmp_path}/test.db"
+        admin_key=SecretStr(ADMIN_KEY),
+        token_encryption_key=SecretStr(base64.urlsafe_b64encode(b"x" * 32).decode()),
+        database_url=f"sqlite:///{tmp_path}/test.db",
     )
     app = create_app(settings)
     Base.metadata.create_all(app.state.engine)

@@ -11,11 +11,20 @@ from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 DEFAULT_KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
-KINDS = [*DEFAULT_KINDS, "ws_tls_cdn", "xhttp_tls_cdn"]
+KINDS = [
+    *DEFAULT_KINDS,
+    "ws_tls_cdn",
+    "xhttp_tls_cdn",
+    "trojan_grpc_cdn",
+    "vmess_httpupgrade_cdn",
+    "trojan_reality_ipv6",
+]
 
 
 class OperatorError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -41,7 +50,7 @@ def api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
             return json.loads(data)
     except HTTPError as error:
         raise OperatorError(
-            f"API returned HTTP {error.code}; inspect the customer state."
+            f"API returned HTTP {error.code}; inspect the customer state.", status=error.code
         ) from None
 
 
@@ -61,7 +70,11 @@ def resolve(selector: str) -> dict[str, Any]:
     try:
         identifier = str(UUID(selector))
     except ValueError:
-        matches = [c for c in customers() if c["mapping"]["upstream_username"] == selector]
+        matches = [
+            c
+            for c in customers()
+            if c["mapping"]["upstream_username"] == selector and c["status"] != "revoked"
+        ]
         if len(matches) != 1:
             raise OperatorError("Username is missing or ambiguous; use its customer ID.") from None
         return matches[0]
@@ -82,24 +95,48 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
         async with asyncio.timeout(settings.upstream_timeout):
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
                 links = await MarzbanBackend(settings, client).configurations(username)
-                result = generate_profiles(links, Policy(profiles=profiles))  # type: ignore[arg-type]
+                authoritative = settings.profile_source == "marzban"
+                result = generate_profiles(
+                    links, Policy.model_validate({"profiles": KINDS if authoritative else profiles})
+                )
     except (UpstreamError, UpstreamUnavailable, TimeoutError, ValueError):
         raise OperatorError("Marzban user is unavailable or has no compatible profiles.") from None
     kinds = sorted({p.kind for p in result})
-    return {"available_profiles": kinds, "missing_profiles": sorted(set(profiles) - set(kinds))}
+    return {
+        "available_profiles": kinds,
+        "missing_profiles": [] if authoritative else sorted(set(profiles) - set(kinds)),
+    }
 
 
 def execute(operation: str, args: dict[str, Any]) -> Any:
+    if operation in {
+        "users",
+        "inbounds",
+        "sync",
+        "reconcile",
+        "user-create",
+        "user-update",
+        "user-inbounds",
+    }:
+        return asyncio.run(panel_operation(operation, args))
     if operation == "health":
         return api("GET", "/health")
     if operation == "list":
-        return api("GET", f"/admin/customers?limit={args['limit']}&offset={args['offset']}")
+        rows = customers()
+        if not args.get("history"):
+            rows = [c for c in rows if c["status"] != "revoked"]
+        return rows[args["offset"] : args["offset"] + args["limit"]]
     if operation == "create":
         username = args["username"]
         matches = [c for c in customers() if c["mapping"]["upstream_username"] == username]
-        if matches:
-            raise OperatorError("This Marzban username is already attached; show its customer.")
-        profiles = args.get("profiles") or DEFAULT_KINDS
+        active = [c for c in matches if c["status"] != "revoked"]
+        if len(active) == 1:
+            return api("GET", "/admin/customers/" + active[0]["id"] + "/subscription")
+        if len(active) > 1:
+            raise OperatorError("Legacy duplicates require keyholder reconcile --confirm.")
+        profiles = args.get("profiles") or (
+            KINDS if os.getenv("KEYHOLDER_PROFILE_SOURCE") == "marzban" else DEFAULT_KINDS
+        )
         check = asyncio.run(upstream(username, profiles))
         if check["missing_profiles"]:
             raise OperatorError("Selected profiles are missing in Marzban; check user inbounds.")
@@ -114,6 +151,8 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
         )
     customer = resolve(args["customer"])
     path = "/admin/customers/" + quote(customer["id"], safe="")
+    if operation == "link":
+        return api("GET", path + "/subscription")
     if operation == "show":
         return customer
     if operation == "check":
@@ -146,6 +185,8 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
     if operation == "rename":
         return api("PATCH", path, {"name": args["name"]})
     if operation == "profiles":
+        if os.getenv("KEYHOLDER_PROFILE_SOURCE") == "marzban":
+            raise OperatorError("Marzban controls profiles; use user-inbounds or the panel.")
         if args["profiles"]:
             check = asyncio.run(
                 upstream(customer["mapping"]["upstream_username"], args["profiles"])
@@ -154,6 +195,111 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
                 raise OperatorError("Selected profiles are missing in Marzban.")
         return api("PATCH", path, {"policy": {"profiles": args["profiles"]}})
     raise OperatorError("Unsupported operation.")
+
+
+def summary(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: user.get(k)
+        for k in ["username", "status", "data_limit", "used_traffic", "expire", "inbounds"]
+    }
+
+
+async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
+    import time
+
+    import httpx
+
+    from keyholder.backends.marzban import MarzbanBackend
+    from keyholder.config import Settings
+
+    settings = Settings()  # type: ignore[call-arg]
+    async with httpx.AsyncClient(
+        trust_env=False, follow_redirects=False, timeout=settings.upstream_timeout
+    ) as client:
+        backend = MarzbanBackend(settings, client)
+        await backend.login()
+
+        async def call(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+            kwargs: dict[str, Any] = {"headers": {"Authorization": "Bearer " + backend.token}}
+            if body is not None:
+                kwargs["json"] = body
+            return (await backend.request(method, path, **kwargs)).json()
+
+        if operation == "inbounds":
+            data = await call("GET", "/api/inbounds")
+            return {
+                protocol: [
+                    {k: item.get(k) for k in ["tag", "protocol", "network", "tls", "port"]}
+                    for item in items
+                ]
+                for protocol, items in data.items()
+            }
+        if operation in {"users", "sync", "reconcile"}:
+            data = await call("GET", "/api/users?limit=1000")
+            if data["total"] > len(data["users"]):
+                raise OperatorError("User inventory exceeds reconciliation limit.")
+            users = data["users"]
+            if operation == "users":
+                return [summary(u) for u in users]
+            if operation == "reconcile" and not args.get("confirmed"):
+                raise OperatorError("Reconciliation rotates old links; --confirm required.")
+            existing = customers()
+            count = 0
+            revoked = 0
+            for user in users:
+                name = user["username"]
+                matches = sorted(
+                    [
+                        c
+                        for c in existing
+                        if c["mapping"]["upstream_username"] == name and c["status"] != "revoked"
+                    ],
+                    key=lambda c: (c["created_at"], c["id"]),
+                )
+                if operation == "reconcile" and matches:
+                    # Rotate only unrecoverable legacy registrations; retry does not rotate again.
+                    try:
+                        api("GET", "/admin/customers/" + matches[0]["id"] + "/subscription")
+                    except OperatorError as error:
+                        if error.status != 409:
+                            raise
+                        api("POST", "/admin/customers/" + matches[0]["id"] + "/rotate-token")
+                    for duplicate in matches[1:]:
+                        api("PATCH", "/admin/customers/" + duplicate["id"], {"status": "revoked"})
+                        revoked += 1
+                elif not matches:
+                    api("POST", "/admin/customers", {"name": name, "upstream_username": name})
+                    count += 1
+            return {"marzban_users": len(users), "registered": count, "duplicates_revoked": revoked}
+        name = args["username"]
+        path = "/api/user/" + quote(name, safe="")
+        if operation == "user-create":
+            body = {
+                "username": name,
+                "proxies": {p: {} for p in args["protocols"]},
+                "inbounds": {},
+                "data_limit": int(args["quota_gb"] * 1024**3),
+                "expire": int(time.time()) + args["days"] * 86400 if args["days"] else 0,
+            }
+            await call("POST", "/api/user", body)
+            return api("POST", "/admin/customers", {"name": name, "upstream_username": name})
+        user = await call("GET", path)
+        if operation == "user-update":
+            body = {}
+            if args.get("quota_gb") is not None:
+                body["data_limit"] = int(args["quota_gb"] * 1024**3)
+            if args.get("days") is not None:
+                body["expire"] = int(time.time()) + args["days"] * 86400 if args["days"] else 0
+            if args.get("status") is not None:
+                body["status"] = args["status"]
+        else:
+            # Preserve every existing protocol credential while changing the requested selection.
+            proxies = user["proxies"]
+            proxies.setdefault(args["protocol"], {})
+            inbounds = user["inbounds"]
+            inbounds[args["protocol"]] = args["tags"]
+            body = {"proxies": proxies, "inbounds": inbounds}
+        return summary(await call("PUT", path, body))
 
 
 def main() -> None:

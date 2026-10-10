@@ -84,7 +84,7 @@ def test_downgrade_rejects_admin_edits_before_restoring_any_customer(
     migrated_database: tuple[Config, Path],
 ) -> None:
     config, database = migrated_database
-    command.upgrade(config, "head")
+    command.upgrade(config, "0002")
     with sqlite3.connect(database) as db:
         db.execute(
             "UPDATE customers SET policy=? WHERE id='second'",
@@ -132,4 +132,4 @@ def test_backup_restore_rehearsal_preserves_complete_legacy_state(
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert after == before
     with sqlite3.connect(database) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003",)

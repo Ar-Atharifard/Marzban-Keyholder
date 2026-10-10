@@ -58,7 +58,35 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             timeout=40,
             check=True,
         )
-        return {"ok": True, "result": {"backup": str(destination), "integrity": "ok"}}
+        # The encrypted vault needs its server-only key; keep it with a root-only recovery set.
+        import shutil
+
+        recovery = folder / destination.stem
+        recovery.mkdir(mode=0o700)
+        shutil.copy2(destination, recovery / "keyholder.sqlite3")
+        shutil.copy2("/srv/keyholder/.env", recovery / "keyholder.env")
+        (recovery / "keyholder.env").chmod(0o600)
+        subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "--source",
+                "/var/lib/marzban/db.sqlite3",
+                "--destination",
+                str(recovery / "marzban.sqlite3"),
+            ],
+            capture_output=True,
+            timeout=40,
+            check=True,
+        )
+        return {
+            "ok": True,
+            "result": {
+                "backup": str(recovery),
+                "integrity": "ok",
+                "includes": ["keyholder", "vault-key-env", "marzban"],
+            },
+        }
     worker = Path(__file__).with_name("worker.py").read_text()
     result = subprocess.run(
         ["docker", "exec", "-i", CONTAINER, "/app/.venv/bin/python", "-c", worker],

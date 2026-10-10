@@ -74,6 +74,9 @@ async def subscription(
         async with asyncio.timeout(request.app.state.settings.upstream_timeout):
             links = await adapter.configurations(username)
         profiles = generate_profiles(links, Policy.model_validate(policy))
+        allowed_hosts = request.app.state.settings.allowed_cdn_hosts
+        if allowed_hosts:
+            profiles = [p for p in profiles if p.security != "tls" or p.address in allowed_hosts]
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)
     except UpstreamUnavailable:

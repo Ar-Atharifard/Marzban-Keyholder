@@ -165,7 +165,9 @@ def test_subscription_limits_are_per_token_and_ignore_forwarded_ips(
     from keyholder.security import hash_token
 
     first = str(create(client)["token"])
-    second = str(create(client)["token"])
+    second = client.post(
+        "/admin/customers", headers=HEADERS, json={"name": "Bob", "upstream_username": "bobby"}
+    ).json()["token"]
     limiter = cast(FastAPI, client.app).state.limiter
     limiter.windows.clear()
     limiter.limit = 1

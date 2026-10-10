@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -59,6 +59,11 @@ class CustomerView(BaseModel):
     updated_at: datetime
     revoked_at: datetime | None
     mapping: MappingInput
+
+    @field_validator("created_at", "updated_at", "revoked_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
 
     @field_validator("policy", mode="before")
     @classmethod

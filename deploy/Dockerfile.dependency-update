@@ -1,0 +1,9 @@
+# Verified deployed base; rebuild the locked environment when dependencies change.
+ARG BASE_IMAGE=keyholder:titan-expansion-bf5487e
+FROM ${BASE_IMAGE}
+USER root
+COPY pyproject.toml uv.lock /app/
+COPY src /app/src
+COPY migrations /app/migrations
+RUN uv sync --frozen --no-dev --no-editable && chown -R 10001:10001 /app
+USER 10001:10001

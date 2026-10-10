@@ -2,9 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from keyholder.api.dependencies import DB, admin
-from keyholder.models import Backend, Customer, CustomerMapping, now
+from keyholder.models import Backend, Customer, CustomerMapping, Registration, now
 from keyholder.schemas import (
     CustomerCreate,
     CustomerUpdate,
@@ -14,6 +15,7 @@ from keyholder.schemas import (
     TokenResult,
 )
 from keyholder.security import generate_token, hash_token
+from keyholder.vault import decrypt, encrypt
 
 router = APIRouter(
     prefix="/admin",
@@ -46,15 +48,37 @@ def token_result(request: Request, customer: Customer, token: str) -> TokenResul
 def create(body: CustomerCreate, request: Request, db: DB) -> TokenResult:
     if not db.get(Backend, body.backend_id):
         raise HTTPException(422, "Unknown backend")
+    existing = db.get(Registration, (body.backend_id, body.upstream_username))
+    if existing:
+        customer = find(db, existing.customer_id)
+        return retrieve_token(customer.id, request, db)
     token = generate_token()
     customer = Customer(
-        name=body.name, token_hash=hash_token(token), policy=body.policy.model_dump()
+        name=body.name,
+        token_hash=hash_token(token),
+        token_encrypted=encrypt(request.app.state.settings, token),
+        policy=body.policy.model_dump(),
     )
     customer.mapping = CustomerMapping(
         backend_id=body.backend_id, upstream_username=body.upstream_username
     )
     db.add(customer)
-    db.commit()
+    try:
+        db.flush()
+        db.add(
+            Registration(
+                backend_id=body.backend_id,
+                upstream_username=body.upstream_username,
+                customer_id=customer.id,
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.get(Registration, (body.backend_id, body.upstream_username))
+        if existing is None:
+            raise HTTPException(409, "Registration conflict") from None
+        return retrieve_token(existing.customer_id, request, db)
     return token_result(request, customer, token)
 
 
@@ -117,6 +141,20 @@ def mapping(customer_id: str, body: MappingInput, db: DB) -> Customer:
         raise HTTPException(409, "Revoked customers are terminal")
     if not db.get(Backend, body.backend_id):
         raise HTTPException(422, "Unknown backend")
+    existing = db.get(Registration, (body.backend_id, body.upstream_username))
+    if existing and existing.customer_id != customer.id:
+        raise HTTPException(409, "Upstream account already registered")
+    registration = db.scalar(select(Registration).where(Registration.customer_id == customer.id))
+    if registration:
+        db.delete(registration)
+        db.flush()
+    db.add(
+        Registration(
+            backend_id=body.backend_id,
+            upstream_username=body.upstream_username,
+            customer_id=customer.id,
+        )
+    )
     customer.mapping.backend_id = body.backend_id
     customer.mapping.upstream_username = body.upstream_username
     customer.updated_at = now()
@@ -138,6 +176,25 @@ def rotate(customer_id: str, request: Request, db: DB) -> TokenResult:
         raise HTTPException(409, "Revoked customers are terminal")
     token = generate_token()
     customer.token_hash = hash_token(token)
+    customer.token_encrypted = encrypt(request.app.state.settings, token)
     customer.updated_at = now()
     db.commit()
+    return token_result(request, customer, token)
+
+
+@router.get(
+    "/customers/{customer_id}/subscription",
+    response_model=TokenResult,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+def retrieve_token(customer_id: str, request: Request, db: DB) -> TokenResult:
+    customer = find(db, customer_id)
+    if customer.status == "revoked":
+        raise HTTPException(409, "Revoked customers are terminal")
+    if customer.token_encrypted is None:
+        raise HTTPException(409, "Legacy link requires explicit rotation")
+    try:
+        token = decrypt(request.app.state.settings, customer.token_encrypted, customer.token_hash)
+    except ValueError:
+        raise HTTPException(503, "Token vault unavailable; restore encryption key") from None
     return token_result(request, customer, token)

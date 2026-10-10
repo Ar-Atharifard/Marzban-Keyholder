@@ -33,8 +33,8 @@ def test_attach_preflight_duplicate_and_link_preserving_management(
     result = worker.execute("create", {"username": "alice", "name": "Alice"})
     cid = result["customer"]["id"]
     token = result["token"]
-    with pytest.raises(worker.OperatorError, match="already attached"):
-        worker.execute("create", {"username": "alice", "name": "Duplicate"})
+    repeated = worker.execute("create", {"username": "alice", "name": "Duplicate"})
+    assert repeated["customer"]["id"] == cid and repeated["token"] == token
     assert worker.execute("show", {"customer": "alice"})["id"] == cid
     operations: list[tuple[str, dict[str, Any]]] = [
         ("rename", {"name": "New name"}),

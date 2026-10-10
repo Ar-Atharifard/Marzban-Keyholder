@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
-KINDS = [*DEFAULT_KINDS, "ws_tls_cdn", "xhttp_tls_cdn"]
+KINDS = [
+    *DEFAULT_KINDS,
+    "ws_tls_cdn",
+    "xhttp_tls_cdn",
+    "trojan_grpc_cdn",
+    "vmess_httpupgrade_cdn",
+    "trojan_reality_ipv6",
+]
 REMOTE = "python3 /usr/local/lib/keyholder-admin/host.py"
 
 
@@ -28,6 +35,35 @@ def parser() -> argparse.ArgumentParser:
     commands = p.add_subparsers(dest="operation", required=True)
     for op in ["status", "health", "backup"]:
         commands.add_parser(op)
+    for op in ["users", "inbounds", "sync"]:
+        commands.add_parser(op)
+    reconcile = commands.add_parser(
+        "reconcile", help="Rotate legacy canonical links and revoke duplicates"
+    )
+    reconcile.add_argument("--confirm", action="store_true", dest="confirmed")
+    user_create = commands.add_parser(
+        "user-create", help="Provision Marzban and register a stable link"
+    )
+    user_create.add_argument("username")
+    user_create.add_argument(
+        "--quota-gb", type=float, required=True, help="0 explicitly means unlimited"
+    )
+    user_create.add_argument("--days", type=int, required=True, help="0 explicitly means no expiry")
+    user_create.add_argument(
+        "--protocols", nargs="+", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
+    )
+    user_create.add_argument("--save-link", type=Path)
+    user_update = commands.add_parser("user-update", help="Modify quota, expiry or panel status")
+    user_update.add_argument("username")
+    user_update.add_argument("--quota-gb", type=float)
+    user_update.add_argument("--days", type=int)
+    user_update.add_argument("--status", choices=["active", "disabled"])
+    inbound = commands.add_parser("user-inbounds", help="Select panel inbounds for one protocol")
+    inbound.add_argument("username")
+    inbound.add_argument(
+        "--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
+    )
+    inbound.add_argument("--tags", nargs="+", required=True)
     panel = commands.add_parser("panel", help="Open the private Marzban panel through SSH")
     panel.add_argument("--port", type=int, default=28080)
     panel.add_argument("--no-browser", action="store_true")
@@ -36,6 +72,7 @@ def parser() -> argparse.ArgumentParser:
     listing = commands.add_parser("list", help="List customers without subscription tokens")
     listing.add_argument("--limit", type=int, default=100)
     listing.add_argument("--offset", type=int, default=0)
+    listing.add_argument("--history", action="store_true")
     create = commands.add_parser("create", help="Attach an existing active Marzban user")
     create.add_argument("username")
     create.add_argument("--name", help="Display name; defaults to Marzban username")
@@ -44,6 +81,7 @@ def parser() -> argparse.ArgumentParser:
         "--save-link", type=Path, help="Explicit private local file, never overwritten"
     )
     for op in [
+        "link",
         "show",
         "check",
         "enable",
@@ -64,7 +102,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("profiles", nargs="+", choices=KINDS)
         if op in {"revoke", "rotate-token"}:
             command.add_argument("--confirm", action="store_true", dest="confirmed")
-        if op == "rotate-token":
+        if op in {"rotate-token", "link"}:
             command.add_argument("--save-link", type=Path)
     return p
 
@@ -162,11 +200,15 @@ def main(argv: list[str] | None = None) -> int:
         p.error("Use an SSH alias without options, credentials or shell expressions.")
     if args.operation == "list" and (not 1 <= args.limit <= 100 or args.offset < 0):
         p.error("Limit must be 1–100 and offset must be nonnegative.")
-    if args.operation in {"create", "remap"} and not re.fullmatch(
-        r"[A-Za-z0-9_]{3,32}", args.username
-    ):
+    if args.operation in {
+        "create",
+        "remap",
+        "user-create",
+        "user-update",
+        "user-inbounds",
+    } and not re.fullmatch(r"[A-Za-z0-9_]{3,32}", args.username):
         p.error("Marzban usernames must be 3–32 ASCII letters, digits or underscores.")
-    if args.operation in {"revoke", "rotate-token"} and not args.confirmed:
+    if args.operation in {"revoke", "rotate-token", "reconcile"} and not args.confirmed:
         p.error("Use --confirm: revocation is permanent; rotation invalidates the old link.")
     if args.operation == "create":
         args.name = args.name or args.username
@@ -174,7 +216,18 @@ def main(argv: list[str] | None = None) -> int:
         p.error("Name must contain 1–200 characters.")
     if args.local and (os.geteuid() != 0 or args.operation == "panel"):
         p.error("--local is for root on the VPS; panel forwarding runs on the workstation.")
-    secret = args.operation in {"create", "rotate-token", "panel-url"}
+    if args.operation in {"user-create", "user-update"}:
+        import math
+
+        if args.quota_gb is not None and (not math.isfinite(args.quota_gb) or args.quota_gb < 0):
+            p.error("Quota must be finite and nonnegative.")
+        if args.days is not None and not 0 <= args.days <= 36500:
+            p.error("Days must be 0–36500.")
+        if args.operation == "user-update" and all(
+            getattr(args, k) is None for k in ["quota_gb", "days", "status"]
+        ):
+            p.error("Specify at least one change.")
+    secret = args.operation in {"create", "user-create", "link", "rotate-token", "panel-url"}
     destination = getattr(args, "save_link", None)
     if secret and not destination and (not sys.stdout.isatty() or args.json):
         p.error("Links require an interactive terminal or explicit --save-link private file.")
@@ -218,7 +271,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print("Customer ID:", result["customer"]["id"])
                 print("Subscription URL:", result["subscription_url"])
-                print("Save this privately; existing links cannot be recovered from their hashes.")
+                print(
+                    "Retrieve this same link later with keyholder link USER; rotation is explicit."
+                )
         else:
             display(result, args.json)
         return 0
