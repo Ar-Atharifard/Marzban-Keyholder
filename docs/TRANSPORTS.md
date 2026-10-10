@@ -41,15 +41,28 @@ from issued URI and JSON output.
 - The installed Marzban parser, host-settings schema and Xray startup-config test
   accepted the candidate with all five existing inbounds preserved.
 - The full Nginx candidate passed syntax checks. Paths are generated only on VPS.
-- Local renderer/API tests retain old fixtures/defaults and reject literal-origin
+- Both transports passed isolated Xray → Nginx → Xray → verified HTTPS tests
+  with synthetic credentials; temporary processes were removed. This does not
+  establish ISP or Cloudflare delivery.
+- All 89 local tests pass; renderer/API tests retain old fixtures/defaults and reject literal-origin
   addresses for the new CDN profiles. New names avoid retired-policy collisions.
 - Activation still requires explicit approval for Marzban's core-update operation,
   which restarts Xray and can briefly disconnect current users. The Marzban container
   and Docker daemon do not need restarting.
 - The owner selected `test1` for the initial pilot; no other Keyholder customer
-  policy should change. The original test1 URL and five selections must survive.
+  policy should change. If test1 has a Keyholder mapping, preserve its URL and prior selections. It is
+  an active Marzban account with all five existing issued families, but the initial
+  Keyholder lookup found no unambiguous mapping. Recheck before attaching; issue
+  one new pilot Keyholder URL only if no mapping exists. No Marzban user creation
+  or quota/expiry change is needed.
 
-Prepare a new locally built backend image, a consistent Keyholder/Marzban backup,
+The code-only image was built locally from the verified deployed base using
+`deploy/Dockerfile.code-update`; both dependency manifests exactly matched. The
+base image ID is `9d90728e7cebccebffe0bec1027bb22102e89f58497fc9e4311b1cd07978726a`
+and candidate image ID is `dcd10c0e0beca17eec1bef25e4e81d5f124324ed4e4b3b7feddc5b78adb6618e`.
+Image import/renderer checks passed offline. No dependencies were installed on VPS.
+
+Prepare a consistent Keyholder/Marzban backup,
 and fresh gateway/config/host-settings snapshots before activation. Recheck source
 hashes to avoid applying a stale candidate. Use Marzban's authenticated core-config
 API rather than editing the active file behind its cached state. Its installed

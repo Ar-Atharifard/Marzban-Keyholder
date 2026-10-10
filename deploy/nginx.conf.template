@@ -80,6 +80,9 @@ http {
 
         # Administrator APIs and health checks remain loopback-only.
         # Replace this fallback only after existing static-site use is reviewed.
-        location / { return 404; }
+        location = /admin { return 404; }
+        location ^~ /admin/ { return 404; }
+        location = /health { return 404; }
+        location / { root /usr/share/nginx/html; try_files $uri $uri/ /index.html; }
     }
 }
