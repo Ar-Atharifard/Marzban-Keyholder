@@ -32,8 +32,14 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
             # Reviewed additive expansion only: existing defaults/values stay frozen.
             old = model["properties"]["profiles"]
             new = actual["properties"]["profiles"]
-            assert new["items"]["enum"] == old["items"]["enum"] + ["ws_tls_cdn", "xhttp_tls_cdn"]
-            assert new["maxItems"] == 7 and old["maxItems"] == 5
+            assert new["items"]["enum"] == old["items"]["enum"] + [
+                "ws_tls_cdn",
+                "xhttp_tls_cdn",
+                "trojan_grpc_cdn",
+                "vmess_httpupgrade_cdn",
+                "trojan_reality_ipv6",
+            ]
+            assert new["maxItems"] == 10 and old["maxItems"] == 5
             new["items"]["enum"] = old["items"]["enum"]
             new["maxItems"] = old["maxItems"]
         assert actual == model

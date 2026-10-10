@@ -10,6 +10,9 @@ SUPPORTED_KINDS = (
     "shadowsocks_ipv6",
     "ws_tls_cdn",
     "xhttp_tls_cdn",
+    "trojan_grpc_cdn",
+    "vmess_httpupgrade_cdn",
+    "trojan_reality_ipv6",
 )
 LEGACY_DEFAULTS = ("xhttp_reality", "tcp_reality")
 

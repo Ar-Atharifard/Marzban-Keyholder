@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 from keyholder.api.dependencies import DB
 from keyholder.backends.base import UpstreamError, UpstreamUnavailable
 from keyholder.models import Customer
-from keyholder.policies import stored_policy
+from keyholder.policies import SUPPORTED_KINDS, stored_policy
 from keyholder.rendering.profiles import generate_profiles
 from keyholder.rendering.renderers import select_renderer
 from keyholder.schemas import ErrorResponse, Policy
@@ -62,7 +62,11 @@ async def subscription(
     if adapter is None:
         raise HTTPException(503, "Backend unavailable")
     username = customer.mapping.upstream_username
-    policy = stored_policy(customer.policy)
+    policy = (
+        {"profiles": list(SUPPORTED_KINDS)}
+        if request.app.state.settings.profile_source == "marzban"
+        else stored_policy(customer.policy)
+    )
     # Release the read transaction before waiting for Marzban. Otherwise slow
     # upstream requests hold pool connections and can stall unrelated requests.
     db.close()

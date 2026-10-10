@@ -1,3 +1,4 @@
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     marzban_username: SecretStr = SecretStr("")
     marzban_password: SecretStr = SecretStr("")
     marzban_token: SecretStr = SecretStr("")
+    profile_source: Literal["policy", "marzban"] = "policy"
     upstream_timeout: float = Field(default=10, ge=1, le=60)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
 

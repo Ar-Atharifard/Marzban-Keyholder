@@ -110,3 +110,39 @@ The owner should now refresh both existing test1 subscriptions and try WS/XHTTP 
 MCI, Irancell and AUT. Record app/core version,
 success/failure and approximate latency. This is a short acceptance test, not a
 request for prolonged ISP troubleshooting. Expand only after that result.
+
+## Next three configurations: prepared, not activated
+
+The owner requested protocol diversity beyond the existing VLESS/Shadowsocks set.
+The local implementation adds:
+
+| Family | Protocol / transport | Exposure |
+|---|---|---|
+| `trojan_grpc_cdn` | Trojan / gRPC / TLS | Titan only, loopback origin 12087 |
+| `vmess_httpupgrade_cdn` | VMess AEAD / HTTPUpgrade / TLS | Titan only, loopback origin 12088 |
+| `trojan_reality_ipv6` | Trojan / TCP / REALITY | IPv6-only origin 11443 |
+
+URI and Xray renderers round-trip these families. VMess uses alterId zero and
+AEAD ciphers; insecure TLS is rejected. Trojan direct IPv4 and literal-IP CDN
+endpoints are rejected. Existing five-profile fixtures/defaults remain frozen.
+These combinations add protocol diversity; sharing gRPC or Cloudflare is still a
+shared transport or provider failure domain, not three wholly independent paths.
+
+Root-private candidates are under `/opt/braavos-panel/next-protocols/<timestamp>`.
+Installed Xray accepted all three appended inbounds without changing existing
+inbounds. Installed Marzban recognizes HTTPUpgrade and exposes Trojan/VMess models.
+Gateway routes, Marzban host templates, account eligibility and real end-to-end
+requests still require validation before activation. No new inbound is active yet.
+
+`www.nlnet.nl` is the candidate target for the new IPv6 REALITY profile only.
+A bounded VPS probe verified its certificate, TLS 1.3 and H2 at about 96 ms.
+Current Microsoft targets remain unchanged. The candidate is not yet proven better
+on Iranian networks; ASN suitability and actual REALITY connectivity still need
+checking. Xray's [REALITY guidance](https://xtls.github.io/en/config/transports/reality.html)
+prefers target certificates from the same ASN and warns about forwarding abuse
+with special targets such as Cloudflare. Popularity alone is not a selection test.
+
+Pending owner choice: pilot the three additions on test1 first, or immediately
+activate them for all eligible users. The previously validated seven are already
+available in all four existing Keyholder policies. Existing client tokens are
+preserved in either choice.

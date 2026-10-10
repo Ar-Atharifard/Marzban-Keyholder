@@ -1,8 +1,9 @@
 import base64
 import binascii
 import ipaddress
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
@@ -32,6 +33,8 @@ class Profile:
     spider_x: str = ""
     method: str = ""
     password: str = ""
+    protocol: str = "vless"
+    cipher: str = "auto"
 
 
 def decode_base64(value: str) -> bytes:
@@ -63,6 +66,10 @@ def normalize(link: str) -> Profile | None:
     if len(link) > 16384 or any(ord(c) < 32 or ord(c) == 127 for c in link):
         return None
     try:
+        if link.startswith("vmess://"):
+            return normalize_vmess(link)
+        if link.startswith("trojan://"):
+            return normalize_trojan(link)
         if link.startswith("ss://"):
             return normalize_shadowsocks(link)
         u = urlsplit(link)
@@ -147,7 +154,7 @@ def normalize(link: str) -> Profile | None:
             authority=get("authority") if transport == "grpc" else "",
             spider_x=get("spx") if security == "reality" else "",
         )
-    except (ValueError, UnicodeError, binascii.Error):
+    except (ValueError, TypeError, UnicodeError, binascii.Error, RecursionError):
         return None
 
 
@@ -193,3 +200,73 @@ def normalize_shadowsocks(link: str) -> Profile | None:
 
 def generate_profiles(links: list[str], policy: Policy) -> list[Profile]:
     return [p for link in links if (p := normalize(link)) is not None and p.kind in policy.profiles]
+
+
+def normalize_trojan(link: str) -> Profile | None:
+    u = urlsplit(link)
+    if not u.hostname or not u.port or u.password or u.path not in {"", "/"}:
+        return None
+    password = text(unquote(u.username or "", errors="strict"), 1024)
+    if not password:
+        return None
+    # Reuse the strict TLS/REALITY transport parser, never import arbitrary settings.
+    endpoint = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
+    synthetic = f"vless://00000000-0000-4000-8000-000000000000@{endpoint}:{u.port}"
+    parsed = normalize(synthetic + "?" + u.query + "#" + u.fragment)
+    if parsed is None:
+        return None
+    if parsed.security == "tls" and parsed.transport == "grpc":
+        try:
+            ipaddress.ip_address(parsed.address)
+        except ValueError:
+            kind: ProfileKind = "trojan_grpc_cdn"
+        else:
+            return None
+    elif parsed.security == "reality" and parsed.transport in {"tcp", "raw"}:
+        if not destination(parsed.address):
+            return None
+        kind = "trojan_reality_ipv6"
+    else:
+        return None
+    return replace(parsed, kind=kind, protocol="trojan", password=password, uuid="", flow="")
+
+
+def normalize_vmess(link: str) -> Profile | None:
+    data = json.loads(decode_base64(link[8:]).decode("utf-8"))
+    if not isinstance(data, dict):
+        return None
+    address = text(str(data.get("add", "")), 253)
+    destination(address)
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        pass
+    else:
+        return None
+    port = int(data.get("port", 0))
+    if not 1 <= port <= 65535:
+        return None
+    if data.get("tls") != "tls" or data.get("net") != "httpupgrade":
+        return None
+    if int(data.get("aid", 0)) != 0 or data.get("allowInsecure") not in {None, False, "0"}:
+        return None
+    cipher = data.get("scy", "auto")
+    if cipher not in {"auto", "aes-128-gcm", "chacha20-poly1305"}:
+        return None
+    sni = text(str(data.get("sni") or address), 253)
+    destination(sni)
+    return Profile(
+        kind="vmess_httpupgrade_cdn",
+        protocol="vmess",
+        cipher=cipher,
+        name=text(str(data.get("ps") or "VMess HTTPUpgrade"), 200),
+        address=address,
+        port=port,
+        transport="httpupgrade",
+        security="tls",
+        uuid=str(UUID(str(data.get("id", "")))),
+        sni=sni,
+        host=text(str(data.get("host", ""))),
+        path=text(str(data.get("path") or "/")),
+        alpn=("http/1.1",),
+    )

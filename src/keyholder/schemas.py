@@ -13,6 +13,9 @@ ProfileKind = Literal[
     "shadowsocks_ipv6",
     "ws_tls_cdn",
     "xhttp_tls_cdn",
+    "trojan_grpc_cdn",
+    "vmess_httpupgrade_cdn",
+    "trojan_reality_ipv6",
 ]
 
 
@@ -24,7 +27,7 @@ class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profiles: list[ProfileKind] = Field(
         default_factory=default_profiles,
-        max_length=7,
+        max_length=10,
     )
 
 
