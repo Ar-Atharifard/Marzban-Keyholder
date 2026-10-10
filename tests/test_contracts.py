@@ -104,3 +104,24 @@ def test_original_subscription_survives_management_restart_and_database_move(
             .startswith("application/json")
         )
         assert restarted.get(path + "?format=unknown").status_code == 422
+
+
+def test_preexisting_v1_token_hash_remains_usable(client: TestClient) -> None:
+    from keyholder.models import Customer
+    from keyholder.security import hash_token, valid_token
+
+    # Fixed synthetic persisted digest: independent of the current generator/hash.
+    token = "A" * 43
+    digest = "0f007385b6f9d4b7eeb2748605afe1a984a0a3bfa3f014d09e2a784ce9e5cd1a"
+    assert valid_token(token) and hash_token(token) == digest
+    result = create(client)
+    customer = result["customer"]
+    assert isinstance(customer, dict)
+    app = cast(FastAPI, client.app)
+    with app.state.sessions() as db:
+        row = db.get(Customer, customer["id"])
+        assert row is not None
+        row.token_hash = digest
+        db.commit()
+    assert client.get("/s/" + token).status_code == 200
+    assert client.get("/s/" + token + "?format=xray").status_code == 200

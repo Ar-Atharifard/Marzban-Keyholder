@@ -63,7 +63,7 @@ Offline OpenAPI export is tested with injected fixture environment values: it
 does not create the supplied database or include those secret values. The schema
 describes both subscription media types and sanitized error bodies.
 
-Latest local verification: 69 tests passed, Ruff lint/format, strict mypy and
+Latest local verification: 83 tests passed, Ruff lint/format, strict mypy and
 `git diff --check` passed. A regression reproduces connection-pool exhaustion
 under slow upstream requests and verifies concurrent subscriptions and health
 remain responsive after releasing the read transaction before awaiting Marzban.
@@ -224,3 +224,22 @@ An administrator can then use `http://127.0.0.1:28000/admin/...` with the existi
 Bearer key in a private API client. Do not put the key in shell history, request
 logs or documentation; the tunnel does not replace API authentication. Close the
 tunnel after use. Never copy the server `.env` to obtain credentials.
+
+## Installed operator tools (October 10, 2026)
+
+`keyholder` is installed in the workstation's `~/.local/bin` and on Braavos in
+`/usr/local/bin`; server code is root-owned in `/usr/local/lib/keyholder-admin`.
+See `scripts/admin/README.md` for every command and its safety/credential behavior.
+Read-only installed `status`, `health`, `list` and mapped-user checks passed.
+The tool installation did not rebuild/restart the API or migrate its database.
+
+API/renderer snapshots and a fixed historical synthetic token hash are frozen
+under `tests/contracts` and `tests/test_contracts.py`. Existing API behavior was
+not changed. CI enforcement/private canonical Git hosting remain decisions.
+
+Protected browser panel preparation is in `/opt/braavos-panel` (root-only).
+Its private entry gate passed isolated tests and the full candidate passed syntax
+checks in the actual Nginx image. A pinned cloudflared 2026.10.0 image and restricted
+Compose file are ready. The connector is **not running**, and Nginx has **not** been
+reloaded to activate the panel listener. Activation waits for the Access policy,
+origin JWT validation and private tunnel token. See `MANAGEMENT.md`.

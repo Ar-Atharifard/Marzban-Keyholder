@@ -21,6 +21,9 @@ ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in
 - [API reference](docs/API.md): authentication, payloads, endpoints and errors.
 - [Operations](docs/OPERATIONS.md): local workflow, backup, release and recovery gates.
 - [Architecture](ARCHITECTURE.md): application boundaries and limitations.
+- [Operator CLI](scripts/admin/README.md): installed commands for daily management.
+- [Compatibility policy](docs/COMPATIBILITY.md): permanent links and frozen contracts.
+- [Management plan](docs/MANAGEMENT.md): protected browser panel and prioritized improvements.
 
 The Marzban-only backend is deployed with database revision `0002`. Hiddify has
 been removed. Nginx owns public 80/443 and retains 2053 for existing Cloudflare

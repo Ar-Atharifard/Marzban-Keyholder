@@ -30,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     panel = commands.add_parser("panel", help="Open the private Marzban panel through SSH")
     panel.add_argument("--port", type=int, default=28080)
     panel.add_argument("--no-browser", action="store_true")
+    bookmark = commands.add_parser("panel-url", help="Show the private public-panel bookmark")
+    bookmark.add_argument("--save-link", type=Path)
     listing = commands.add_parser("list", help="List customers without subscription tokens")
     listing.add_argument("--limit", type=int, default=100)
     listing.add_argument("--offset", type=int, default=0)
@@ -171,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         p.error("Name must contain 1–200 characters.")
     if args.local and (os.geteuid() != 0 or args.operation == "panel"):
         p.error("--local is for root on the VPS; panel forwarding runs on the workstation.")
-    secret = args.operation in {"create", "rotate-token"}
+    secret = args.operation in {"create", "rotate-token", "panel-url"}
     destination = getattr(args, "save_link", None)
     if secret and not destination and (not sys.stdout.isatty() or args.json):
         p.error("Links require an interactive terminal or explicit --save-link private file.")
@@ -193,10 +195,14 @@ def main(argv: list[str] | None = None) -> int:
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
         )["result"]
         if secret:
-            credentials = {
-                "customer_id": result["customer"]["id"],
-                "subscription_url": result["subscription_url"],
-            }
+            credentials = (
+                {"panel_url": result["panel_url"], "active": result["active"]}
+                if args.operation == "panel-url"
+                else {
+                    "customer_id": result["customer"]["id"],
+                    "subscription_url": result["subscription_url"],
+                }
+            )
             if fd is not None:
                 with os.fdopen(fd, "w") as file:
                     fd = None
@@ -204,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
                     file.flush()
                     os.fsync(file.fileno())
                 print("Private link file saved. Keep it in secure storage.")
+            elif args.operation == "panel-url":
+                print("Private panel bookmark:", result["panel_url"])
+                if not result["active"]:
+                    print("Prepared only: public access awaits Cloudflare configuration.")
             else:
                 print("Customer ID:", result["customer"]["id"])
                 print("Subscription URL:", result["subscription_url"])

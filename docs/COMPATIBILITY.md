@@ -37,8 +37,9 @@ with client compatibility review, rather than changing existing fields silently.
 `tests/contracts/` freezes synthetic examples for both subscription formats and
 the current OpenAPI paths/schemas. `tests/test_contracts.py` compares these and
 exercises the original URL across rename, policy changes, mapping replacement,
-pause/resume, application restart and database backup/relocation. Historical
-migration tests separately prove hash/mapping preservation.
+pause/resume, application restart and database backup/relocation. A fixed
+historical synthetic token digest also proves old hashes remain usable; migration
+tests separately prove hash/mapping preservation.
 
 Do not regenerate snapshots merely to make a failing test green. Treat failures as
 compatibility reviews. New unrelated endpoints/schemas can be added without deleting

@@ -82,3 +82,46 @@ expiry and inbounds. Keyholder owns durable customer subscription identity,
 provider mapping and rendering. Disabling Keyholder delivery does not revoke
 already-downloaded Marzban access. A future web screen should make this distinction
 clear and never silently rotate links, expand permissions or expose the admin key.
+
+## Prepared server files and token placement
+
+`/opt/braavos-panel` is root-only and holds `access.json` (private bookmark/cookie),
+`nginx.fragment.conf`, `nginx.candidate.conf`, a pinned restricted
+`docker-compose.json`, and a nonsecret `deployment.json` record. The private gate
+and actual Nginx candidate were tested. The connector is not started and the live
+gateway configuration is unchanged. Get the private bookmark interactively using
+`keyholder panel-url`; it reports that public access is not active yet.
+
+After creating the Tunnel, copy its connector token from the dashboard and enter it
+**directly on Braavos**, without pasting it into chat or putting it on a command line.
+In an interactive `ssh braavos` session (bash):
+
+```bash
+umask 077
+read -rs -p 'Tunnel token (hidden): ' PANEL_TUNNEL_TOKEN
+printf '\n'
+printf '%s' "$PANEL_TUNNEL_TOKEN" > /opt/braavos-panel/tunnel-token
+unset PANEL_TUNNEL_TOKEN
+chown 65532:65532 /opt/braavos-panel/tunnel-token
+chmod 600 /opt/braavos-panel/tunnel-token
+```
+
+The parent directory stays root-only; the secret file is readable by the connector's
+nonroot UID through a read-only bind mount. Do not run the dashboard's example command
+with its token in argv. No token is embedded in Compose or Git. Never overwrite an
+existing active connector token without reviewing rotation/reconnection behavior.
+
+The prepared connector uses host networking to reach loopback 18081, drops all
+capabilities, uses no-new-privileges/read-only root, caps memory at 128 MiB/processes
+at 128, binds its metrics to loopback 20001, and rotates Docker logs. These are
+ceilings, not reserved RAM. Its image is pinned by registry digest. It opens no
+public listening port; outbound Cloudflare Tunnel connectivity still needs testing.
+
+Before activation, verify the entire hostname Access policy, the correct
+application audience/team under Protect with Access, and the token file. Take a
+fresh gateway backup and regenerate the candidate from the **current** active
+configuration (the prepared candidate may become stale). Syntax-check, write the
+bind-mounted file in place and gracefully reload Nginx. Start only the dedicated
+panel connector after those gates. Validate public authentication and private
+bookmark behavior; record readiness before setting `access.json` active to true.
+Do not activate it simply because the token file exists.

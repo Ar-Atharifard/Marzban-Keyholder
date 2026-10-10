@@ -33,6 +33,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
                 }
             )
         return {"ok": True, "result": states}
+    if operation == "panel-url":
+        state = json.loads(Path("/opt/braavos-panel/access.json").read_text())
+        return {"ok": True, "result": {"panel_url": state["panel_url"], "active": state["active"]}}
     if operation == "backup":
         item = inspect(CONTAINER)
         source = next(

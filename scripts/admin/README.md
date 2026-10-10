@@ -9,6 +9,7 @@ Python package installation, public API route or database migration is required.
 | Container status | `keyholder status` |
 | Database/API health | `keyholder health` |
 | Open private panel | `keyholder panel` |
+| Show protected-panel bookmark | `keyholder panel-url` |
 | List customers | `keyholder list` |
 | Next page | `keyholder list --offset 100` |
 | Customer details | `keyholder show alice` |

@@ -118,3 +118,27 @@ def test_failed_cli_request_removes_empty_reserved_file(
 def test_cli_rejects_ssh_option_injection() -> None:
     with pytest.raises(SystemExit):
         cli.main(["--host=-oProxyCommand=bad", "status"])
+
+
+def test_panel_bookmark_is_not_printed_to_noninteractive_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    with pytest.raises(SystemExit):
+        cli.main(["panel-url"])
+
+
+def test_panel_bookmark_saved_explicitly_without_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    url = "https://edge.example/manage/synthetic-private-bookmark"
+
+    def request(host: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "result": {"panel_url": url, "active": False}}
+
+    monkeypatch.setattr(cli, "request", request)
+    path = tmp_path / "bookmark.json"
+    assert cli.main(["panel-url", "--save-link", str(path)]) == 0
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text()) == {"panel_url": url, "active": False}
+    assert url not in capsys.readouterr().out
