@@ -211,3 +211,16 @@ then uses a synthetic clone token, real mapped upstream reads and the installed
 Xray binary. `--connectivity` launches and cleans up temporary loopback clients;
 it does not provision users or alter server inbounds. Run it only in a bounded,
 nonroot disposable container as done during this cutover.
+
+## Private administrator access
+
+From the workstation, use an SSH tunnel with an unused local port:
+
+```bash
+ssh -N -L 127.0.0.1:28000:127.0.0.1:18000 braavos-keyholder
+```
+
+An administrator can then use `http://127.0.0.1:28000/admin/...` with the existing
+Bearer key in a private API client. Do not put the key in shell history, request
+logs or documentation; the tunnel does not replace API authentication. Close the
+tunnel after use. Never copy the server `.env` to obtain credentials.

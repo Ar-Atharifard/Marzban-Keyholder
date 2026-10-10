@@ -48,6 +48,8 @@ Never download or publish it. Inspect `manifest.json` for artifact hashes.
 - `marzban-runtime-config.tar`: original Xray configuration and binary.
 - `nginx-precutover.conf`, `root-bashrc.before`, `disabled-hiddify-cron/`, and
   `retirement-file-metadata.json`: old ingress, shell hooks, jobs and symlink targets.
+- `retired-systemd-dropins.tar`: four orphaned Hiddify unit override directories,
+  archived before final removal.
 - `iptables.rules` and `ip6tables.rules`: read-only snapshots; no firewall rules
   were modified. Network tuning was preserved as `/etc/sysctl.d/braavos.conf`.
 
