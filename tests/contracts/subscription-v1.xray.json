@@ -1,0 +1,240 @@
+[
+  {
+    "remarks": "IPv4",
+    "inbounds": [
+      {
+        "tag": "socks",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "192.0.2.1",
+              "port": 8443,
+              "users": [
+                {
+                  "id": "12345678-1234-4234-9234-123456789abc",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "direct.example",
+            "fingerprint": "firefox",
+            "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "shortId": "aB12",
+            "spiderX": "/hello"
+          }
+        },
+        "mux": {
+          "enabled": false
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "Direct",
+    "inbounds": [
+      {
+        "tag": "socks",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "192.0.2.1",
+              "port": 9443,
+              "users": [
+                {
+                  "id": "12345678-1234-4234-9234-123456789abc",
+                  "encryption": "none"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "direct.example",
+            "fingerprint": "chrome",
+            "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "shortId": "abcd"
+          },
+          "xhttpSettings": {
+            "host": "direct.example",
+            "path": "/x",
+            "mode": "stream-one"
+          }
+        },
+        "mux": {
+          "enabled": false
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "Titan",
+    "inbounds": [
+      {
+        "tag": "socks",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "titan.example",
+              "port": 443,
+              "users": [
+                {
+                  "id": "12345678-1234-4234-9234-123456789abc",
+                  "encryption": "none"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "tls.example",
+            "fingerprint": "chrome",
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "allowInsecure": false
+          },
+          "grpcSettings": {
+            "serviceName": "service/name?x=1",
+            "multiMode": true,
+            "authority": "grpc.example"
+          }
+        },
+        "mux": {
+          "enabled": false
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "IPv4",
+    "inbounds": [
+      {
+        "tag": "socks",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "2001:db8::1",
+              "port": 10443,
+              "users": [
+                {
+                  "id": "12345678-1234-4234-9234-123456789abc",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "direct.example",
+            "fingerprint": "firefox",
+            "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "shortId": "aB12",
+            "spiderX": "/hello"
+          }
+        },
+        "mux": {
+          "enabled": false
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "IPv6 SS",
+    "inbounds": [
+      {
+        "tag": "socks",
+        "listen": "127.0.0.1",
+        "port": 10808,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "shadowsocks",
+        "settings": {
+          "servers": [
+            {
+              "address": "2001:db8::1",
+              "port": 10444,
+              "method": "aes-128-gcm",
+              "password": "sanitized:+/=@password"
+            }
+          ]
+        },
+        "mux": {
+          "enabled": false
+        }
+      }
+    ]
+  }
+]
