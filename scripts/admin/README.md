@@ -31,6 +31,11 @@ needed for routine customer management.
 | Private recovery set on VPS | `keyholder backup` |
 | Browser panel / SSH recovery tunnel | `keyholder panel-url` / `keyholder panel` |
 
+A user created in the Marzban panel needs one initial `keyholder create USER`
+registration (or `keyholder sync`). Afterwards `link`, `show` and `check` work.
+This is an identity-registration step, not a profile or source-code change.
+Use the exact, case-sensitive panel username. Repeating `create` keeps the same URL.
+
 Selectors are a UUID or an unambiguous non-revoked Marzban username. `--json`
 (before the command) works for nonsecret results. Listing/pagination never reveals
 subscription credentials. The current panel is `https://edge.javatechpack.ir/dashboard/`.

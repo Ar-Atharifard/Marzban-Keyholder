@@ -75,8 +75,15 @@ def resolve(selector: str) -> dict[str, Any]:
             for c in customers()
             if c["mapping"]["upstream_username"] == selector and c["status"] != "revoked"
         ]
-        if len(matches) != 1:
-            raise OperatorError("Username is missing or ambiguous; use its customer ID.") from None
+        if not matches:
+            raise OperatorError(
+                "No Keyholder registration for this username; run keyholder create USER first. "
+                "Use the exact Marzban username."
+            ) from None
+        if len(matches) > 1:
+            raise OperatorError(
+                "Username has multiple registrations; use its customer ID."
+            ) from None
         return matches[0]
     return api("GET", "/admin/customers/" + identifier)  # type: ignore[no-any-return]
 

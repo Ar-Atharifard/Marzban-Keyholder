@@ -161,3 +161,21 @@ def test_reset_usage_requires_confirmation_inside_worker(monkeypatch: pytest.Mon
     monkeypatch.setattr(MarzbanBackend, "login", login)
     with pytest.raises(worker.OperatorError, match="requires --confirm"):
         asyncio.run(worker.panel_operation("user-reset-usage", {"username": "alice"}))
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_lookup_distinguishes_missing_registration_from_duplicates(
+    monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    from scripts.admin import worker
+
+    monkeypatch.setattr(
+        worker,
+        "customers",
+        lambda: [
+            {"mapping": {"upstream_username": "OWNER"}, "status": "active"} for _ in range(count)
+        ],
+    )
+    expected = "run keyholder create USER first" if count == 0 else "multiple registrations"
+    with pytest.raises(worker.OperatorError, match=expected):
+        worker.resolve("OWNER")
