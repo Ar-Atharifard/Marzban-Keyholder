@@ -99,6 +99,14 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
                 result = generate_profiles(
                     links, Policy.model_validate({"profiles": KINDS if authoritative else profiles})
                 )
+                if settings.allowed_cdn_hosts:
+                    result = [
+                        p
+                        for p in result
+                        if p.security != "tls" or p.address in settings.allowed_cdn_hosts
+                    ]
+                if not result:
+                    raise ValueError("No allowed profiles")
     except (UpstreamError, UpstreamUnavailable, TimeoutError, ValueError):
         raise OperatorError("Marzban user is unavailable or has no compatible profiles.") from None
     kinds = sorted({p.kind for p in result})
@@ -117,6 +125,8 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
         "user-create",
         "user-update",
         "user-inbounds",
+        "user-usage",
+        "user-reset-usage",
     }:
         return asyncio.run(panel_operation(operation, args))
     if operation == "doctor":
@@ -318,6 +328,12 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
             return {"marzban_users": len(users), "registered": count, "duplicates_revoked": revoked}
         name = args["username"]
         path = "/api/user/" + quote(name, safe="")
+        if operation == "user-usage":
+            return await call("GET", path + "/usage")
+        if operation == "user-reset-usage":
+            if not args.get("confirmed"):
+                raise OperatorError("Traffic reset requires --confirm; used traffic becomes zero.")
+            return summary(await call("POST", path + "/reset"))
         if operation == "user-create":
             body = {
                 "username": name,
@@ -339,6 +355,10 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                 body["status"] = args["status"]
         else:
             # Preserve every existing protocol credential while changing the requested selection.
+            available = await call("GET", "/api/inbounds")
+            allowed = {item["tag"] for item in available.get(args["protocol"], [])}
+            if not set(args["tags"]) <= allowed:
+                raise OperatorError("An inbound tag does not belong to the selected protocol.")
             proxies = user["proxies"]
             proxies.setdefault(args["protocol"], {})
             inbounds = user["inbounds"]

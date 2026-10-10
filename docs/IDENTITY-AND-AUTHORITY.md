@@ -1,11 +1,14 @@
-# Customer identity and configuration authority
+# Customer identity, database and configuration authority
 
-## Confirmed current production schema (revision 0002)
+Production uses SQLite revision `0003`. Marzban and Keyholder each own different
+facts; customer management does not require editing source code.
 
 ```mermaid
 erDiagram
     BACKENDS ||--o{ CUSTOMER_MAPPINGS : provides
     CUSTOMERS ||--|| CUSTOMER_MAPPINGS : maps
+    BACKENDS ||--o{ REGISTRATIONS : provides
+    CUSTOMERS ||--o| REGISTRATIONS : canonical
     BACKENDS {
         string id PK
         string provider
@@ -16,6 +19,7 @@ erDiagram
         string name
         string status
         string token_hash UK
+        string token_encrypted
         json policy
         datetime created_at
         datetime updated_at
@@ -26,6 +30,11 @@ erDiagram
         string backend_id FK
         string upstream_username
     }
+    REGISTRATIONS {
+        string backend_id PK,FK
+        string upstream_username PK
+        string customer_id UK,FK
+    }
     APPLICATION_DATA {
         string key PK
         json value
@@ -33,77 +42,65 @@ erDiagram
     }
 ```
 
-`alembic_version` stores the migration revision. `backends.config_ref` references
-server-side configuration rather than credentials. Customer tokens are random
-256-bit bearer credentials; only SHA-256 hashes are stored. `policy` currently
-contains the allowed profile families. Application data retains legacy/rollback
-archives, not live user plans. Passwords, quota, expiry, protocol credentials and
-inbound selections belong to Marzban's separate database, not Keyholder.
+`alembic_version` stores the schema revision. `backends.config_ref` references
+server configuration, never panel credentials. `customer_mappings` connects a
+public customer identity to its upstream account. `registrations` enforces one
+canonical identity per backend/username with a composite primary key and a unique
+customer ID. Historical mappings can remain without being canonical registrations.
+`application_data` retains dormant legacy data and migration rollback archives;
+it is not a second plan database.
 
-A mapping has one customer, but the current schema does not enforce uniqueness
-of `(backend_id, upstream_username)`. A read-only aggregate check found four
-customers and two duplicated upstream groups. Existing links must remain valid;
-adding a uniqueness constraint directly would fail or force deletion.
+Tokens contain 256 random bits. Public authentication uses the unique SHA-256 hash.
+`token_encrypted` stores authenticated Fernet ciphertext so an authorized operator
+can retrieve the original URL. The encryption key is a server-only environment
+secret outside SQLite. Decryption also checks the token hash. There is no token TTL.
+Back up both the database and key; a database-only backup cannot recover URLs.
+Database plus key compromise exposes subscription credentials, so recovery sets
+are root-only and must be encrypted before any future off-host transfer.
 
-## Link semantics and current limitation
+## One registration, one URL
 
-`POST /admin/customers` creates a new identity every time; it is not a lookup.
-The CLI prevents repeated creation by preflight, but direct API calls do not.
-This explains different IDs/URLs after repeating creation. `/s/{token}` does not
-expire on a timer. Disable/revoke, explicit token rotation, Marzban inactive status,
-quota/expiry or missing upstream can prevent delivery. Maintaining availability
-also requires preserving the public domain, TLS, database and recovery backups.
-No implementation can promise eternal availability independent of those assets.
+`POST /admin/customers` atomically registers or retrieves the existing identity.
+Repeating it returns the same ID and token rather than creating another customer.
+Concurrent requests are guarded by the database constraint. The established 201
+response is retained even when retrieving an existing registration. Repeated
+registration does not rename a customer, alter its policy or reactivate it.
 
-Hashes cannot recover existing original tokens. Storing them as hashes protects
-links if the database leaks, but makes redisplaying a lost URL impossible. A new
-retrieval feature cannot retroactively reverse hashes. Never silently rotate links
-or delete duplicate customers to make the database easier to migrate.
+`GET /admin/customers/{id}/subscription`, or `keyholder link USER`, retrieves the
+same URL. Listing contains no token. A legacy row without ciphertext returns 409;
+a missing/wrong vault key returns 503. Neither failure silently creates a new URL.
+An explicit `rotate-token` changes the token while retaining the customer ID.
+Remapping changes the upstream account while retaining the customer URL; mapping
+to an already registered account returns 409.
 
-## Revised authority model (local implementation; not deployed yet)
+The owner approved rotation on October 11, 2026. The two current Marzban users have
+two canonical, retrievable subscriptions. Two duplicate Keyholder rows were revoked
+and retained as history. Earlier URLs were intentionally invalidated. The external
+removal of `test-xhttp` was confirmed by the owner; it was not recreated.
+Ordinary future upgrades must preserve the current identities and hashes.
 
-`KEYHOLDER_PROFILE_SOURCE=marzban` makes subscription requests follow the supported
-configurations returned for the current Marzban user. Enabling or disabling an
-inbound in Marzban takes effect on the next fetch, without changing customer
-policies, IDs, tokens or source code. Existing `policy` mode remains the deployment
-default for backwards compatibility until the revised release is validated.
-The setting applies to all customers, including old duplicate links.
+## Single sources of truth
 
-Marzban is authoritative for user status, quotas, expiry and protocol/inbound
-selection. Keyholder is authoritative for permanent public identity, mapping and
-revocation. Normalization remains a compatibility/security boundary; unsupported
-protocols are not blindly passed through. Adding support for a genuinely new
-protocol requires a tested renderer; creating/editing individual users does not.
+| Fact | Authority |
+|---|---|
+| User status, quota, expiry, usage, proxy credentials, selected inbounds | Marzban |
+| Stable public customer ID/token, mapping, local delivery pause/revocation | Keyholder |
+| Active protocol definitions and host templates | Marzban/Xray |
+| TLS and external HTTP routing | Nginx and Cloudflare |
 
-## Pending identity decision and migration design
+Production sets `KEYHOLDER_PROFILE_SOURCE=marzban`. Every fetch follows the user's
+current supported Marzban links; selecting or deselecting an inbound takes effect
+on the next subscription refresh without editing Keyholder policies or code.
+`KEYHOLDER_ALLOWED_CDN_HOSTS` restricts CDN delivery to Titan. Legacy `policy` mode
+and five-profile defaults remain available for compatibility, but stored customer
+policies do not gate profiles in Marzban-authority mode.
 
-Recommended: one canonical registration per `(backend_id, upstream_username)`,
-with existing duplicate customer rows retained as compatibility aliases. Register
-or get should atomically return that canonical identity, never mint a fresh token
-on a repeated call. An explicit rotate operation remains separate.
+Normalization is still a tested compatibility/security boundary. It does not
+blindly forward unsupported protocols, unsafe TLS or plaintext direct IPv4.
+Supporting a new protocol family requires a renderer; creating or editing a user
+never does. XHTTP `extra` is removed only in the established XHTTP transformation.
 
-Use a separate encrypted token vault for retrievable links, with authenticated
-encryption from a maintained library and a server-only key outside SQLite. Back up
-both database and encryption key; prohibit plaintext exports/logging. New issuance
-stores hash plus encrypted token. Existing links remain valid; their vault entries
-can be populated only by supplying the original token once with hash verification,
-or by a separately approved rotation. An unrecoverable legacy URL should produce
-an explicit error rather than another customer or implicit rotation.
-
-Do not implement custom encryption, derive tokens from usernames/IDs, expose raw
-Marzban links as permanent public URLs, or discard compatibility aliases. Atomic
-registration needs a database uniqueness constraint on the canonical registry,
-not just a CLI preflight. Concurrent registration, restart/backup recovery, key
-loss, alias preservation and secret-free logging require regression tests.
-
-The vault/registry requires a new migration and image; neither is deployed yet.
-A fresh consistent snapshot, clone migration rehearsal, preserved token-hash and
-mapping checks, isolated API tests and explicit image rollback must precede it.
-
-## Rollout record
-
-On 2026-10-11, the owner authorized granting the two previously validated Titan CDN
-families to all existing subscriptions. Two remaining customers gained the families;
-the two test1 mappings already had them. All four IDs, statuses, token hashes and
-mappings compared unchanged. A consistent SQLite snapshot and prior policies are
-root-only under `/var/backups/keyholder-policy-rollout/<timestamp>`.
+Links do not expire on a timer. Delivery can stop after explicit rotation/revocation,
+local disablement, upstream account limits/expiry, or operational failure. Stable
+links depend on retaining the domain, path, database, vault key and backups; no
+software can promise perpetual availability independently of those assets.

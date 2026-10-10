@@ -108,7 +108,15 @@ async def validate() -> None:
         assert db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         assert db.execute("SELECT id,policy FROM customers ORDER BY id").fetchall() == policies
-        row = db.execute("SELECT id FROM customers WHERE status='active' LIMIT 1").fetchone()
+        if "--username" in sys.argv:
+            username = sys.argv[sys.argv.index("--username") + 1]
+            row = db.execute(
+                "SELECT c.id FROM customers c JOIN customer_mappings m ON m.customer_id=c.id "
+                "WHERE c.status='active' AND m.upstream_username=? LIMIT 1",
+                (username,),
+            ).fetchone()
+        else:
+            row = db.execute("SELECT id FROM customers WHERE status='active' LIMIT 1").fetchone()
         assert row is not None
         # Only the clone receives a synthetic token. Live identities are untouched.
         token = secrets.token_urlsafe(32)

@@ -63,7 +63,14 @@ def parser() -> argparse.ArgumentParser:
     inbound.add_argument(
         "--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
     )
-    inbound.add_argument("--tags", nargs="+", required=True)
+    inbound.add_argument(
+        "--tags", nargs="*", required=True, help="Empty selection disables this protocol's inbounds"
+    )
+    usage = commands.add_parser("user-usage", help="Read panel traffic usage for a user")
+    usage.add_argument("username")
+    reset = commands.add_parser("user-reset-usage", help="Reset a user's used traffic explicitly")
+    reset.add_argument("username")
+    reset.add_argument("--confirm", action="store_true", dest="confirmed")
     panel = commands.add_parser("panel", help="Open the private Marzban panel through SSH")
     panel.add_argument("--port", type=int, default=28080)
     panel.add_argument("--no-browser", action="store_true")
@@ -206,10 +213,17 @@ def main(argv: list[str] | None = None) -> int:
         "user-create",
         "user-update",
         "user-inbounds",
+        "user-usage",
+        "user-reset-usage",
     } and not re.fullmatch(r"[A-Za-z0-9_]{3,32}", args.username):
         p.error("Marzban usernames must be 3–32 ASCII letters, digits or underscores.")
-    if args.operation in {"revoke", "rotate-token", "reconcile"} and not args.confirmed:
-        p.error("Use --confirm: revocation is permanent; rotation invalidates the old link.")
+    if (
+        args.operation in {"revoke", "rotate-token", "reconcile", "user-reset-usage"}
+        and not args.confirmed
+    ):
+        p.error(
+            "Use --confirm: revocation, token rotation and traffic reset are explicit operations."
+        )
     if args.operation == "create":
         args.name = args.name or args.username
     if args.operation in {"create", "rename"} and not 1 <= len(args.name) <= 200:
@@ -276,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             display(result, args.json)
+        if args.operation == "doctor" and not result["healthy"]:
+            return 1
         return 0
     except CLIError as error:
         print(str(error), file=sys.stderr)

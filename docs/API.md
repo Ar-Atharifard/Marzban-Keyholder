@@ -12,8 +12,8 @@ incorrect credentials return 401 with `WWW-Authenticate: Bearer`. There is one
 operator key, without roles or per-administrator audit identity.
 
 Subscription tokens are bearer credentials in `/s/{token}`. They contain 256 random
-bits, are returned once at creation/rotation and are stored only as SHA-256 hashes.
-Listing cannot recover a token. Protect URLs from access logs, shell history and
+bits, are stored as SHA-256 hashes plus authenticated encrypted ciphertext.
+An authenticated subscription-retrieval endpoint recovers the same URL; listing never reveals it. Protect URLs from access logs, shell history and
 analytics. Mapping/policy changes preserve the URL; rotation invalidates it.
 
 All responses have `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and
@@ -33,17 +33,22 @@ Only `marzban-default` has a runtime adapter. A backend row does not automatical
 enable a provider. Mapping changes do not contact Marzban or validate user existence;
 missing users or permission failures surface when fetching the subscription.
 
-`Policy` has one field, `profiles`: a list of at most seven supported profile names.
+`Policy` has one field, `profiles`: a list of at most ten supported profile names.
 The defaults retain the original five profiles for compatibility. An empty list is allowed
-and disables compatible output, producing 503. Supported choices are:
+and disables compatible output in legacy policy mode, producing 503.
+Production uses `KEYHOLDER_PROFILE_SOURCE=marzban`: supported current upstream
+selections control output; stored policy is retained for compatibility. Supported choices are:
 
 - `tcp_reality`
 - `xhttp_reality`
 - `grpc_cdn`
 - `tcp_reality_ipv6`
 - `shadowsocks_ipv6`
-- `ws_tls_cdn` (new, explicit opt-in)
-- `xhttp_tls_cdn` (new, explicit opt-in)
+- `ws_tls_cdn`
+- `xhttp_tls_cdn`
+- `trojan_grpc_cdn`
+- `vmess_httpupgrade_cdn`
+- `trojan_reality_ipv6`
 
 Unknown request fields/profile names are rejected. `ech_enabled`,
 `include_base_cdn`, `xhttp_cdn` and `ws_cdn` are no longer accepted API inputs.
@@ -53,11 +58,11 @@ fields are omitted, and new families are not added automatically.
 `CustomerView` contains `id`, `name`, `status`, `policy`, `created_at`, `updated_at`,
 `revoked_at` and `mapping`. IDs are opaque strings generated as UUIDs. Timestamps
 are ISO datetime values; `revoked_at` is null until revocation. SQLite may serialize
-timestamps without an explicit offset; stored values originate in UTC. No token
+timestamps internally without an offset; API views normalize them to UTC. No token
 hash or raw token is included in this view.
 
 `TokenResult` contains `customer` (a CustomerView), `token` and `subscription_url`.
-Only creation and rotation return it.
+Registration, explicit rotation and authenticated retrieval return it.
 
 ## Endpoints
 
@@ -72,7 +77,8 @@ No admin authorization. `format=uri` returns `text/plain`: standard base64 of
 newline-separated proxy URIs, with a final newline before encoding. `format=xray`
 returns `application/json`: an array of individual Xray client configurations,
 each with remarks, a loopback SOCKS inbound and one proxy outbound. These formats
-include only the customer's selected compatible upstream profiles.
+include supported profiles selected by Marzban in production; legacy policy mode
+uses the stored selection. The configured CDN allowlist applies in either mode.
 
 With no format, URI output is the default. An opt-in `Keyholder-Xray` User-Agent
 marker selects Xray JSON. Other client names/versions are not guessed. Invalid
@@ -85,8 +91,9 @@ are retained. ECH is not generated. This processing never rewrites panel inbound
 
 ### POST `/admin/customers`
 
-Create the Marzban user separately first. This endpoint creates only local identity
-and mapping. Body combines MappingInput with required `name` (1–200 characters)
+Create the Marzban user separately first. This endpoint atomically registers or retrieves only local identity
+and mapping. A database constraint guarantees one canonical registration per
+backend/username, including concurrent calls. Body combines MappingInput with required `name` (1–200 characters)
 and optional `policy`. Example with all current families explicitly selected:
 
 ```json
@@ -100,17 +107,27 @@ and optional `policy`. Example with all current families explicitly selected:
 }
 ```
 
-Success: 201, TokenResult. Save the returned URL privately. Unknown backend: 422.
+Success: 201, TokenResult, including repeated registration for compatibility.
+Repeated calls return the same ID/token and do not rename or update the customer.
+Unknown backend: 422. Revoked or legacy-unrecoverable registration: 409. Broken
+vault key: 503; restore the key rather than minting another identity.
 
 ### GET `/admin/customers`
 
 Query: `offset` defaults to 0, minimum 0; `limit` defaults to 50, range 1–100.
 Success: 200, array of CustomerView, ordered by creation time then ID. There is no
-total-count field, token recovery or panel-wide user listing.
+total-count field or panel-wide user listing. Token retrieval uses the endpoint below.
 
 ### GET `/admin/customers/{customer_id}`
 
 Success: 200, CustomerView. Missing customer: 404.
+
+### GET `/admin/customers/{customer_id}/subscription`
+
+Admin authentication required. Success: 200, TokenResult with the existing URL.
+No mutation or implicit rotation. Missing customer: 404; revoked or legacy token
+without ciphertext: 409; missing/wrong encryption key: 503. Disabled customers
+can retrieve their URL, but delivery remains disabled.
 
 ### PATCH `/admin/customers/{customer_id}`
 
@@ -119,6 +136,7 @@ corresponding value unchanged. Name length is 1–200. Status is `active`, `disa
 or `revoked`. Example: `{"status":"disabled"}`.
 
 **A supplied policy replaces the complete policy; it is not merged.**
+In production Marzban-authority mode it does not override panel inbound selections.
 `{"policy":{}}` replaces it with defaults. To select only gRPC, send
 `{"policy":{"profiles":["grpc_cdn"]}}`.
 
@@ -131,7 +149,7 @@ upstream account is changed separately.
 
 Body: MappingInput. Both mapping fields are replaced; omitting `backend_id`
 selects its default. Success: 200, CustomerView. Subscription token and URL remain
-unchanged. Unknown backend: 422. Revoked customer: 409.
+unchanged. Unknown backend: 422. Revoked customer or target account already registered: 409.
 
 ### POST `/admin/customers/{customer_id}/rotate-token`
 
@@ -153,11 +171,11 @@ and neither creates tables nor starts the application lifespan.
 |---|---|
 | 401 | Missing/incorrect admin authentication |
 | 404 | Missing customer; invalid/unknown/disabled/revoked subscription; inactive upstream user |
-| 409 | Mutation attempted after terminal revocation |
+| 409 | Revoked identity, canonical mapping conflict or unrecoverable legacy token |
 | 422 | Invalid body/query or unknown backend |
 | 429 | Rate limit exceeded; `Retry-After: 60` |
 | 502 | Upstream fetch/auth/schema/permission failure or total deadline exceeded |
-| 503 | Missing runtime adapter or no compatible subscription profiles |
+| 503 | Missing runtime adapter, no compatible profiles or unavailable token vault |
 | 500 | Unexpected application/database failure; sanitized response |
 
 Upstream 404/403 responses currently become 502, not a local customer-not-found
@@ -177,25 +195,15 @@ Static tokens are not refreshed. Password-login tokens get one refresh/retry.
 Redirects are refused, HTTPS is verified, responses are bounded to 1 MiB and the
 entire login/fetch sequence has a configured deadline. No stale output is served.
 
-The installed OpenAPI was checked as 0.8.4 on October 10, 2026. A guarded isolated
-clone of the production Keyholder database accepted all five Marzban-issued link
-families and rendered both formats without exposing credentials. XHTTP `extra`
-was present upstream and omitted in both outputs. Customer identities, mappings,
-token hashes and statuses survived migration and the final code-only release.
+The installed Marzban OpenAPI was verified as 0.8.4. Guarded private database-clone
+checks on October 11, 2026 rendered all ten selected profiles for both current
+users in both formats. Installed Xray accepted all client configs and each profile
+completed a real certificate-verified HTTPS request, including Titan CDN and IPv6.
+XHTTP `extra` was omitted from both output forms.
 
-All five generated configurations passed installed Xray validation and real HTTPS
-requests through the current Marzban inbounds, including IPv6 and gRPC through
-Cloudflare. The issued gRPC destination stays on public 443; titan/sealord Origin
-Rules use 2053, which Nginx retains alongside 443. Public Python/v2rayNG/browser
-routing checks pass after the scoped Browser Integrity Check exception. These
-results do not certify every customer client version; the owner should refresh
-and import their own subscription without sharing its private URL.
-
-## Activated titan pilot
-
-The deployed release now supports all seven documented policy values. Defaults
-remain the original five. Only the two existing active subscriptions mapped to
-test1 opt into WS/XHTTP TLS CDN. Both formats and all seven installed-Xray client
-configs passed actual verified HTTPS requests, including the new Cloudflare paths.
-Customer IDs, statuses, hashes and mappings were verified preserved. Legacy CDN
-profile names remain rejected. This is not proof of connectivity on every ISP.
+The owner-approved token rotation and duplicate retirement are documented in
+`IDENTITY-AND-AUTHORITY.md`. Future upgrades preserve the replacement URLs.
+The gRPC public destination stays on 443; existing Titan/Sealord origin-port rules
+use 2053, retained by Nginx. New CDN templates use Titan only. VPS validation does
+not guarantee every Iranian ISP or client version; refresh the same URL and test
+on the actual client without sharing its credential.

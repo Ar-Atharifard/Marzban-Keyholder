@@ -6,15 +6,17 @@ all panel, backend, image and VPS changes. DNS/domain ownership and database
 recovery are part of this contract, not properties source code can guarantee alone.
 
 A customer token is generated independently of their Marzban username, UUID,
-password, upstream link or inbound port. Keyholder stores its hash and mapping.
+password, upstream link or inbound port. Keyholder stores its hash, encrypted token and mapping. The server-only vault key
+must be preserved alongside the database.
 Rename, policy changes and remapping retain the hash; pause/resume retains the URL.
 A code update does not regenerate tokens. Moving the same database to another
 instance retains access; migrations must preserve identities and hashes.
 
 Only explicit token rotation changes a customer's URL. Revocation permanently
 disables delivery; deletion/database loss makes hashes unavailable. Do not do any
-of these during normal upgrades. If a URL is lost, its hash cannot reconstruct it;
-recover the customer's saved URL or use a deliberately approved rotation.
+of these during normal upgrades. Lost issued URLs can be retrieved through `keyholder link USER`; hashes alone
+cannot reconstruct them. A wrong/missing vault key must be restored, not silently
+replaced. Legacy entries without ciphertext require an explicit recovery decision.
 
 ## Rendering contract
 
@@ -51,16 +53,20 @@ retain old and new hosts during validation, preserve domain/path and TLS, check 
 formats and actual proxy delivery, then change DNS. Never instruct customers to use
 raw Marzban subscription addresses as a replacement for the stable Keyholder URL.
 
-## Reviewed additive CDN expansion
+## Reviewed changes on October 11, 2026
 
-The activated release adds `ws_tls_cdn` and `xhttp_tls_cdn` with a policy capacity of seven.
-The original five values and defaults, all routes, tokens and existing rendered
-fixtures stay unchanged. Retired `ws_cdn`/`xhttp_cdn` names remain rejected and
-filtered from legacy stored policies; reusing those names would silently reactivate
-old selections. Tests permit only this explicit enum/capacity expansion rather than
-regenerating the original OpenAPI snapshot. Existing customers do not gain the new
-families without a deliberate policy update. Production activation and the two test1 pilot policies are tracked in
-`TRANSPORTS.md`. All existing token hashes and mappings were verified unchanged.
+Ten profile names and capacity ten are the reviewed additive enum expansion.
+Original five defaults, operations and rendered fixtures remain frozen. New token
+retrieval is an additive authenticated endpoint. Registration now atomically
+returns an existing canonical identity, preserving the established 201 response.
+Production follows supported Marzban selections, while legacy policy mode remains.
+
+The owner explicitly approved rotating the two current users' former tokens and
+revoking duplicate subscriptions. Those old URLs were intentionally retired; the
+replacement URLs are the permanent identities to preserve on future upgrades.
+Migration 0003 alone does not rotate hashes. User deletion outside this work was
+confirmed by the owner; two real accounts remain. Ten configurations are selected
+for each without source edits. No new Sealord routes were added.
 
 ## Remaining guarantees to operationalize
 

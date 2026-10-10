@@ -1,24 +1,66 @@
 # Keyholder boundaries
 
-`main.py` owns the FastAPI factory, lifecycle, one pooled HTTPX client, single-process rate limiter, sanitized errors and route-template logging. Startup neither creates tables nor migrates data. Public Swagger, ReDoc and OpenAPI HTTP endpoints are disabled.
+FastAPI's factory in `main.py` owns lifecycle, pooled HTTPX, bounded single-process
+rate limiting, sanitized errors and route-template logging. Startup creates no
+tables and performs no migrations. HTTP Swagger/OpenAPI routes remain disabled.
 
-`api/public.py` resolves a subscription bearer token by SHA-256, checks local status, loads its mapping, fetches links through a trusted adapter, reads the compatible policy and renders a subscription. The mapping and policy are materialized and the database read transaction is
-closed before awaiting the upstream. The fetch has a total deadline. `/health` checks database connectivity only. No GET mutates stored policies or customer identity.
+`api/public.py` authenticates `/s/{token}` using SHA-256, checks local status and
+mapping, closes the DB read transaction before awaiting Marzban, then normalizes
+and renders supported upstream links within a total deadline. Production follows
+Marzban selections and restricts TLS CDN destinations to Titan. `/health` checks
+DB connectivity only. Public GETs never mutate identities, vaults or policies.
 
-`api/admin.py` authenticates an environment bearer key with constant-time digest comparison. It manages local customers, mappings, policies, statuses and token rotation. It never provisions upstream users. Revocation is terminal. Policy PATCH replaces the whole policy; it is not a merge. ECH settings endpoints are retired.
+`api/admin.py` uses one environment bearer key with constant-time digest comparison.
+It atomically registers/retrieves canonical customers, retrieves encrypted tokens,
+manages local status/mappings and explicitly rotates tokens. Uniqueness races
+return the winning identity. Remapping to another canonical account is refused.
+Revocation is terminal; local disable/revoke does not invalidate downloaded proxy
+credentials. The admin API never provisions upstream users.
 
-`models.py` and `db.py` own SQLAlchemy persistence. Customers, backend references and mappings are distinct records. Raw subscription tokens are never stored. `ApplicationData` retains dormant ECH data and migration archives for recovery; there is no runtime settings API. SQLite connection setup enables foreign keys and WAL. Schema and explicit data evolution belong to Alembic.
+`models.py`/`db.py` own customers, mappings, backend references, canonical
+registrations and dormant application archives. SQLite enables foreign keys and
+WAL; schema evolution belongs to Alembic. `vault.py` uses maintained Fernet
+cryptography with a server-only key and verifies decrypted tokens against hashes.
+Missing vault entries/keys fail explicitly instead of rotating links. See the
+[database schema](docs/IDENTITY-AND-AUTHORITY.md).
 
-`policies.py` provides conservative read compatibility for legacy policy JSON: retain supported selections, discard retired fields, and never grant new families implicitly. Both public subscriptions and admin views use it. Invalid stored policies produce an empty selection. API input validation remains strict. Migration `0002` archives original/applied policies and enables all five profiles for existing customers as approved by the owner. It preserves all identities. Read compatibility does not independently expand explicitly stored selections. Downgrade preflights every policy and refuses to overwrite subsequent administrator changes. Historical migrations must not import live defaults.
+`policies.py` retains conservative legacy policy compatibility. In legacy policy
+mode only explicit supported selections are served. Production Marzban-authority
+mode follows current supported upstream links, without duplicating user quota,
+expiry or inbound state. Original five defaults remain frozen. Migration 0002
+archives/applies the old five-profile policy; 0003 adds the vault column and unique
+canonical registry without changing token hashes or deleting historical rows.
+Downgrading 0003 refuses while encrypted tokens exist; restoring pre-rotation data
+would restore old URLs and needs a deliberate full recovery decision.
 
-`backends/base.py` defines the read-only adapter boundary and sanitized errors. `backends/marzban.py` owns panel authentication and response validation. Its only panel operations are login and fetching a mapped user. Redirects and environment proxy settings are disabled; HTTPS verification is enabled. Responses and link counts are bounded. Concurrent expired-token requests share refresh state. Only `marzban-default` is registered. Database backend rows do not enable arbitrary URLs or automatically instantiate new providers.
+`backends/marzban.py` handles bounded authentication/user fetches, refresh after
+401, schema validation and sanitized failures. Public rendering only logs in and
+reads users. Explicit `scripts/admin/worker.py` operations separately use Marzban's
+authenticated management API for provisioning, quota/expiry and inbound selection.
+It preserves existing protocol credentials and never changes proxy core config.
+There is no application background synchronization or stale subscription cache.
 
-`rendering/profiles.py` converts supported VLESS and Shadowsocks links into immutable provider-neutral profiles. It validates addresses, UUIDs, REALITY keys/short IDs, transport metadata and the supported cipher. It selects seven supported profile families, retaining the original five as defaults and requiring explicit opt-in for the new titan TLS CDN WebSocket/XHTTP families, preserves allowed upstream fields and does not synthesize new endpoints. `extra` is never copied into an XHTTP profile. ECH generation is retired.
+`rendering/profiles.py` parses supported VLESS, Shadowsocks, Trojan and VMess links
+into immutable profiles. It validates UUIDs, addresses, REALITY fields, transport
+metadata and ciphers. Ten protocol/transport combinations are supported. New CDN
+families reject literal origin IPs; direct Trojan requires IPv6 REALITY. Standard
+IPv6 Shadowsocks preserves the per-user AEAD cipher. Unsupported links fail closed.
+XHTTP `extra` is never copied; unrelated extra fields are not globally removed.
 
-`rendering/renderers.py` rebuilds base64 URI subscriptions or an Xray client JSON array. JSON RAW is normalized to TCP. XHTTP and gRPC omit incompatible flow; MUX is off. IPv6 URI literals are bracketed. gRPC TLS links represent the external gateway, not the plain loopback inbound. TLS does not independently prove CDN use. Selection uses `format=uri|xray` or the opt-in `Keyholder-Xray` User-Agent marker.
+`rendering/renderers.py` rebuilds base64 URI lines or an Xray JSON config array.
+TLS verification stays on, MUX off, IPv6 literals bracketed and incompatible Vision
+flow omitted from XHTTP/WS/gRPC/Trojan. Formats and original fixtures stay frozen.
+New representations must be opt-in instead of replacing an established format.
 
-`rate_limit.py` owns bounded single-process fixed-window limiting. Each public token has its own SHA-256 bucket. Admin requests use a separate immediate-peer bucket; arbitrary forwarded headers cannot choose identity. Keep one worker until a reviewed distributed-limiting design is needed. No Redis service is required now.
+The SSH CLI separates nonsecret inventory from credential output. Link commands
+require a terminal or an explicitly chosen new private file. The root-owned host
+dispatcher retains secrets inside the API container; backup snapshots and the
+vault-key environment remain on the VPS. No additional management service runs.
 
-`scripts/backup_database.py` is an explicitly invoked operator tool using SQLite's online backup API. It is never run by the application. Tests rehearse backup and restore with synthetic data. Production backup storage and scheduling are separate operator decisions.
-
-The same-VPS deployment uses host networking and loopback ports 18000 for Keyholder and 8000 for Marzban. Public routing, TLS and firewall management remain separate. Preserve the public domain and Keyholder database through panel/VPS migration. Moving Keyholder away from Marzban requires a future secured synchronization design with snapshot freshness, atomic publication and revocation rules. No snapshots, background synchronization, stale serving or multi-node orchestration exist today.
+Same-VPS host networking uses loopback 18000 for Keyholder and 8000 for Marzban.
+Nginx owns public TLS/routing/Java homepages; Cloudflare provides the Titan CDN.
+Admin/health stay private. The browser Marzban panel uses its existing login on
+edge's `/dashboard/`. One worker keeps rate limits coherent without Redis.
+Domain, path, DB and vault-key preservation are required across future VPS moves.
+Multi-node orchestration, billing, queued jobs, failover, per-operator identities,
+off-host scheduled backups and CI deployment are not implemented.

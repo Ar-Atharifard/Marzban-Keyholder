@@ -1,6 +1,6 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
-from typing import cast
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,8 +12,8 @@ from tests.test_api import HEADERS, create
 
 
 def test_registration_is_idempotent_encrypted_and_retrievable(client: TestClient) -> None:
-    first = create(client)
-    second = create(client)
+    first = cast(dict[str, Any], create(client))
+    second = cast(dict[str, Any], create(client))
     assert first == second
     cid = first["customer"]["id"]
     recovered = client.get(f"/admin/customers/{cid}/subscription", headers=HEADERS)
@@ -27,12 +27,15 @@ def test_registration_is_idempotent_encrypted_and_retrievable(client: TestClient
 
 
 def test_concurrent_registration_has_one_identity(client: TestClient) -> None:
-    def register() -> dict:
-        return client.post(
-            "/admin/customers",
-            headers=HEADERS,
-            json={"name": "Concurrent", "upstream_username": "concurrent"},
-        ).json()
+    def register() -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            client.post(
+                "/admin/customers",
+                headers=HEADERS,
+                json={"name": "Concurrent", "upstream_username": "concurrent"},
+            ).json(),
+        )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: register(), range(4)))
@@ -41,7 +44,7 @@ def test_concurrent_registration_has_one_identity(client: TestClient) -> None:
 
 
 def test_rotation_invalidates_old_link_and_remains_retrievable(client: TestClient) -> None:
-    before = create(client)
+    before = cast(dict[str, Any], create(client))
     cid = before["customer"]["id"]
     after = client.post(f"/admin/customers/{cid}/rotate-token", headers=HEADERS).json()
     assert after["customer"]["id"] == cid and after["token"] != before["token"]
@@ -51,7 +54,7 @@ def test_rotation_invalidates_old_link_and_remains_retrievable(client: TestClien
 
 
 def test_wrong_vault_key_never_mints_another_identity(client: TestClient) -> None:
-    first = create(client)
+    first = cast(dict[str, Any], create(client))
     app = cast(FastAPI, client.app)
     app.state.settings.token_encryption_key = SecretStr(
         base64.urlsafe_b64encode(b"y" * 32).decode()
@@ -65,7 +68,7 @@ def test_wrong_vault_key_never_mints_another_identity(client: TestClient) -> Non
 
 
 def test_mapping_cannot_claim_another_registered_user(client: TestClient) -> None:
-    first = create(client)
+    first = cast(dict[str, Any], create(client))
     client.post(
         "/admin/customers", headers=HEADERS, json={"name": "Bob", "upstream_username": "bobby"}
     )

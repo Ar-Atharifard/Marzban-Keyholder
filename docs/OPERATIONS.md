@@ -3,7 +3,7 @@
 This runbook prepares a release. Production operations require explicit approval.
 Run development checks on the workstation with synthetic data, not on the VPS.
 
-## Current baseline (October 10, 2026)
+## Current baseline (October 11, 2026)
 
 The approved Marzban-only cutover has been executed. Hiddify's application,
 services, maintenance jobs and shell hooks have been removed. Recovery archives
@@ -12,25 +12,26 @@ remain private on the VPS. Shared OS packages and network tuning were retained.
 - `/srv/keyholder` still has its original unfinished changes (14 modified and
   two untracked files), branch `master`, HEAD `5236238`. Do not reset or build it.
 - Releases live separately in `/srv/keyholder-releases/<commit>` and use the
-  existing root-only `/srv/keyholder/.env`. The active code release is `bf5487e`; previous compatible release `f692e52`
+  existing root-only `/srv/keyholder/.env`. The active code release is `8e0a5ff`; previous compatible release `26e78c3`
   is retained for rollback, and the initial cutover was `b2fb14c`.
   Check the active container's Compose labels and the release `deployment.json`
   for the current commit and immutable image, rather than trusting a mutable tag.
-- Production SQLite revision is `0002`; defaults retain the five original profiles; the two
-  approved test1 pilot policies now contain all seven. IDs, statuses, token hashes and mappings survived.
+- Production SQLite revision is `0003`. Two canonical users have retrievable encrypted
+  subscriptions; two duplicate rows remain revoked as history. The owner approved
+  token rotation. Marzban owns supported profile selection for every fetch.
 - Keyholder: loopback 18000, one worker, nonroot, read-only root filesystem,
   dropped capabilities, no-new-privileges, and rotated Docker logs.
-- Marzban API: loopback 8000, panel 0.8.4, Xray 26.9.30. Its running container and original five proxy inbounds/users were preserved;
-  the approved core update added two loopback titan CDN inbounds.
+- Marzban API: loopback 8000, panel 0.8.4, Xray 26.9.30. Its running container and original seven proxy inbounds and existing credentials/plans were preserved;
+  the approved expansion adds two Titan loopback profiles and IPv6 Trojan REALITY.
 - Nginx: public 80/443 and retained 2053; gRPC forwards to loopback 12084.
   Only `/s/` is exposed for Keyholder; admin and health routes stay private.
-- All five profiles passed real HTTPS connectivity through temporary Xray
-  clients, including Cloudflare gRPC and both IPv6 profiles.
+- All ten profiles passed real HTTPS connectivity for both current users,
+  including Cloudflare CDN paths and the IPv6 profiles.
 - Cloudflare Full (strict), disabling Bot Fight Mode, and a `/s/`-scoped Browser
   Integrity Check exception were reported by the owner. Python, v2rayNG and
   browser probes now reach Keyholder without a challenge, returning the expected
   JSON 404 for `/s/invalid`, `no-store` and `DYNAMIC`. See `CLOUDFLARE.md`.
-- Latest pilot resource snapshot: 404 MiB available RAM, 145 MiB swap used, 8.8 GiB
+- Latest resource snapshot before final checks: 326 MiB available RAM, 116 MiB swap used, 8.7 GiB
   free disk. These are observations, not guaranteed capacity.
 - Existing failed Cloudzy agent / netfilter-persistence state remains outside
   this cutover. It does not establish whether active firewall rules are absent.
@@ -64,7 +65,7 @@ Offline OpenAPI export is tested with injected fixture environment values: it
 does not create the supplied database or include those secret values. The schema
 describes both subscription media types and sanitized error bodies.
 
-Latest local verification: 89 tests passed, Ruff lint/format, strict mypy and
+Latest local verification: 119 tests passed, Ruff lint/format, strict mypy and
 `git diff --check` passed. A regression reproduces connection-pool exhaustion
 under slow upstream requests and verifies concurrent subscriptions and health
 remain responsive after releasing the read transaction before awaiting Marzban.
@@ -99,7 +100,7 @@ No backup scheduling or off-host upload has been configured.
 The local recovery rehearsal now backs up a legacy fixture before migration, restores to
 a separate file, and verifies all customer, mapping, backend, application-data and
 Alembic rows against the original snapshot. It also verifies the migrated source
-remains at revision 0002. Production snapshots and isolated recovery rehearsals were also completed; see
+remains at the expected migration revision. Production snapshots and isolated recovery rehearsals were also completed; see
 `CUTOVER.md` for the private recovery inventory.
 
 ## Release procedure
@@ -226,7 +227,7 @@ Bearer key in a private API client. Do not put the key in shell history, request
 logs or documentation; the tunnel does not replace API authentication. Close the
 tunnel after use. Never copy the server `.env` to obtain credentials.
 
-## Installed operator tools (October 10, 2026)
+## Installed operator tools (October 11, 2026)
 
 `keyholder` is installed in the workstation's `~/.local/bin` and on Braavos in
 `/usr/local/bin`; server code is root-owned in `/usr/local/lib/keyholder-admin`.
@@ -235,8 +236,8 @@ Read-only installed `status`, `health`, `list` and mapped-user checks passed.
 The tool installation did not rebuild/restart the API or migrate its database.
 
 API/renderer snapshots and a fixed historical synthetic token hash are frozen
-under `tests/contracts` and `tests/test_contracts.py`. Existing API behavior was
-not changed. CI enforcement/private canonical Git hosting remain decisions.
+under `tests/contracts` and `tests/test_contracts.py`. Existing rendering contracts are preserved; canonical registration and
+authenticated URL retrieval are documented reviewed changes. CI enforcement/private canonical Git hosting remain decisions.
 
 Public browser management is now served by the existing HTTPS Nginx gateway at
 `https://edge.javatechpack.ir/dashboard/`, using Marzban login. The owner selected
@@ -244,27 +245,49 @@ this simple model because Cloudflare Zero Trust is unavailable. The previous
 private bookmark/tunnel candidate is inactive. No cloudflared service runs.
 See `MANAGEMENT.md` for TLS/cache requirements, verification and rollback.
 
-## Java homepages and staged titan pilot
+## Homepages, profiles and registry rollout
 
-The apex and titan/sealord/Keyholder/edge homepages now serve the lightweight
-Java-learning site from the existing static mount. Origin and public Cloudflare
-checks returned 200 with the expected content. The panel stays at `/dashboard/`;
-its login/API/static paths and customer `/s/` delivery were preserved. Existing
-sealord routing is unchanged. See `MANAGEMENT.md` for page/config rollback.
+Domain/subdomain roots serve the recovered Java-learning static homepage. Panel,
+subscription and transport routes remain separate. The WS/XHTTP pilot has ended:
+both existing users select all ten configurations in Marzban. The original seven
+inbounds, credentials and quota/expiry/status were compared unchanged when adding
+the three new protocol combinations. New CDN routes/templates are Titan-only.
 
-The WS/XHTTP titan expansion is activated for both existing test1 subscriptions.
-The owner explicitly approved the core restart/container replacement and selected
-both mappings after inspection revealed the ambiguous username. All seven profiles
-passed real verified HTTPS requests through Xray, including both new CDN routes
-through Cloudflare. Both formats passed; no URL was created or rotated. All token
-hashes/identities/mappings and nonpilot policies compare unchanged. Fresh private
-snapshots and rollback records are under `/var/backups/keyholder-pilot`.
-The API and gateway are healthy; Marzban is running; only the three production
-containers remain. Database integrity/FKs pass and revision remains `0002`.
+The runtime account refresh uses Marzban's core-config API, which restarts Xray
+and includes users from its authoritative database. Applying a core config can
+briefly reconnect sessions. Always test real traffic after changing user protocols;
+parser/startup success alone does not prove runtime account registration.
+Marzban and the Docker daemon were not restarted. Nginx was gracefully reloaded
+only after syntax validation; its single-file bind mount must be updated in place
+rather than replacing its inode.
 
-Panel browser HTML/assets and public authenticated login checks pass; the owner
-confirmed the panel loaded. Python-style requests still receive Cloudflare 403
-for this browser-only hostname. Workstation direct connectivity timed out while
-VPS browser checks succeeded: avoid interpreting origin success as proof of
-universal ISP reachability. Use the existing SSH panel command if needed.
-See `TRANSPORTS.md` for the pilot acceptance test and rollback.
+Root-only snapshots before the registry migration are under
+`/var/backups/keyholder-registry`; snapshots after rotation before the final API
+update are under `/var/backups/keyholder-final`. Recovery sets include both DBs,
+core/gateway configuration and the environment containing the vault key.
+`keyholder backup` makes another complete private recovery set. Same-server
+snapshots do not protect against VPS loss. No off-host upload/schedule is active.
+
+The active source/image are recorded in the release's private `deployment.json`;
+operator/docs commits are separately recorded in
+`/usr/local/lib/keyholder-admin/installed.json`. API image identity is
+`sha256:ef8302623098ba1bcf11da3fd259d4df2c4860200efa2ccca89113f170eaaa5d`.
+The dependency update adds maintained cryptography/Fernet and its locked CFFI
+requirements. Build on the workstation using the committed lock. Use
+`deploy/Dockerfile.dependency-update` only with a verified base for dependency
+updates; code-only builds require identical base/candidate manifests.
+
+Rollback an API image without restoring an old DB when the old application is
+schema-compatible. Preserve current hashes and the vault key. Restoring a
+pre-rotation snapshot reactivates old URLs and loses later writes; it requires a
+separate owner-approved full recovery. Removing the new profiles instead should
+restore the saved core through Marzban's API and gateway in place, preserving user
+DBs and current canonical URLs. Test the retained seven profiles after rollback.
+Do not downgrade 0003 with live encrypted entries.
+
+Use `--username` in the guarded validator to verify each current user, both output
+formats and actual verified HTTPS through all selected transports. Keep clone DBs
+and detailed diagnostics root-private and never transfer them to the workstation.
+Iranian ISP reachability/client compatibility still needs customer-side testing.
+Panel browser checks and owner confirmation passed; Cloudflare can reject generic
+Python panel requests. The SSH panel command remains a recovery option.

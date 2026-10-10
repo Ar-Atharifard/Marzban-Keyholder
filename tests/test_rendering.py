@@ -229,4 +229,5 @@ def test_standard_shadowsocks_aead_methods_follow_panel(method: str) -> None:
     outbound = json.loads(XrayRenderer().render([p]))[0]["outbounds"][0]
     assert outbound["settings"]["servers"][0]["method"] == method
     uri = base64.b64decode(URIRenderer().render([p])).decode().strip()
-    assert normalize(uri).method == method
+    restored = normalize(uri)
+    assert restored is not None and restored.method == method

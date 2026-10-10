@@ -1,148 +1,86 @@
-# Titan transport expansion: activated test1 pilot
+# Active transport configurations
 
-The original five live inbounds remain unchanged. The activated release adds two VLESS
-transport combinations; it does not claim seven unrelated wire protocols.
+Both current Marzban users select all ten profiles. The previous WS/XHTTP pilot
+has ended with the owner's approval. Keyholder follows current supported panel
+selections on every fetch, so later user edits require no backend policy/code change.
 
-| Profile | Public route | Private origin | Purpose |
+| Profile | Protocol / transport | Public delivery | Origin |
 |---|---|---|---|
-| Existing TCP REALITY | Existing IPv4:8443 | Existing Xray inbound | Direct REALITY fallback |
-| Existing XHTTP REALITY | Existing IPv4:9443 | Existing Xray inbound | Different direct transport |
-| Existing TCP REALITY IPv6 | Existing IPv6:10443 | Existing Xray inbound | Alternative address family |
-| Existing Shadowsocks IPv6 | Existing IPv6:10444 | Existing Xray inbound | Different protocol and address family |
-| Existing gRPC CDN | Existing titan route | Loopback:12084 | HTTP/2 through Cloudflare |
-| New `ws_tls_cdn` | Titan HTTPS:443, private WS path | Loopback:12085 | WebSocket over HTTP/1.1 |
-| New `xhttp_tls_cdn` | Titan HTTPS:443, private XHTTP path | Loopback:12086 | XHTTP packet-up through CDN |
+| `tcp_reality` | VLESS TCP REALITY | Existing IPv4:8443 | Existing inbound |
+| `xhttp_reality` | VLESS XHTTP REALITY | Existing IPv4:9443 | Existing inbound |
+| `tcp_reality_ipv6` | VLESS TCP REALITY | Existing IPv6:10443 | Existing inbound |
+| `shadowsocks_ipv6` | Shadowsocks standard AEAD | Existing IPv6:10444 | Existing inbound |
+| `grpc_cdn` | VLESS gRPC TLS | Titan / Cloudflare | Loopback:12084 |
+| `ws_tls_cdn` | VLESS WebSocket TLS | Titan / Cloudflare | Loopback:12085 |
+| `xhttp_tls_cdn` | VLESS XHTTP packet-up TLS | Titan / Cloudflare | Loopback:12086 |
+| `trojan_grpc_cdn` | Trojan gRPC TLS | Titan / Cloudflare | Loopback:12087 |
+| `vmess_httpupgrade_cdn` | VMess AEAD HTTPUpgrade TLS | Titan / Cloudflare | Loopback:12088 |
+| `trojan_reality_ipv6` | Trojan TCP REALITY | IPv6-only:11443 | New inbound |
 
-New host templates advertise only `titan.javatechpack.ir`, verified TLS, no MUX,
-and no direct IPv4 endpoint. REALITY remains the explicit IPv4 exception; it does
-not hide the address from a client. No new sealord path or hostname template is
-added. Existing sealord/gRPC routing remains for compatibility. CDN inbounds listen
-only on loopback; their public TLS terminates at the existing Nginx gateway.
+The original seven inbounds remain unchanged. Existing proxy credentials,
+quota/expiry/status were preserved while granting the new families to both users.
+The user-specific Shadowsocks AEAD method is preserved, including ChaCha20-Poly1305;
+no unsupported 2022 variant or compatibility service is introduced.
 
-The owner reports MCI working with gRPC and Shadowsocks, Irancell with gRPC at
-roughly one-second latency, and no working profile on the AUT network. These are
-reports, not independently measured findings. No latency/DPI resistance guarantee
-can be inferred from VPS tests. All CDN routes share titan and Cloudflare, so a
-hostname/provider block can affect them together. No IPv6 service helps a network
-without IPv6 reachability. A genuine additional infrastructure failure domain would
-need another permitted hostname/provider or node, which is outside this change.
+New CDN templates use only `titan.javatechpack.ir`, verified TLS and disabled MUX.
+New gateway routes enforce Titan and return 404 for Sealord. Existing Sealord
+routing remains untouched, but Keyholder's configured CDN allowlist delivers only
+Titan. All CDN Xray listeners bind loopback and rely on Nginx/Cloudflare TLS.
+Direct IPv4 is used only by the preserved REALITY profiles. The third addition
+binds the existing public IPv6 address; there is no new plain direct IPv4 profile.
+REALITY still reveals its direct endpoint to the client; it is not an IP-hiding CDN.
 
-The Xray project documents [WebSocket transport](https://xtls.github.io/en/config/transports/websocket.html)
-and [XHTTP modes/CDN behavior](https://github.com/XTLS/Xray-core/discussions/4113).
-Packet-up is chosen for the first XHTTP CDN pilot, with ordinary HTTP proxying and
-request/response buffering disabled. This uses the existing supported Xray core;
-no unofficial fork, arbitrary fragmentation, ECH or heavyweight service is added.
-Client support must be checked on the actual apps. XHTTP `extra` remains removed
-from issued URI and JSON output.
+## REALITY target
 
-## Activation and validation record
+The new IPv6 Trojan profile uses `www.nlnet.nl:443`. A bounded VPS probe checked its
+certificate/TLS 1.3/H2 and measured roughly 96 ms. Installed Xray's own TLS probe
+confirmed TLS 1.3 and X25519MLKEM768; actual REALITY-to-HTTPS traffic passed in an
+isolated loopback test and through the live IPv6 inbound for both users. Existing
+Microsoft targets remain unchanged to preserve working configurations.
 
-- Candidate files are private in `/opt/braavos-panel/transport-expansion`.
-- The installed Marzban parser, host-settings schema and Xray startup-config test
-  accepted the candidate with all five existing inbounds preserved.
-- The full Nginx candidate passed syntax checks. Paths are generated only on VPS.
-- Both transports passed isolated Xray → Nginx → Xray → verified HTTPS tests
-  with synthetic credentials; temporary processes were removed. This does not
-  establish ISP or Cloudflare delivery.
-- All 89 local tests pass; renderer/API tests retain old fixtures/defaults and reject literal-origin
-  addresses for the new CDN profiles. New names avoid retired-policy collisions.
-- The owner approved activation. Only Keyholder was replaced; Marzban applied
-  the new core configuration through its own API, restarting Xray once. The
-  gateway was gracefully reloaded. The Marzban container and Docker daemon were
-  not restarted.
-- The owner selected both existing active Keyholder subscriptions attached to
-  Marzban test1. The initial ambiguous username lookup was not proof of absence:
-  inspection found two mappings, and the owner explicitly selected both. No new
-  customer or URL was created and no token rotated. Only their policies gained
-  the two new families. All customer IDs, statuses, token hashes and mappings
-  compare unchanged against the snapshot; all other policies compare unchanged.
-- A fresh guarded database-clone rehearsal verified both subscription formats,
-  accepted all seven configs in installed Xray, and completed actual verified
-  HTTPS requests with nonempty response bodies through each profile. Both new
-  CDN transports passed through Cloudflare. Temporary containers were removed.
-- The public panel HTML/assets and real authentication passed through Cloudflare.
-  The owner confirmed the panel loaded. Workstation direct IPv4/IPv6 checks failed
-  while VPS browser-style checks passed, so network-specific reachability is not
-  guaranteed. Cloudflare BIC still rejects Python-style panel requests; this does
-  not affect the validated browser login or Keyholder delivery.
+The [official REALITY documentation](https://xtls.github.io/en/config/transports/reality.html)
+explains target/SNI compatibility and recommends a target in the same ASN when
+possible. NLnet is a validated alternative, not a claim of optimal ASN camouflage
+or superior Iranian-network reachability. Public targets can change; retest before
+switching existing target/SNI pairs. Do not pick a target solely for obscurity.
 
-The code-only image was built locally from the verified deployed base using
-`deploy/Dockerfile.code-update`; both dependency manifests exactly matched. The
-base image ID is `9d90728e7cebccebffe0bec1027bb22102e89f58497fc9e4311b1cd07978726a`
-and candidate image ID is `5bde9df5a0f81e43c33914b3d57ff274f6fb06993ff3690caace9f19879c143c`.
-Image import/renderer checks passed offline. The candidate API also passed a
-private consistent production-database-clone rehearsal: identities/mappings and
-all five existing upstream profiles remained valid in both formats. Compose
-comparison confirmed that only the image changes; volume, environment, networking
-and hardening match the deployed service. Marzban control API read prerequisites
-passed. The image is deployed and healthy. No dependencies were installed on VPS.
+## Validation and operating constraints
 
-Use `KEYHOLDER_ENV_FILE=/srv/keyholder/.env` explicitly with Compose; supplying
-`--env-file` alone does not resolve the service `env_file` selector. Keep all
-configuration output captured privately rather than printing resolved credentials.
+The installed Marzban parser, host schema and Xray startup checks accept all ten
+inbounds. Nginx syntax validation passed before a graceful reload. After applying
+the new core and user permissions, runtime registration was refreshed through
+Marzban's core-config API, which reloads authoritative DB users. Startup acceptance
+alone did not establish live connectivity; actual traffic checks were required.
 
-Fresh consistent Keyholder/Marzban snapshots and original gateway/core/host
-settings are retained root-only under `/var/backups/keyholder-pilot/<activation-time>`.
-For a future rollout, take fresh snapshots and recheck source
-hashes to avoid applying a stale candidate. Use Marzban's authenticated core-config
-API rather than editing the active file behind its cached state. Its installed
-implementation validates, writes the file, includes database users, restarts the
-core and refreshes host templates. Its hosts API updates only the named new tags.
-Adding VLESS inbounds can make them available to existing Marzban VLESS users by
-its exclusion-list semantics; Keyholder still delivers them only to opted-in
-customers. Do not alter users' quotas, passwords, expiry or exclusions incidentally.
+Guarded private DB-clone checks for each current user confirmed URI and Xray output
+contain ten profiles, the installed core accepts each generated client config,
+and all ten complete certificate-verified HTTPS requests with nonempty responses.
+The CDN paths were tested through Cloudflare. Temporary clients/containers were
+removed; no production token was used in printed commands or logs. XHTTP `extra`
+removal passed for URI queries and JSON `xhttpSettings`.
 
-The completed activation followed this order: preserve snapshots; deploy the tested
-backward-compatible API image; apply Marzban candidate and only the two new titan host templates; load
-Nginx routes with a graceful reload; add the two families only to both test1's current
-policies; validate both formats, old token hash and all seven actual HTTPS paths.
-Existing customer identities, mappings and tokens must compare unchanged.
+The original fixtures/defaults and existing API operations remain contract tested.
+VMess uses alterId zero and AEAD; insecure TLS, direct Trojan IPv4 and literal-IP
+CDN endpoints are rejected. These are protocol/transport combinations, not ten
+independent protocols. Sharing gRPC or Cloudflare creates shared failure domains.
 
-Rollback: restore the two policies from `pilot-before-both.json` in the private
-activation backup, restore the gateway file in place and
-reload after syntax validation; restore the original core through the same API
-(which again briefly reconnects users). Restore only host rows belonging to the
-new tags if necessary; never overwrite the live user database merely to remove
-these additions. The previous API image remains compatible with original policies.
-No migration is needed. Both rollout and rollback leave customer URLs intact.
+The owner reports MCI working with gRPC/Shadowsocks, Irancell with slow gRPC, and
+no working profile on AUT. VPS checks cannot guarantee Iranian ISP performance,
+DPI resistance or client-version compatibility. Refresh the same subscriptions
+and test the additions on the actual networks. IPv6 profiles require IPv6 access.
+Titan-only CDN profiles remain vulnerable to a shared hostname/provider block.
+Adding another provider/node requires a separate business/infrastructure decision.
 
-The owner should now refresh both existing test1 subscriptions and try WS/XHTTP on
-MCI, Irancell and AUT. Record app/core version,
-success/failure and approximate latency. This is a short acceptance test, not a
-request for prolonged ISP troubleshooting. Expand only after that result.
+## Recovery
 
-## Next three configurations: prepared, not activated
+Private original core/gateway/host/user snapshots are under
+`/var/backups/keyholder-registry/<timestamp>`; later full recovery sets are under
+`/var/backups/keyholder-final` and `keyholder backup`'s reported directory. Candidate
+transport files are under `/opt/braavos-panel/next-protocols/<timestamp>`.
 
-The owner requested protocol diversity beyond the existing VLESS/Shadowsocks set.
-The local implementation adds:
-
-| Family | Protocol / transport | Exposure |
-|---|---|---|
-| `trojan_grpc_cdn` | Trojan / gRPC / TLS | Titan only, loopback origin 12087 |
-| `vmess_httpupgrade_cdn` | VMess AEAD / HTTPUpgrade / TLS | Titan only, loopback origin 12088 |
-| `trojan_reality_ipv6` | Trojan / TCP / REALITY | IPv6-only origin 11443 |
-
-URI and Xray renderers round-trip these families. VMess uses alterId zero and
-AEAD ciphers; insecure TLS is rejected. Trojan direct IPv4 and literal-IP CDN
-endpoints are rejected. Existing five-profile fixtures/defaults remain frozen.
-These combinations add protocol diversity; sharing gRPC or Cloudflare is still a
-shared transport or provider failure domain, not three wholly independent paths.
-
-Root-private candidates are under `/opt/braavos-panel/next-protocols/<timestamp>`.
-Installed Xray accepted all three appended inbounds without changing existing
-inbounds. Installed Marzban recognizes HTTPUpgrade and exposes Trojan/VMess models.
-Gateway routes, Marzban host templates, account eligibility and real end-to-end
-requests still require validation before activation. No new inbound is active yet.
-
-`www.nlnet.nl` is the candidate target for the new IPv6 REALITY profile only.
-A bounded VPS probe verified its certificate, TLS 1.3 and H2 at about 96 ms.
-Current Microsoft targets remain unchanged. The candidate is not yet proven better
-on Iranian networks; ASN suitability and actual REALITY connectivity still need
-checking. Xray's [REALITY guidance](https://xtls.github.io/en/config/transports/reality.html)
-prefers target certificates from the same ASN and warns about forwarding abuse
-with special targets such as Cloudflare. Popularity alone is not a selection test.
-
-Pending owner choice: pilot the three additions on test1 first, or immediately
-activate them for all eligible users. The previously validated seven are already
-available in all four existing Keyholder policies. Existing client tokens are
-preserved in either choice.
+Remove additions by restoring the saved core via Marzban's authenticated API,
+restoring Nginx in place and reloading only after syntax validation, and restoring
+only affected new host rows. A core reload briefly reconnects proxy sessions.
+Preserve live databases and canonical tokens; never restore a whole user DB merely
+to remove protocol additions. Retest the retained seven paths and subscriptions.
+See [operations](OPERATIONS.md) for image/schema rollback and vault-key custody.

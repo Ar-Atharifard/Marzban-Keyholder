@@ -1,6 +1,9 @@
 import sys
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from scripts.admin.cli import main, parser
 
@@ -24,6 +27,8 @@ def test_management_commands_cover_provisioning_and_panel_selection() -> None:
         ["user-inbounds", "alice", "--protocol", "trojan", "--tags", "TROJAN GRPC CDN TITAN"]
     )
     assert args.tags == ["TROJAN GRPC CDN TITAN"]
+    assert parser().parse_args(["user-usage", "alice"]).username == "alice"
+    assert parser().parse_args(["user-reset-usage", "alice", "--confirm"]).confirmed
     for op in ["users", "inbounds", "sync"]:
         assert parser().parse_args([op]).operation == op
 
@@ -33,6 +38,7 @@ def test_management_commands_cover_provisioning_and_panel_selection() -> None:
     [
         ["link", "alice"],
         ["reconcile"],
+        ["user-reset-usage", "alice"],
         ["user-update", "alice"],
         ["user-create", "alice", "--quota-gb", "-1", "--days", "30", "--protocols", "vless"],
         ["user-create", "alice", "--quota-gb", "nan", "--days", "30", "--protocols", "vless"],
@@ -46,13 +52,15 @@ def test_invalid_or_secret_management_request_never_reaches_server(
         main(command)
 
 
-def test_doctor_verifies_registry_and_vault(client, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_verifies_registry_and_vault(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.admin import worker
     from tests.conftest import ADMIN_KEY
     from tests.test_api import create
 
     create(client)
-    app = client.app
+    app = cast(FastAPI, client.app)
     monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
     monkeypatch.setenv("KEYHOLDER_DATABASE_URL", str(app.state.settings.database_url))
     monkeypatch.setenv(
@@ -65,7 +73,7 @@ def test_doctor_verifies_registry_and_vault(client, monkeypatch: pytest.MonkeyPa
         db.execute(text("CREATE TABLE alembic_version (version_num varchar(32))"))
         db.execute(text("INSERT INTO alembic_version VALUES ('0003')"))
 
-    async def inventory(operation, args):
+    async def inventory(operation: str, args: dict[str, Any]) -> list[dict[str, str]]:
         return [{"username": "alice"}]
 
     monkeypatch.setattr(worker, "panel_operation", inventory)
@@ -73,3 +81,83 @@ def test_doctor_verifies_registry_and_vault(client, monkeypatch: pytest.MonkeyPa
     assert result["healthy"] is True
     assert result["canonical_registrations"] == result["retrievable_links"] == 1
     assert "token" not in str(result) and "subscription_url" not in str(result)
+
+
+@pytest.mark.parametrize("tags", [["NEW"], []])
+def test_panel_selection_preserves_credentials_and_accepts_empty_selection(
+    monkeypatch: pytest.MonkeyPatch, tags: list[str]
+) -> None:
+    import asyncio
+    import copy
+
+    import httpx
+
+    from keyholder.backends.marzban import MarzbanBackend
+    from scripts.admin import worker
+    from tests.conftest import ADMIN_KEY
+
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+    user: dict[str, Any] = {
+        "username": "alice",
+        "status": "active",
+        "data_limit": 123,
+        "expire": 456,
+        "proxies": {"vless": {"id": "synthetic-id"}, "trojan": {"password": "synthetic-password"}},
+        "inbounds": {"vless": ["OLD"], "trojan": ["PREVIOUS"]},
+    }
+    submitted: list[dict[str, Any]] = []
+
+    async def login(self: MarzbanBackend) -> None:
+        self.token = "synthetic"
+
+    async def request(
+        self: MarzbanBackend, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response:
+        if path == "/api/inbounds":
+            return httpx.Response(200, json={"trojan": [{"tag": "NEW"}]})
+        if method == "GET":
+            return httpx.Response(200, json=copy.deepcopy(user))
+        submitted.append(kwargs["json"])
+        return httpx.Response(200, json={**user, **kwargs["json"]})
+
+    monkeypatch.setattr(MarzbanBackend, "login", login)
+    monkeypatch.setattr(MarzbanBackend, "request", request)
+    result = asyncio.run(
+        worker.panel_operation(
+            "user-inbounds",
+            {
+                "username": "alice",
+                "protocol": "trojan",
+                "tags": tags,
+            },
+        )
+    )
+    assert submitted == [
+        {"proxies": user["proxies"], "inbounds": {"vless": ["OLD"], "trojan": tags}}
+    ]
+    assert result["data_limit"] == 123 and result["expire"] == 456
+    assert "synthetic-password" not in str(result)
+
+
+def test_doctor_failed_health_has_nonzero_cli_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.admin import cli
+
+    monkeypatch.setattr(cli, "request", lambda *a, **kw: {"ok": True, "result": {"healthy": False}})
+    assert main(["doctor"]) == 1
+
+
+def test_reset_usage_requires_confirmation_inside_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from keyholder.backends.marzban import MarzbanBackend
+    from scripts.admin import worker
+    from tests.conftest import ADMIN_KEY
+
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+
+    async def login(self: MarzbanBackend) -> None:
+        self.token = "synthetic"
+
+    monkeypatch.setattr(MarzbanBackend, "login", login)
+    with pytest.raises(worker.OperatorError, match="requires --confirm"):
+        asyncio.run(worker.panel_operation("user-reset-usage", {"username": "alice"}))

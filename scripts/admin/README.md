@@ -1,87 +1,92 @@
 # Keyholder operator commands
 
-Run `keyholder --help` from the workstation. These tools use the existing `braavos`
-SSH alias; the administrator key stays inside the API container. No new service,
-Python package installation, public API route or database migration is required.
+The workstation command is `~/.local/bin/keyholder`, linked to this folder's
+`cli.py`. Ensure `~/.local/bin` is on PATH. On Braavos, `/usr/local/bin/keyholder`
+is installed. Run `keyholder --help` or `keyholder COMMAND --help`. Workstation
+commands use SSH alias `braavos`; root on the VPS uses `keyholder --local COMMAND`.
+Secrets remain inside the API container. No manual curl or script invocation is
+needed for routine customer management.
 
 | Task | Command |
 |---|---|
-| Container status | `keyholder status` |
-| Database/API health | `keyholder health` |
-| Open private panel | `keyholder panel` |
-| Show public-panel URL | `keyholder panel-url` |
-| List customers | `keyholder list` |
-| Next page | `keyholder list --offset 100` |
-| Customer details | `keyholder show alice` |
-| Check mapped Marzban profiles | `keyholder check alice` |
-| Attach an existing panel user | `keyholder create alice --name 'Alice'` |
-| Rename | `keyholder rename alice 'Alice Smith'` |
-| Select profiles | `keyholder profiles alice tcp_reality xhttp_reality grpc_cdn tcp_reality_ipv6 shadowsocks_ipv6` |
-| Pause/resume delivery | `keyholder disable alice` / `keyholder enable alice` |
-| Change upstream mapping, retain link | `keyholder remap alice replacement_user` |
-| Private server-side DB snapshot | `keyholder backup` |
-| Permanently revoke | `keyholder revoke alice --confirm` |
-| Replace a compromised/lost token | `keyholder rotate-token alice --confirm` |
+| Container state / database health | `keyholder status` / `keyholder health` |
+| DB integrity, vault and inventory checks | `keyholder doctor` |
+| Panel accounts / available inbound tags | `keyholder users` / `keyholder inbounds` |
+| Canonical customers / revoked history | `keyholder list` / `keyholder list --history` |
+| Customer details / supported live profiles | `keyholder show alice` / `keyholder check alice` |
+| Attach or retrieve an existing panel account | `keyholder create alice --name 'Alice'` |
+| Retrieve the same subscription URL | `keyholder link alice` |
+| Register missing panel accounts, without rotation | `keyholder sync` |
+| Create upstream user and attach subscription | `keyholder user-create alice --quota-gb 20 --days 30 --protocols vless vmess trojan shadowsocks` |
+| Traffic per user/node | `keyholder user-usage alice` |
+| Explicitly reset used traffic | `keyholder user-reset-usage alice --confirm` |
+| Set quota / expiry from now | `keyholder user-update alice --quota-gb 30 --days 30` |
+| Disable / enable upstream proxy access | `keyholder user-update alice --status disabled` / `--status active` |
+| Select inbounds for one protocol | `keyholder user-inbounds alice --protocol trojan --tags 'TROJAN GRPC CDN TITAN' 'TROJAN REALITY IPV6'` |
+| Disable all inbounds for one protocol | `keyholder user-inbounds alice --protocol trojan --tags` |
+| Rename / change mapping, preserving URL | `keyholder rename alice 'Alice Smith'` / `keyholder remap alice replacement_user` |
+| Pause / resume Keyholder delivery only | `keyholder disable alice` / `keyholder enable alice` |
+| Permanently revoke local delivery | `keyholder revoke alice --confirm` |
+| Explicitly replace a compromised token | `keyholder rotate-token alice --confirm` |
+| Private recovery set on VPS | `keyholder backup` |
+| Browser panel / SSH recovery tunnel | `keyholder panel-url` / `keyholder panel` |
 
-A selector is a customer UUID or an unambiguous Marzban username. After remapping,
-use the new username or the same customer ID. Duplicate/ambiguous usernames require
-IDs. Listing never reveals tokens. `--json` is available before the command for
-nonsecret results. On Braavos as root, use `keyholder --local <command>`; `panel`
-forwarding runs on the workstation.
+Selectors are a UUID or an unambiguous non-revoked Marzban username. `--json`
+(before the command) works for nonsecret results. Listing/pagination never reveals
+subscription credentials. The current panel is `https://edge.javatechpack.ir/dashboard/`.
 
-Create the Marzban user with its quota, expiry, VLESS/Shadowsocks permissions and
-selected inbounds first. `create`, `profiles` and `remap` check the active upstream
-user before mutation and refuse missing selected families. This preflight does
-not continuously synchronize accounts or provide an atomic guarantee across two
-independent systems. The create duplicate check is not a database uniqueness
-constraint; concurrent operators should not attach the same username at once.
+`user-create` requires explicit quota and days: zero means unlimited. `user-update
+--days` sets expiry from now, not from the previous expiry; quota changes do not
+reset used traffic. Use `user-reset-usage --confirm` only for a deliberate traffic
+renewal/reset; it does not rotate proxy credentials or the Keyholder URL. User creation uses Marzban's default available inbounds for the
+specified protocols. Use `user-inbounds` to restrict selection. It replaces only
+that protocol's selection, validates tag ownership and preserves existing proxy
+credentials and all other protocol selections. Normal Marzban panel changes are
+reflected on the next subscription fetch. The old `profiles` command is refused
+in production Marzban-authority mode.
 
-## Credentials and confirmations
+## Stable links and secret handling
 
-Creation and rotation show a URL only in an interactive terminal, never with
-`--json` or redirected stdout. Optionally save it deliberately to a new mode-0600
-local file; existing files and symlinks are refused **before** making the request:
+`create` is idempotent in the backend, including concurrent requests. `link` is
+read-only and retrieves the same token. There is no reason to store URLs manually
+for future lookup. Neither changes quota/expiry or recreates an existing panel user.
+Renaming, remapping, panel edits and upgrades keep the URL. Rotation invalidates
+it immediately; revoke is terminal. Link availability remains subject to upstream
+status/quota/expiry and infrastructure availability.
+
+Link-bearing commands require an interactive terminal. `--json` and redirected
+stdout are refused. To deliberately save a link, use `--save-link` with a new
+private file; files/symlinks are refused before mutation and mode 0600 is used:
 
 ```bash
-keyholder create alice --save-link /path/to/private-storage/alice.json
+keyholder link alice --save-link /path/to/private-storage/alice.json
 ```
 
-This explicitly saves a customer credential on your workstation. Use secure
-storage/password-manager import; do not put it in Git, shared folders or logs.
-No administrator key, panel password or database is downloaded. URLs cannot be
-recovered from stored hashes. Keep the issued URL: rotation invalidates old links.
-Never rotate tokens during ordinary upgrades, remapping or infrastructure moves.
+That option explicitly downloads a customer credential. Keep it outside Git/logs.
+Missing legacy vault entries return an error, never an implicit rotation.
+`reconcile --confirm` is the historical bootstrap tool: it rotates unrecoverable
+legacy registrations and revokes duplicate rows. It is not part of daily use.
 
-`disable` pauses delivery but preserves the link for `enable`. `revoke` is terminal.
-Neither changes downloaded proxy credentials or terminates Marzban access; manage
-those accounts separately in the panel. No bulk mutation, deletion, deployment,
-restore, firewall or proxy restart command is provided.
+The API and panel are independent systems. If panel creation succeeds but attaching
+fails, inspect `users` then recover with `create`; do not recreate the upstream user.
+After an uncertain rotation response, use `link` rather than rotating again.
+Disable/revoke in Keyholder does not invalidate downloaded proxy credentials;
+change the account in Marzban when access must stop.
 
-A failed mutation may have succeeded if its response was lost. Inspect `show` /
-`list` before retrying. Do not automatically retry create or token rotation.
-Backups use the SQLite online backup API and integrity checks, stay root-only in
-`/var/backups/keyholder`, and are not off-server recovery. Retention is manual.
+## Backup and scope
 
-## Installation and updates
+`backup` uses SQLite online snapshots, integrity and foreign-key checks. Its
+root-only recovery directory includes both databases, the vault-key environment,
+Xray and Nginx configuration. This is same-server recovery, not an off-host backup.
+Scheduling, encrypted destination and retention still require an owner decision.
 
-The workstation command links to `scripts/admin/cli.py`. Root-owned server files
-live in `/usr/local/lib/keyholder-admin`: `cli.py`, `host.py`, `worker.py`, and the
-existing `backup_database.py` utility. `/usr/local/bin/keyholder` links to `cli.py`.
-The frontend and host dispatcher require Python 3.10+; the worker executes inside
-the existing API Python 3.12 environment. The host dispatcher requires the existing
-administrative SSH account because Docker access and private backups are privileged.
-Do not grant broader Docker/sudo privileges to other users to run this tool.
+The CLI covers customer/API and common panel operations. It deliberately offers
+no user deletion, bulk usage reset, firewall changes, deployment or automatic
+restore. Infrastructure recovery follows the reviewed operations runbook.
 
-Update only these operator files after tests. No running container needs replacement.
-Run read-only `status`, `health`, `list`, and an approved existing user's `check`
-after installation. Do not create customers or rotate tokens as smoke tests.
-
-## New CDN profile pilot
-
-The installed CLI accepts `ws_tls_cdn` and `xhttp_tls_cdn` in explicit `--profiles`
-or `profiles` selections. Defaults remain the original five. The backend/core release is active and all
-seven profiles passed actual HTTPS tests through the deployed routes. The approved initial pilot covers both existing subscriptions mapped to
-`test1`; wider rollout needs Iranian-network results and owner approval.
-Since test1 has two mappings, use a customer ID from `keyholder list` for
-`show`, `check` or policy edits; username selection intentionally refuses ambiguity. Preserve all
-existing selections when adding new ones; `profiles` replaces the selection.
+Root-owned server files are in `/usr/local/lib/keyholder-admin`: `cli.py`, `host.py`,
+`worker.py`, `backup_database.py`. The frontend/host require Python 3.10+; the worker
+runs in the existing API Python 3.12 environment. Docker/private-backup access uses
+the existing administrative SSH account. Updating operator files needs no API
+container replacement. Verify `status`, `doctor`, `users`, `list` and `check` after
+installation; never rotate or create a real account as a smoke test.

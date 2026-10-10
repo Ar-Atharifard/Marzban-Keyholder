@@ -1,8 +1,8 @@
 # Keyholder
 
-Keyholder provides stable customer subscriptions at `/s/{token}` while an operator can change the upstream mapping. It reads Marzban through HTTP; it never provisions panel users, reads the panel database, or changes proxy services.
+Keyholder provides stable customer subscriptions at `/s/{token}` while an operator can change the upstream mapping. Its subscription API reads Marzban through HTTP. Explicit operator CLI commands separately provision or update panel users; the application never reads the panel database or changes proxy services.
 
-This release supports seven configured Marzban profile families:
+This release supports ten configured Marzban profile families:
 
 | Policy profile | Accepted upstream configuration |
 |---|---|
@@ -10,13 +10,20 @@ This release supports seven configured Marzban profile families:
 | `xhttp_reality` | VLESS XHTTP with REALITY |
 | `grpc_cdn` | VLESS gRPC with TLS, supplied through the external gateway |
 | `tcp_reality_ipv6` | IPv6 VLESS TCP or RAW with REALITY |
-| `shadowsocks_ipv6` | IPv6 Shadowsocks `aes-128-gcm` |
-| `ws_tls_cdn` | VLESS WebSocket + TLS on titan, explicit opt-in |
-| `xhttp_tls_cdn` | VLESS XHTTP + TLS on titan, explicit opt-in |
+| `shadowsocks_ipv6` | IPv6 Shadowsocks standard AEAD: AES-128/256-GCM or ChaCha20-Poly1305 |
+| `ws_tls_cdn` | VLESS WebSocket + TLS on titan |
+| `xhttp_tls_cdn` | VLESS XHTTP + TLS on titan |
+| `trojan_grpc_cdn` | Trojan gRPC + TLS on titan |
+| `vmess_httpupgrade_cdn` | VMess AEAD HTTPUpgrade + TLS on titan |
+| `trojan_reality_ipv6` | IPv6 Trojan TCP + REALITY |
 
-The original five Marzban families remain enabled by default. Both existing test1 subscriptions also enable the two new titan CDN families for the approved pilot. Administrators can still select a smaller per-customer policy. No endpoints are synthesized and no new upstream protocols, nodes or plans are provisioned. A TLS gRPC link does not independently prove CDN routing; operators must validate the external gateway/domain setup.
+Production follows each user's current Marzban inbound selections automatically.
+Both current users have all ten profiles; no per-customer Keyholder policy change
+is required after panel edits. Legacy policy mode retains the original five defaults
+for compatibility. Endpoints are never synthesized by the subscription renderer.
+All CDN profiles advertise Titan only; existing Sealord routing is untouched.
 
-ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy names remain retired. The new TLS CDN profiles use distinct opt-in names; old stored policies do not reactivate them. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. A policy with no remaining compatible profiles returns 503 until an administrator chooses a supported profile.
+ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy names remain retired. The new TLS CDN profiles use distinct opt-in names; old stored policies do not reactivate them. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. In legacy policy mode, a policy with no compatible profiles returns 503; production follows supported Marzban selections.
 
 ## Documentation
 
@@ -25,10 +32,11 @@ ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy name
 - [Architecture](ARCHITECTURE.md): application boundaries and limitations.
 - [Operator CLI](scripts/admin/README.md): installed commands for daily management.
 - [Compatibility policy](docs/COMPATIBILITY.md): permanent links and frozen contracts.
+- [Database and authority](docs/IDENTITY-AND-AUTHORITY.md): schema, canonical registrations and vault recovery.
 - [Management](docs/MANAGEMENT.md): public browser panel, Java homepage and daily workflow.
-- [Transport pilot](docs/TRANSPORTS.md): activated titan profiles, validation and rollback.
+- [Transport configuration](docs/TRANSPORTS.md): activated titan profiles, validation and rollback.
 
-The Marzban-only backend is deployed with database revision `0002`. Hiddify has
+The Marzban-only backend is deployed with database revision `0003`. Hiddify has
 been removed. Nginx owns public 80/443 and retains 2053 for existing Cloudflare
 gRPC origin rules. See [cutover and recovery](docs/CUTOVER.md) and
 [Cloudflare settings](docs/CLOUDFLARE.md) for verified outcomes and remaining checks.
@@ -45,7 +53,7 @@ uv sync --frozen --extra dev --python 3.12
 .venv/bin/mypy src tests scripts
 ```
 
-Tests use synthetic data, disposable SQLite databases and mocked HTTP. They do not require production credentials. Migration tests exercise revision 0001 through 0002 and rollback. Backup tests include committed WAL data and identity preservation.
+Tests use synthetic data, disposable SQLite databases and mocked HTTP. They do not require production credentials. Migration tests exercise historical revisions through 0003 and guarded rollback. Backup tests include committed WAL data and identity preservation.
 
 For a separate development instance, copy `.env.example` only if `.env` does not already exist, restrict it to mode 0600 and replace the placeholder admin key with a privately generated value of at least 32 characters. Use a local database and test-only panel credentials. Then run:
 
@@ -64,6 +72,9 @@ All settings use the `KEYHOLDER_` prefix and can be loaded from `.env`.
 
 | Setting | Behavior |
 |---|---|
+| `TOKEN_ENCRYPTION_KEY` | Server-only Fernet key for retrievable stable URLs; back up with DB |
+| `PROFILE_SOURCE` | `marzban` in production; legacy `policy` default retained |
+| `ALLOWED_CDN_HOSTS` | JSON array; production permits only titan.javatechpack.ir |
 | `ADMIN_KEY` | Required bearer key, minimum 32 characters; placeholders rejected |
 | `DATABASE_URL` | SQLite development path; Compose overrides it to `/data/keyholder.db` |
 | `PUBLIC_BASE_URL` | Permanent public base; returned URLs append `/s/{token}` |
@@ -88,7 +99,7 @@ Ingress access/error logging is suppressed to protect subscription tokens.
 
 ## Reliability and security
 
-Only SHA-256 subscription-token hashes are stored. Tokens contain 256 random bits and are returned once at creation/rotation. Mapping and policy changes preserve the URL; rotation invalidates the previous token immediately.
+Tokens contain 256 random bits. SQLite stores their SHA-256 hashes plus authenticated encrypted ciphertext; the encryption key stays outside the database. Registration is atomic and idempotent; `keyholder link USER` retrieves the same URL. There is no token TTL. Mapping and policy changes preserve the URL; rotation invalidates the previous token immediately.
 
 Disable/revoke stops Keyholder delivery only. It does not revoke already-downloaded proxy credentials; administer the upstream account separately. Revocation is terminal.
 
@@ -101,5 +112,5 @@ Request logs contain route templates, method, status and duration, without token
 
 The rate limiter is bounded and in-memory. Run one worker. Subscription buckets use token hashes; admin buckets use the immediate peer, ignoring forwarded headers. This is a local abuse guard, not distributed DDoS protection. SQLite uses foreign keys, WAL and a five-second busy timeout. `/health` checks the DB, not subscriptions.
 
-All seven profiles passed real HTTPS connectivity through installed Xray clients, including the new titan routes through Cloudflare.
-Owner client import/refresh remains the final compatibility check. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. Billing, user provisioning, multi-node orchestration and additional protocols are future work, not features of this release.
+All ten profiles passed real HTTPS connectivity for both current users through installed Xray clients, including the new titan routes through Cloudflare.
+Owner client import/refresh remains the final compatibility check. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. CLI user provisioning is implemented. Billing, multi-node orchestration and further protocol families remain future work.
