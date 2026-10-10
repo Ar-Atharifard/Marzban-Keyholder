@@ -119,6 +119,51 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
         "user-inbounds",
     }:
         return asyncio.run(panel_operation(operation, args))
+    if operation == "doctor":
+        import sqlite3
+
+        from sqlalchemy.engine import make_url
+
+        from keyholder.config import Settings
+        from keyholder.vault import decrypt
+
+        settings = Settings()  # type: ignore[call-arg]
+        filename = make_url(settings.database_url).database
+        with sqlite3.connect("file:" + str(filename) + "?mode=ro", uri=True) as db:
+            integrity = db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+            foreign_keys = not db.execute("PRAGMA foreign_key_check").fetchall()
+            revision = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            rows = db.execute(
+                "SELECT c.token_encrypted,c.token_hash FROM registrations r "
+                "JOIN customers c ON c.id=r.customer_id WHERE c.status!='revoked'"
+            ).fetchall()
+            archived = db.execute(
+                "SELECT count(*) FROM customers WHERE status='revoked'"
+            ).fetchone()[0]
+            canonical = db.execute("SELECT upstream_username FROM registrations").fetchall()
+        retrievable = 0
+        for encrypted, digest in rows:
+            try:
+                decrypt(settings, encrypted, digest)
+                retrievable += 1
+            except ValueError:
+                pass
+        users = asyncio.run(panel_operation("users", {}))
+        names = {u["username"] for u in users}
+        mapped = {r[0] for r in canonical}
+        return {
+            "database_integrity": integrity,
+            "foreign_keys": foreign_keys,
+            "revision": revision,
+            "marzban_users": len(users),
+            "canonical_registrations": len(canonical),
+            "revoked_history": archived,
+            "retrievable_links": retrievable,
+            "profile_source": settings.profile_source,
+            "cdn_hosts": settings.allowed_cdn_hosts,
+            "registration_inventory_matches": names == mapped,
+            "healthy": integrity and foreign_keys and names == mapped and retrievable == len(rows),
+        }
     if operation == "health":
         return api("GET", "/health")
     if operation == "list":
@@ -154,7 +199,7 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
     if operation == "link":
         return api("GET", path + "/subscription")
     if operation == "show":
-        return customer
+        return {**customer, "profile_source": os.getenv("KEYHOLDER_PROFILE_SOURCE", "policy")}
     if operation == "check":
         return {
             "customer_id": customer["id"],

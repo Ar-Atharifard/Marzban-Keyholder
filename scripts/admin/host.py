@@ -66,6 +66,12 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         shutil.copy2(destination, recovery / "keyholder.sqlite3")
         shutil.copy2("/srv/keyholder/.env", recovery / "keyholder.env")
         (recovery / "keyholder.env").chmod(0o600)
+        for backup_source, name in [
+            ("/var/lib/marzban/xray_config.json", "xray.json"),
+            ("/opt/braavos-gateway/nginx/nginx.conf", "nginx.conf"),
+        ]:
+            shutil.copy2(backup_source, recovery / name)
+            (recovery / name).chmod(0o600)
         subprocess.run(
             [
                 sys.executable,

@@ -44,3 +44,32 @@ def test_invalid_or_secret_management_request_never_reaches_server(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
     with pytest.raises(SystemExit):
         main(command)
+
+
+def test_doctor_verifies_registry_and_vault(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.admin import worker
+    from tests.conftest import ADMIN_KEY
+    from tests.test_api import create
+
+    create(client)
+    app = client.app
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+    monkeypatch.setenv("KEYHOLDER_DATABASE_URL", str(app.state.settings.database_url))
+    monkeypatch.setenv(
+        "KEYHOLDER_TOKEN_ENCRYPTION_KEY", app.state.settings.token_encryption_key.get_secret_value()
+    )
+    # Test fixture schema is made directly; install the migration revision metadata only.
+    from sqlalchemy import text
+
+    with app.state.engine.begin() as db:
+        db.execute(text("CREATE TABLE alembic_version (version_num varchar(32))"))
+        db.execute(text("INSERT INTO alembic_version VALUES ('0003')"))
+
+    async def inventory(operation, args):
+        return [{"username": "alice"}]
+
+    monkeypatch.setattr(worker, "panel_operation", inventory)
+    result = worker.execute("doctor", {})
+    assert result["healthy"] is True
+    assert result["canonical_registrations"] == result["retrievable_links"] == 1
+    assert "token" not in str(result) and "subscription_url" not in str(result)

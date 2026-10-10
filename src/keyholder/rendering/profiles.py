@@ -188,7 +188,11 @@ def normalize_shadowsocks(link: str) -> Profile | None:
     if ":" not in decoded:
         decoded = decode_base64(decoded).decode("utf-8")
     method, separator, password = decoded.partition(":")
-    if method != "aes-128-gcm" or not separator or not password:
+    if (
+        method not in {"aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305"}
+        or not separator
+        or not password
+    ):
         return None
     text(password, 1024)
     return Profile(

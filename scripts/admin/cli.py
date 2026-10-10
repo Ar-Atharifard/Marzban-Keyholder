@@ -33,7 +33,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--local", action="store_true", help="Run on the VPS as root")
     p.add_argument("--json", action="store_true", help="JSON output for nonsecret results")
     commands = p.add_subparsers(dest="operation", required=True)
-    for op in ["status", "health", "backup"]:
+    for op in ["status", "health", "doctor", "backup"]:
         commands.add_parser(op)
     for op in ["users", "inbounds", "sync"]:
         commands.add_parser(op)

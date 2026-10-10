@@ -213,3 +213,20 @@ def test_new_cdn_transports_roundtrip_without_changing_old_defaults(
 @pytest.mark.parametrize("address", ["192.0.2.5", "[2001:db8::5]"])
 def test_cdn_profiles_refuse_literal_origin_addresses(transport: str, address: str) -> None:
     assert normalize(f"vless://{UUID}@{address}:443?security=tls&type={transport}") is None
+
+
+@pytest.mark.parametrize("method", ["aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305"])
+def test_standard_shadowsocks_aead_methods_follow_panel(method: str) -> None:
+    import base64
+    import json
+
+    from keyholder.rendering.profiles import normalize
+    from keyholder.rendering.renderers import URIRenderer, XrayRenderer
+
+    userinfo = base64.urlsafe_b64encode((method + ":synthetic-password").encode()).decode()
+    p = normalize("ss://" + userinfo + "@[2001:db8::1]:10444#AEAD")
+    assert p is not None and p.method == method
+    outbound = json.loads(XrayRenderer().render([p]))[0]["outbounds"][0]
+    assert outbound["settings"]["servers"][0]["method"] == method
+    uri = base64.b64decode(URIRenderer().render([p])).decode().strip()
+    assert normalize(uri).method == method
