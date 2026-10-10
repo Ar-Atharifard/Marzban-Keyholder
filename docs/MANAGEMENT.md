@@ -1,127 +1,98 @@
-# Management improvements and protected panel plan
+# Management and browser access
 
-Implemented operator commands are documented in `scripts/admin/README.md`.
-Subscription/API compatibility and release rules are in `COMPATIBILITY.md`.
-The public panel plan below is prepared; it is not active until Cloudflare setup
-and validation are complete. Current SSH panel access remains available.
+## Public Marzban panel
 
-## Public browser access
+The owner selected a simple public panel after reporting Cloudflare Zero Trust
+unavailable. The URL is **https://edge.javatechpack.ir/dashboard/**; `/` redirects
+there. Sign in with the existing Marzban administrator credentials. The login
+screen is public; Marzban authentication protects administrative API operations.
+There is no Access application, extra Nginx password or private bookmark gate.
+The previous Access/tunnel preparation remains inactive and is superseded.
 
-The owner selected `edge.javatechpack.ir`, protected by Cloudflare Access and then
-Marzban login. The administrator email is the identity allowed through Access,
-not necessarily the account used to administer the Cloudflare zone. Keep the exact
-email allowlist in Cloudflare/private operations records, not committed source.
-Protect the entire hostname and all paths, including API/static/WebSocket routes.
-Never attach Access protection to the customer subscription hostname.
+The existing Nginx gateway terminates HTTPS on 443 and forwards the original paths
+to Marzban on `127.0.0.1:8000`. Assets, API paths and WebSocket upgrade headers are
+preserved. Marzban and Keyholder containers need no restart. No panel connector,
+new proxy port, firewall rule or public Keyholder administrator API was added.
+Customer delivery remains exclusively through the existing Keyholder subscription
+URL. Never give customers Marzban's upstream subscription URL instead.
 
-Prefer a small Cloudflare Tunnel connector to a loopback-only panel gateway,
-with **Protect with Access** enabled so the connector validates application JWTs.
-No public origin panel port or VPS firewall change is needed. This prevents origin
-IP bypass, unlike adding only a public Nginx vhost and an edge login screen.
-The existing subscription/gRPC ingress and Marzban proxy ports remain untouched.
+`deploy/panel-public.conf` is the reusable Nginx fragment. Responses use no-store;
+access/error request logging is suppressed to avoid credential leakage. Login
+requests at `/api/admin/token` have a hostname-wide 10/minute limit with a burst
+of 10; excess returns 429. It does not trust forwarded client IPs. This bounded
+single-admin policy also limits legitimate attempts, so wait before retrying after
+429. Use a unique strong Marzban password in a password manager. Cloudflare/browser
+protections may remain enabled for this browser-only hostname.
 
-A complex entry path is an additional privacy gate, not a replacement for Access.
-The prepared loopback Nginx template issues a Secure/HttpOnly/SameSite entry cookie
-only at a random bookmark path. Other panel paths return 404 without the cookie.
-The normal Marzban path/assets are preserved after entry, avoiding brittle upstream
-frontend rewrites or a Marzban restart. Access authenticates before this gate;
-Marzban login is still required afterwards. Keep the bookmark privately; it is not
-published in this repository. A browser's final URL may use `/dashboard/`, but
-knowing that URL alone does not open its login screen.
+Cloudflare requirements:
 
-### Cloudflare prerequisites
+1. Keep `edge.javatechpack.ir` as a proxied DNS record pointing to Braavos.
+2. Use HTTPS origin port 443; no titan/sealord port-2053 override may match edge.
+3. Set a hostname-scoped SSL configuration rule to **Full (strict)** for edge,
+   because the existing Cloudflare Origin CA certificate covers this hostname.
+4. Use a cache bypass rule for the entire edge hostname. Origin no-store is set,
+   but future Cache Everything rules must not override it.
 
-1. Zero Trust → Access → Applications: add a Self-hosted application for the whole
-   `edge.javatechpack.ir` hostname. Add an Allow policy containing only the owner's
-   chosen email(s); no Everyone or Bypass policy. Use an existing identity provider
-   with MFA where available, or email one-time PIN for initial setup.
-2. Create a named Cloudflare Tunnel for the panel. Do not publish its hostname route
-   before the Access application exists. The connector token is a secret: place it
-   directly in a root-only file on Braavos, never in chat, Git or shell history.
-3. Route only `edge.javatechpack.ir` to `http://127.0.0.1:18081`. Enable origin
-   **Protect with Access**, using the correct team and application audience.
-   Remove/replace the existing edge DNS record as required by the tunnel; do not
-   change Keyholder/titan/sealord DNS or their Origin Rules.
-4. Keep BIC/bot protections for this browser hostname as appropriate. Add a cache
-   bypass for the whole panel hostname; do not cache authenticated panel responses.
-5. Validate anonymously, with a disallowed identity, with an allowed identity, and
-   through origin bypass attempts. Missing entry cookie should return 404 even
-   after Access login. Verify login, user management, logout, static assets and
-   WebSockets. Do not use real customer creation as an incidental validation.
+[Cloudflare Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)
+validates the origin certificate. Existing titan/sealord and subscription settings
+must retain their current matching rules.
 
-Affected components: a loopback gateway listener and one bounded connector.
-Nginx graceful reload can add the listener without restarting Marzban. Connector
-failure affects browser administration only; SSH access and customer proxies keep
-working. Rollback removes the tunnel route/stops only its connector, restores the
-previous gateway file **in place**, syntax-checks and reloads Nginx. Keep Access
-protection during rollback, and retain the private bookmark/connector credentials
-securely. No production exposure should precede owner allowlist configuration.
+## Validation and rollback
 
-References: [Publish a protected application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/),
-[Origin JWT validation](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/origin-parameters/#access).
+The complete candidate passed syntax validation in the running Nginx image.
+An isolated bounded test verified dashboard HTML/static assets and unauthenticated
+administrative API rejection. Activation uses an in-place config write and a
+graceful Nginx reload. Direct-origin SNI probes verify panel 200, admin API 401,
+Keyholder invalid-subscription 404 and public Keyholder admin 404.
+Public Cloudflare checks passed for dashboard HTML, all referenced static assets,
+admin API 401 and invalid subscription 404. Browser-style request headers are
+needed for panel assets under existing Cloudflare browser protections; a generic
+Python asset request was blocked. Real administrator login still needs owner
+verification. No real user was created or administrator credential downloaded.
 
-## Prioritized usage and management improvements
+Private rollback backups are under `/opt/braavos-panel/nginx.before-public-*.conf`.
+Restore the chosen file **in place** to `/opt/braavos-gateway/nginx/nginx.conf`,
+run `docker exec braavos-gateway nginx -t`, then
+`docker exec braavos-gateway nginx -s reload`. A rename over this bind-mounted
+file would leave Docker reading the old inode. Rollback removes browser access;
+customer delivery and private SSH access continue. No Marzban restart is needed.
+`/opt/braavos-panel/access.json` now records the standard public URL and activation
+state; previous tunnel configuration is not used and no tunnel token is required.
+
+## Daily workflow
+
+1. Open the public dashboard and create the Marzban user with the intended quota,
+   expiry, VLESS/Shadowsocks permissions and enabled inbounds.
+2. Run `keyholder create USERNAME --name 'Customer name'` from the workstation.
+   The CLI attaches the existing active user and defaults to all five profiles;
+   it refuses missing selected profiles. Save the issued URL privately and give
+   that Keyholder URL to the customer.
+3. Use `keyholder list`, `show`, `check`, `disable`, `enable`, `remap` and `backup`
+   as documented in `scripts/admin/README.md`. `keyholder panel` remains the SSH
+   recovery option; `keyholder panel-url` reports the public dashboard address.
+
+The backend stores only token hashes: keep the original issued URL securely.
+Renaming, changing policies or remapping must preserve it. Explicit rotation or
+revocation invalidates it. See `COMPATIBILITY.md` for frozen contracts and release
+rules. Disabling Keyholder delivery does not terminate already-downloaded Marzban
+proxy access; manage that access in Marzban separately.
+
+## Prioritized improvements
 
 | Priority | Improvement | Reason / decision |
 |---|---|---|
-| Now | Freeze URL/render/API contracts and CLI workflows | Implemented without an API change |
-| Now | Protected browser panel with a private entry bookmark | Owner selected Access; dashboard prerequisites remain |
-| Next | Encrypted off-host scheduled backups + restore drills | Owner must choose storage, retention, acceptable data loss and downtime |
-| Next | Customer link storage in a password manager | Lost raw URLs cannot be recovered from hashes; CLI saving is explicit |
-| Next | Delivery alerts separate from DB health | Catch Marzban, Cloudflare, certificate and protocol failures |
-| Next | Private canonical Git remote + mandatory CI checks | Prevent ad-hoc deployment from a dirty server checkout |
-| Later | Small Keyholder admin web screen behind Access | Create/copy links from a phone without exporting the global API key |
-| Later | Per-operator identity and sanitized mutation audit | Current API has one administrator key, not individual roles |
-| Later | Reconciliation report for missing/disabled upstream users | Read-only report first; no bulk correction without review |
-| Later | Idempotent attach API / uniqueness policy | CLI preflight is not atomic; decide whether shared upstream mappings are allowed |
-| Later | Quota/expiry convenience commands | Marzban remains authoritative; owner must define product policies |
-| Later | Notification/billing/plans/multi-node work | Requires product decisions; not implemented by these tools |
+| Implemented | Frozen API/render/URL contracts and operator CLI | Preserve current compatibility; simplify management |
+| Implemented | Simple HTTPS Marzban dashboard | Owner selected existing Marzban authentication |
+| Next | Encrypted off-host scheduled backups and restore drills | Owner must choose storage, retention, acceptable data loss and downtime |
+| Next | Password-manager storage for customer URLs | Raw URLs cannot be recovered from stored hashes |
+| Next | Delivery alerts beyond database health | Detect Marzban, Cloudflare, certificate and protocol failures |
+| Next | Private canonical Git remote and mandatory CI | Avoid ad-hoc deployment from the dirty server checkout |
+| Later | Small authenticated Keyholder management UI | Phone-friendly link creation without exporting the global API key |
+| Later | Per-operator identity and sanitized mutation audit | Current API uses one administrator key |
+| Later | Read-only reconciliation report | Find missing/disabled upstream users before any correction |
+| Later | Idempotent attach / upstream uniqueness policy | CLI duplicate preflight is not atomic |
+| Later | Quota/expiry convenience commands | Owner defines product policies; Marzban remains authoritative |
+| Later | Billing/plans/multi-node support | Requires separate product decisions |
 
-Avoid building a second full proxy panel. Marzban owns users, credentials, quotas,
-expiry and inbounds. Keyholder owns durable customer subscription identity,
-provider mapping and rendering. Disabling Keyholder delivery does not revoke
-already-downloaded Marzban access. A future web screen should make this distinction
-clear and never silently rotate links, expand permissions or expose the admin key.
-
-## Prepared server files and token placement
-
-`/opt/braavos-panel` is root-only and holds `access.json` (private bookmark/cookie),
-`nginx.fragment.conf`, `nginx.candidate.conf`, a pinned restricted
-`docker-compose.json`, and a nonsecret `deployment.json` record. The private gate
-and actual Nginx candidate were tested. The connector is not started and the live
-gateway configuration is unchanged. Get the private bookmark interactively using
-`keyholder panel-url`; it reports that public access is not active yet.
-
-After creating the Tunnel, copy its connector token from the dashboard and enter it
-**directly on Braavos**, without pasting it into chat or putting it on a command line.
-In an interactive `ssh braavos` session (bash):
-
-```bash
-umask 077
-read -rs -p 'Tunnel token (hidden): ' PANEL_TUNNEL_TOKEN
-printf '\n'
-printf '%s' "$PANEL_TUNNEL_TOKEN" > /opt/braavos-panel/tunnel-token
-unset PANEL_TUNNEL_TOKEN
-chown 65532:65532 /opt/braavos-panel/tunnel-token
-chmod 600 /opt/braavos-panel/tunnel-token
-```
-
-The parent directory stays root-only; the secret file is readable by the connector's
-nonroot UID through a read-only bind mount. Do not run the dashboard's example command
-with its token in argv. No token is embedded in Compose or Git. Never overwrite an
-existing active connector token without reviewing rotation/reconnection behavior.
-
-The prepared connector uses host networking to reach loopback 18081, drops all
-capabilities, uses no-new-privileges/read-only root, caps memory at 128 MiB/processes
-at 128, binds its metrics to loopback 20001, and rotates Docker logs. These are
-ceilings, not reserved RAM. Its image is pinned by registry digest. It opens no
-public listening port; outbound Cloudflare Tunnel connectivity still needs testing.
-
-Before activation, verify the entire hostname Access policy, the correct
-application audience/team under Protect with Access, and the token file. Take a
-fresh gateway backup and regenerate the candidate from the **current** active
-configuration (the prepared candidate may become stale). Syntax-check, write the
-bind-mounted file in place and gracefully reload Nginx. Start only the dedicated
-panel connector after those gates. Validate public authentication and private
-bookmark behavior; record readiness before setting `access.json` active to true.
-Do not activate it simply because the token file exists.
+Avoid a second full proxy panel: Marzban owns users, credentials, quotas, expiry
+and inbounds. Keyholder owns durable customer identity, mappings and rendering.

@@ -237,9 +237,8 @@ API/renderer snapshots and a fixed historical synthetic token hash are frozen
 under `tests/contracts` and `tests/test_contracts.py`. Existing API behavior was
 not changed. CI enforcement/private canonical Git hosting remain decisions.
 
-Protected browser panel preparation is in `/opt/braavos-panel` (root-only).
-Its private entry gate passed isolated tests and the full candidate passed syntax
-checks in the actual Nginx image. A pinned cloudflared 2026.10.0 image and restricted
-Compose file are ready. The connector is **not running**, and Nginx has **not** been
-reloaded to activate the panel listener. Activation waits for the Access policy,
-origin JWT validation and private tunnel token. See `MANAGEMENT.md`.
+Public browser management is now served by the existing HTTPS Nginx gateway at
+`https://edge.javatechpack.ir/dashboard/`, using Marzban login. The owner selected
+this simple model because Cloudflare Zero Trust is unavailable. The previous
+private bookmark/tunnel candidate is inactive. No cloudflared service runs.
+See `MANAGEMENT.md` for TLS/cache requirements, verification and rollback.
