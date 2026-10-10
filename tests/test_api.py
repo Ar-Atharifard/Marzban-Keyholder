@@ -4,16 +4,65 @@ import json
 import logging
 from typing import cast
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from keyholder.backends.base import UpstreamError
 from keyholder.models import Customer
 from tests.conftest import ADMIN_KEY, ALL, KINDS
 
 HEADERS = {"Authorization": f"Bearer {ADMIN_KEY}"}
+
+
+def test_slow_upstream_does_not_exhaust_database_pool(client: TestClient) -> None:
+    token = str(create(client)["token"])
+    app = cast(FastAPI, client.app)
+    engine = create_engine(
+        app.state.engine.url,
+        connect_args={"check_same_thread": False},
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.05,
+    )
+    original_sessions = app.state.sessions
+    app.state.sessions = sessionmaker(engine, expire_on_commit=False)
+
+    async def exercise() -> None:
+        entered = 0
+        release = asyncio.Event()
+        both_entered = asyncio.Event()
+
+        class SlowBackend:
+            async def configurations(self, username: str) -> list[str]:
+                nonlocal entered
+                entered += 1
+                if entered == 2:
+                    both_entered.set()
+                await release.wait()
+                return ALL
+
+        app.state.backends = {"marzban-default": SlowBackend()}
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+            requests = [asyncio.create_task(api.get(f"/s/{token}")) for _ in range(2)]
+            try:
+                await asyncio.wait_for(both_entered.wait(), timeout=1)
+                assert (await api.get("/health")).status_code == 200
+            finally:
+                release.set()
+                responses = await asyncio.gather(*requests)
+            assert [response.status_code for response in responses] == [200, 200]
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        app.state.sessions = original_sessions
+        engine.dispose()
 
 
 def create(client: TestClient) -> dict[str, object]:

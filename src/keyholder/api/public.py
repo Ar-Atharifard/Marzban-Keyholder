@@ -61,10 +61,15 @@ async def subscription(
     adapter = request.app.state.backends.get(customer.mapping.backend_id)
     if adapter is None:
         raise HTTPException(503, "Backend unavailable")
+    username = customer.mapping.upstream_username
+    policy = stored_policy(customer.policy)
+    # Release the read transaction before waiting for Marzban. Otherwise slow
+    # upstream requests hold pool connections and can stall unrelated requests.
+    db.close()
     try:
         async with asyncio.timeout(request.app.state.settings.upstream_timeout):
-            links = await adapter.configurations(customer.mapping.upstream_username)
-        profiles = generate_profiles(links, Policy.model_validate(stored_policy(customer.policy)))
+            links = await adapter.configurations(username)
+        profiles = generate_profiles(links, Policy.model_validate(policy))
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)
     except UpstreamUnavailable:

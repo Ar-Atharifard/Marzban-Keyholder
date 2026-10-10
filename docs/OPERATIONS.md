@@ -5,22 +5,34 @@ Run development checks on the workstation with synthetic data, not on the VPS.
 
 ## Current baseline (October 10, 2026)
 
-- Remote workspace: `/srv/keyholder`, branch `master`, HEAD `5236238`.
-- The workspace has unfinished changes and two untracked files. Do not build it as-is.
-- The running image uses older ECH-capable code. Its renderers differ from HEAD.
-- Production SQLite is at Alembic revision `0001`.
-- Keyholder listens on loopback port 18000, with one worker and host networking.
-- Marzban's API listener was observed on loopback port 8000; OpenAPI reports 0.8.4.
-- The gateway handles gRPC on TLS port 2053 to Marzban loopback port 12084.
-- Root read-only inspection confirms Hiddify owns 80/443. The complete public
-  Keyholder path and external CDN rules remain unverified; see `CUTOVER.md` for
-  the Marzban-only transition candidate and dependencies.
-- Failed units: `cloudzy_agent`, `mtproxy`, `netfilter-persistent`. Diagnose before
-  changing them. A failed persistence service does not prove the active firewall is absent.
-- Follow-up read-only check: Cloudzy agent and netfilter persistence are enabled,
-  loaded and failed with exit status 1. `mtproxy` has no loaded unit file and retains
-  failure status 203. No journal entries were readable by this account; no cause
-  or cleanup action is established by these metadata alone.
+The approved Marzban-only cutover has been executed. Hiddify's application,
+services, maintenance jobs and shell hooks have been removed. Recovery archives
+remain private on the VPS. Shared OS packages and network tuning were retained.
+
+- `/srv/keyholder` still has its original unfinished changes (14 modified and
+  two untracked files), branch `master`, HEAD `5236238`. Do not reset or build it.
+- Releases live separately in `/srv/keyholder-releases/<commit>` and use the
+  existing root-only `/srv/keyholder/.env`. The initial release was `b2fb14c`.
+  Check the active container's Compose labels and the release `deployment.json`
+  for the current commit and immutable image, rather than trusting a mutable tag.
+- Production SQLite revision is `0002`; all existing customer policies enable
+  the five approved profiles. IDs, statuses, token hashes and mappings survived.
+- Keyholder: loopback 18000, one worker, nonroot, read-only root filesystem,
+  dropped capabilities, no-new-privileges, and rotated Docker logs.
+- Marzban API: loopback 8000, panel 0.8.4, Xray 26.9.30. Its running container,
+  proxy inbounds, users and configuration were preserved.
+- Nginx: public 80/443 and retained 2053; gRPC forwards to loopback 12084.
+  Only `/s/` is exposed for Keyholder; admin and health routes stay private.
+- All five profiles passed real HTTPS connectivity through temporary Xray
+  clients, including Cloudflare gRPC and both IPv6 profiles.
+- Cloudflare Full (strict) for Keyholder and disabling Bot Fight Mode were
+  reported by the owner. Browser/v2rayNG routing checks reach Keyholder; a
+  Python-urllib request still receives 403. Identify the service in Cloudflare
+  Events before changing additional protections. See `CLOUDFLARE.md`.
+- Post-removal snapshot: 386 MiB available RAM, 166 MiB swap used, 9.1 GiB free
+  disk. These are observations, not guaranteed capacity.
+- Existing failed Cloudzy agent / netfilter-persistence state remains outside
+  this cutover. It does not establish whether active firewall rules are absent.
 
 ## Local development
 
@@ -51,13 +63,12 @@ Offline OpenAPI export is tested with injected fixture environment values: it
 does not create the supplied database or include those secret values. The schema
 describes both subscription media types and sanitized error bodies.
 
-Latest local verification: 68 tests passed, Ruff lint/format checks passed, strict
-mypy passed for `src`, `tests` and `scripts`, and `git diff --check` passed. Compose
-rendered using `.env.example`; selected-field checks confirmed host networking,
-loopback binding, one worker, no published ports, read-only root, dropped
-capabilities, no-new-privileges, rotated logs and the loopback healthcheck. No image
-was built or deployed. The suite emits an existing Starlette/httpx deprecation
-warning; dependencies remain locked and unchanged.
+Latest local verification: 69 tests passed, Ruff lint/format, strict mypy and
+`git diff --check` passed. A regression reproduces connection-pool exhaustion
+under slow upstream requests and verifies concurrent subscriptions and health
+remain responsive after releasing the read transaction before awaiting Marzban.
+The existing Starlette/httpx deprecation warning remains; dependencies are locked.
+Build images on the workstation, never on the resource-constrained VPS.
 
 ## Database backup and restore rehearsal
 
@@ -75,8 +86,7 @@ Test the utility on synthetic data first:
 
 For production, an authorized operator must run it **on the VPS** with access to
 the database volume and a private backup directory. Do not copy a production
-backup to the development workstation. The utility currently lives in the local
-checkout; transferring or running it remotely is a separate approved step.
+backup to the development workstation. Keep the utility and production snapshots on their respective hosts.
 
 A backup is not verified recovery until an isolated restore proves database
 integrity, Alembic revision, customer IDs, token hashes, mappings, policies, and
@@ -88,7 +98,8 @@ No backup scheduling or off-host upload has been configured.
 The local recovery rehearsal now backs up a legacy fixture before migration, restores to
 a separate file, and verifies all customer, mapping, backend, application-data and
 Alembic rows against the original snapshot. It also verifies the migrated source
-remains at revision 0002. This is a synthetic rehearsal, not a production backup.
+remains at revision 0002. Production snapshots and isolated recovery rehearsals were also completed; see
+`CUTOVER.md` for the private recovery inventory.
 
 ## Release procedure
 
@@ -112,7 +123,7 @@ changing status, IDs, token hashes or mappings. Explicit administrator policies
 remain supported after migration. Upstream permissions are not expanded by
 Keyholder; only existing Marzban configurations are returned.
 
-Nginx will own 80/443; existing Marzban proxy ports remain unchanged. Preserve
+Nginx owns 80/443; existing Marzban proxy ports remain unchanged. Preserve
 2053 during the transition until external origin rules are verified. See
 `CUTOVER.md` for the staged retirement and rollback procedure.
 
@@ -123,8 +134,7 @@ identity preservation, schema agreement and refusal without partial restoration.
 
 Keep migrations and container replacement separate. Avoid rebuilding a dirty
 production workspace. Keep the previous image available locally; never rely on a
-mutable tag as the sole rollback reference. Image pinning and changes to production
-Compose configuration require a separate reviewed operational change.
+mutable tag as the sole rollback reference. Use the release-specific image override; pin images by their recorded SHA256.
 
 ## Validation and rollback
 
@@ -147,11 +157,11 @@ after that snapshot; the owner must approve that recovery action.
 
 ## Remaining infrastructure decisions
 
-- Complete privileged routing inventory and firewall-persistence diagnosis.
+- Diagnose pre-existing firewall-persistence failures in a separately reviewed task.
 - Choose canonical private Git hosting and deployment credentials.
 - Choose backup storage, encryption, retention and recovery objectives.
-- Review gateway/Marzban log rotation and exact image pinning independently.
-- Confirm admin-route exposure and subscription-token redaction across the full ingress.
+- Retain gateway image pinning and rotated logs; review Marzban log retention separately.
+- Resolve the remaining Cloudflare Python-client 403 and confirm owner client refresh.
 - Keep health checks lightweight. Add canary delivery monitoring separately from DB liveness.
 
-No infrastructure configuration changes are performed by this runbook.
+Production changes require the owner's authorized scope; do not broaden a release to unrelated infrastructure.

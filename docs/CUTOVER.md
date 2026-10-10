@@ -1,100 +1,99 @@
-# Marzban-only cutover candidate
+# Executed Marzban-only cutover and recovery
 
-This is preparation, not an executed deployment. The owner approved retiring
-Hiddify customers/links, retaining current proxy ports with Nginx on 80/443, and
-enabling all five current Marzban profiles. Use `braavos` for Hiddify and host administration;
-use `braavos-keyholder` for the Keyholder workspace. Never download production
-databases, certificates, credentials or private subscription paths to development.
+The owner approved complete Hiddify link retirement, all five current Marzban
+profiles, and Nginx ingress. The cutover and Hiddify removal were executed on
+October 10, 2026. Use `ssh braavos` for host administration and
+`ssh braavos-keyholder` for the preserved project workspace. Never copy customer
+credentials, databases, certificates or subscription URLs to the workstation.
 
-## Verified dependencies
+## Current routing and validation
 
-- Hiddify HAProxy owns port 80; Hiddify's `rpxy-l4` owns port 443.
-- The existing `braavos-gateway` already runs Nginx 1.30.5 on TLS port 2053,
-  forwarding an existing private gRPC location to Marzban on loopback 12084.
-- Its certificate is Cloudflare Origin CA, valid through October 2041. This is
-  not evidence of public-browser trust or of correct external CDN configuration.
-- Keyholder is loopback 18000; Marzban's API is loopback 8000.
-- Marzban proxy ports are REALITY TCP 8443, XHTTP 9443, IPv6 TCP 10443 and
-  IPv6 Shadowsocks 10444 (aes-128-gcm). Preserve them during the initial cutover
-  unless the owner explicitly accepts changing downloaded client configurations.
-- Hiddify has enabled services plus watchdog, auto-update, daily and reboot
-  reinstall cron jobs. Stopping its units alone is not a reliable retirement.
-- The gateway has an existing static fallback. Its purpose and all accepted
-  hostnames must be established before replacing that fallback or virtual hosts.
+Nginx owns 80/443 and keeps 2053 because titan/sealord Cloudflare Origin Rules
+still use it. Their existing private gRPC matcher and static fallback were
+preserved. Keyholder's stable hostname and `/s/{token}` path forward to loopback
+18000 without rewriting path or query. Admin and health paths return 404 at
+public ingress. No access logs or token-bearing error logs are produced.
 
-## Candidate ingress
+Marzban remains on its original ports: REALITY TCP 8443, XHTTP 9443, IPv6 TCP
+10443, IPv6 Shadowsocks 10444 (`aes-128-gcm`), and loopback gRPC 12084.
+Its container was not restarted and its configuration/users were not changed.
+All five profiles passed real HTTPS requests via temporary Xray clients. Both
+subscription render formats and XHTTP-only `extra` removal were verified using
+an isolated clone with a synthetic token; the live customer token was unchanged.
 
-Reuse the existing gateway instead of adding another server. The local
-`deploy/nginx.conf.template` proposes ports 80/443 plus transitional 2053,
-unchanged gRPC routing and `/s/` forwarding to Keyholder without rewriting the
-path or query. Admin and health routes remain private. Access logs are disabled;
-error logs are suppressed because they can contain subscription tokens.
+The independent Cloudflare Origin CA certificate covers the apex and wildcard,
+expires in October 2041, and lives outside the removed Hiddify directory. It is
+for Cloudflare origin verification, not direct browser trust. The owner reported
+Keyholder Full (strict) and disabled Bot Fight Mode. Normal client/browser checks
+reach Keyholder with `DYNAMIC` cache status; Python-urllib still receives 403.
+See `CLOUDFLARE.md` for event investigation and explicit cache bypass.
 
-This template is intentionally not deployable: public hostname and existing
-private gRPC matcher are placeholders, and fallback behavior needs review.
-The candidate passed `nginx -t` locally in an isolated, network-disabled Nginx
-1.29.5 container with synthetic hostname, gRPC path and certificate. This does
-not validate production Nginx 1.30.5, public TLS, routing or proxy connectivity.
-The hostname must match the existing stable subscription address, TLS SANs and
-gRPC client SNI. Preserve any additional production virtual hosts after inventory.
-For Cloudflare-proxied use, validate strict origin TLS and the external origin
-port/routing rule. For direct public access, provision a publicly trusted
-certificate and a renewal process independent of Hiddify before switching.
-Do not give Nginx and a REALITY inbound the same IP/port combination.
+## Private recovery inventory
 
-## Gates before production changes
+Recovery directory: `/var/backups/braavos-cutover/20261010T163352Z` (root-only).
+Never download or publish it. Inspect `manifest.json` for artifact hashes.
 
-1. Hiddify links are intentionally retired. Inventory recovery dependencies before
-   stopping services; no Hiddify customer migration is required.
-2. All five current profiles are approved for existing/new Keyholder customers.
-   Confirm migration preserves IDs, token hashes, mappings and customer status.
-3. Verify actual public domain/path ownership, CDN origin port and routing,
-   certificate SANs, all gateway hostnames, and client connectivity. Do not rotate
-   subscription tokens or create test customers incidentally.
-4. Record a reviewed release commit and immutable image identities. Build on the
-   workstation; do not build the dirty production checkout or stress VPS memory.
-5. Create private on-VPS recovery snapshots of Keyholder SQLite (including WAL),
-   Marzban database/configuration, Hiddify database/generated configuration,
-   gateway config/certificates, systemd units and maintenance jobs. Check storage
-   capacity and recovery permissions first. Retain existing images. Record active
-   firewall rules without altering SSH or networking. Rehearse recovery securely.
+- `keyholder.sqlite3`: original revision 0001 snapshot.
+- `keyholder-predeploy.sqlite3`: fresh pre-migration snapshot, checked integrity.
+- `marzban.sqlite3`: consistent online SQLite backup, isolated restore verified.
+- `recovery-files.tar`: old Hiddify installation, generated configuration and
+  environment; old gateway certificates/configuration; dirty Keyholder workspace;
+  Marzban installation; systemd units and cron/configuration hooks.
+- `hiddify-mysql.sql`, `hiddify-mysql-precutover.sql`, `hiddify-mysql.cnf`:
+  logical recovery artifacts. `hiddify-data-cold.tar` contains the final consistent
+  physical data directory after all Hiddify services were stopped.
+- `marzban-runtime-config.tar`: original Xray configuration and binary.
+- `nginx-precutover.conf`, `root-bashrc.before`, `disabled-hiddify-cron/`, and
+  `retirement-file-metadata.json`: old ingress, shell hooks, jobs and symlink targets.
+- `iptables.rules` and `ip6tables.rules`: read-only snapshots; no firewall rules
+  were modified. Network tuning was preserved as `/etc/sysctl.d/braavos.conf`.
 
-## Staged execution after approval
+Images were retained with `braavos-rollback/...` tags and immutable identities.
+Release `deployment.json` records the previous API image. Backups are on this
+same VPS: disk/server loss remains a risk until encrypted off-host storage is
+chosen. Scheduling, retention and recovery objectives need an owner decision.
 
-1. Deploy Keyholder alone using the reviewed release and approved migration.
-   Validate private health/admin access and existing canary subscriptions in both
-   formats. Verify token identity and XHTTP `extra` removal. This stage can briefly
-   interrupt subscription refreshes; existing proxy traffic is independent.
-2. Prepare a rendered Nginx candidate on the VPS without replacing the active
-   file. Preserve the current gRPC matcher and any required hosts/static routes.
-   Syntax-check with the actual running Nginx version and certificate mounts.
-   Validate subscription proxying on an approved unused loopback test listener;
-   an Nginx syntax check alone is not an end-to-end routing test.
-3. In a maintenance window, prevent Hiddify maintenance jobs from restarting it
-   and stop only the inventoried Hiddify services. Preserve their files and data.
-   Confirm 80/443 are free, activate the gateway candidate and reload Nginx.
-   Keep 2053 until its upstream dependency has been checked. Existing Hiddify
-   sessions are interrupted at this point; Marzban proxy ports remain unchanged.
-4. Validate public subscriptions, unchanged URL/token, both render formats,
-   REALITY TCP/XHTTP/IPv6, existing gRPC and Shadowsocks with supported clients.
-   Confirm private admin routes are unreachable and no token-bearing logs are
-   produced. Observe memory, swap, container health and certificate behavior.
-5. Remove Hiddify only after a successful, owner-accepted observation period.
-   Review its uninstall lifecycle first: it must not remove shared certificates,
-   Marzban data, gateway files, Docker, SSH/firewall state or retained backups.
-   Permanent deletion is a distinct irreversible step, not part of the first
-   traffic switch. Do not blindly execute an upstream uninstall script.
+## Removal details
 
-## Rollback
+Hiddify's eight active services were stopped and disabled; all its unit files,
+watchdog/update/reinstall/daily jobs, application directory, CLI links, profile
+hooks, completion, sudoers entry and obsolete parked Nginx configuration were
+removed. The upstream uninstaller was not used because it broadly purges shared
+packages. Shared MariaDB/Redis/Nginx packages remain inactive, allowing recovery;
+they do not constitute a running Hiddify installation. Docker, Marzban, SSH,
+firewall and routing rules were preserved.
 
-Before permanent deletion, restore the previous gateway configuration and reload
-it to release 80/443, then restart the exact previously active Hiddify units and
-restore their prior maintenance-job state. Verify original listeners and customer
-links. Do not restart Docker globally. If Nginx cannot reload, retain the old
-workers/config and restore before further attempts; verify listener ownership.
+## Targeted rollback
 
-Keyholder rollback uses the previous immutable image plus the reviewed database
-recovery procedure in `OPERATIONS.md`. Preserve post-cutover database state before
-restoration; restoring a snapshot loses subsequent administrative changes.
-After deleting Hiddify, restoration requires its private recovery artifacts and
-is slower. That risk must be accepted before deletion.
+A code-only Keyholder rollback recreates only the API with the previous pinned
+image and current database, provided schema compatibility is established. For a
+revision-0001 restore, stop only Keyholder, preserve a fresh copy of current data,
+restore the selected snapshot with UID/GID 10001 and correct permissions, and
+start the original image. Restoring loses subsequent administrative changes;
+obtain owner approval for that data-loss decision.
+
+Gateway hardening rollback removes its production override and recreates only
+`gateway` from its original Compose file, retaining current Marzban-only routing.
+This briefly disconnects gRPC clients, which should reconnect. Other Marzban
+proxy ports are independent. Do not restart Docker globally.
+
+Restoring retired Hiddify requires a separately approved maintenance operation:
+
+1. Restore `nginx-precutover.conf` **in place** in its existing bind-mounted file,
+   syntax-check and reload Nginx, then verify 80/443 are released. If necessary,
+   stop only the gateway. Keep customer impact explicit.
+2. List archive members and selectively extract the old Hiddify application and
+   its units/hooks from `recovery-files.tar`. Never extract the whole archive over
+   current Keyholder, Marzban or gateway configuration.
+3. Restore `hiddify-data-cold.tar` over the recovered Hiddify data directory,
+   preserving ownership. This is the final stopped-state database snapshot;
+   do not overlay it with older live files. Shared OS packages/UIDs were retained.
+4. Restore CLI links from `retirement-file-metadata.json`, shell hooks and the
+   original root bashrc after checking syntax. Keep network tuning values intact.
+5. Reload systemd, enable/start only the originally active Hiddify units, validate
+   listeners and panel, then restore maintenance jobs last.
+
+Hiddify recovery is slower than rollback before removal. No automatic revival
+or recovery job is installed. The generated local Nginx template uses synthetic
+placeholders; never deploy it over the rendered production file without preserving
+private gRPC matching, certificates and fallback behavior.
