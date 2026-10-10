@@ -2,7 +2,8 @@
 
 `main.py` owns the FastAPI factory, lifecycle, one pooled HTTPX client, single-process rate limiter, sanitized errors and route-template logging. Startup neither creates tables nor migrates data. Public Swagger, ReDoc and OpenAPI HTTP endpoints are disabled.
 
-`api/public.py` resolves a subscription bearer token by SHA-256, checks local status, loads its mapping, fetches links through a trusted adapter, reads the compatible policy and renders a subscription. The fetch has a total deadline. `/health` checks database connectivity only. No GET mutates stored policies or customer identity.
+`api/public.py` resolves a subscription bearer token by SHA-256, checks local status, loads its mapping, fetches links through a trusted adapter, reads the compatible policy and renders a subscription. The mapping and policy are materialized and the database read transaction is
+closed before awaiting the upstream. The fetch has a total deadline. `/health` checks database connectivity only. No GET mutates stored policies or customer identity.
 
 `api/admin.py` authenticates an environment bearer key with constant-time digest comparison. It manages local customers, mappings, policies, statuses and token rotation. It never provisions upstream users. Revocation is terminal. Policy PATCH replaces the whole policy; it is not a merge. ECH settings endpoints are retired.
 

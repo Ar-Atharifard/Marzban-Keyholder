@@ -14,7 +14,7 @@ This release targets the five currently configured Marzban families:
 
 All five current Marzban families are enabled by default. Administrators can still select a smaller per-customer policy. No endpoints are synthesized and no new upstream protocols, nodes or plans are provisioned. A TLS gRPC link does not independently prove CDN routing; operators must validate the external gateway/domain setup.
 
-ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in this proposed release. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. A policy with no remaining compatible profiles returns 503 until an administrator chooses a supported profile.
+ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in this deployed release. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. A policy with no remaining compatible profiles returns 503 until an administrator chooses a supported profile.
 
 ## Documentation
 
@@ -22,7 +22,10 @@ ECH generation, its settings API, WebSocket CDN and XHTTP TLS CDN are retired in
 - [Operations](docs/OPERATIONS.md): local workflow, backup, release and recovery gates.
 - [Architecture](ARCHITECTURE.md): application boundaries and limitations.
 
-The running VPS still has the previous ECH-capable image and database revision `0001`. These code changes are local; do not assume this release is deployed.
+The Marzban-only backend is deployed with database revision `0002`. Hiddify has
+been removed. Nginx owns public 80/443 and retains 2053 for existing Cloudflare
+gRPC origin rules. See [cutover and recovery](docs/CUTOVER.md) and
+[Cloudflare settings](docs/CLOUDFLARE.md) for verified outcomes and remaining checks.
 
 ## Local development
 
@@ -72,7 +75,10 @@ Compose uses Linux host networking. Uvicorn must remain explicitly bound to `127
 
 A reviewed deployment builds a known commit, runs separately approved migrations, and replaces **Keyholder only**. Follow the operations runbook before executing it. Do not use `docker compose down -v`, which deletes the database volume. Keep the previous image and a verified private database backup for rollback.
 
-DNS, public TLS, proxy routing and firewall rules are managed separately. The current gateway serves Marzban gRPC; the complete public Keyholder routing path has not yet been verified. Keep admin routes private where practical, and redact subscription paths and query strings throughout ingress logging.
+DNS, public TLS, proxy routing and firewall rules are managed separately. The gateway serves Marzban gRPC and Keyholder `/s/` on the stable hostname.
+Admin and health routes remain private. The gateway uses a pinned image, a
+read-only root, restricted capabilities, resource limits and rotated Docker logs.
+Ingress access/error logging is suppressed to protect subscription tokens.
 
 ## Reliability and security
 
@@ -80,7 +86,8 @@ Only SHA-256 subscription-token hashes are stored. Tokens contain 256 random bit
 
 Disable/revoke stops Keyholder delivery only. It does not revoke already-downloaded proxy credentials; administer the upstream account separately. Revocation is terminal.
 
-Each subscription fetch calls Marzban synchronously. Only active users are accepted. There is no stale cache, snapshot store, background synchronization or automatic failover. The adapter verifies HTTPS, refuses redirects, ignores proxy environment variables, limits decompressed responses to 1 MiB and accepts at most 128 links. Password-login authentication allows one refresh/retry after a 401.
+Each subscription fetch awaits Marzban with a bounded deadline. The database read
+transaction is closed first so slow upstream requests cannot exhaust its pool. Only active users are accepted. There is no stale cache, snapshot store, background synchronization or automatic failover. The adapter verifies HTTPS, refuses redirects, ignores proxy environment variables, limits decompressed responses to 1 MiB and accepts at most 128 links. Password-login authentication allows one refresh/retry after a 401.
 
 Normalization reconstructs recognized fields. XHTTP `extra` is omitted from URI query output and Xray `xhttpSettings`; host/path and supported upstream modes are retained. ECH and upstream MUX settings are not imported; JSON MUX is disabled. Unsupported or malformed links are omitted and empty output fails closed with 503. TCP/RAW flow is preserved when supported; XHTTP and gRPC never receive Vision flow.
 
@@ -88,4 +95,5 @@ Request logs contain route templates, method, status and duration, without token
 
 The rate limiter is bounded and in-memory. Run one worker. Subscription buckets use token hashes; admin buckets use the immediate peer, ignoring forwarded headers. This is a local abuse guard, not distributed DDoS protection. SQLite uses foreign keys, WAL and a five-second busy timeout. `/health` checks the DB, not subscriptions.
 
-Client import and connectivity remain release gates. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. Billing, user provisioning, multi-node orchestration and additional protocols are future work, not features of this release.
+All five profiles passed real HTTPS connectivity through installed Xray clients.
+Owner client import/refresh remains the final compatibility check. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. Billing, user provisioning, multi-node orchestration and additional protocols are future work, not features of this release.

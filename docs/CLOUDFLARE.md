@@ -53,11 +53,26 @@ decision is to disable it, turn it off and retest with a normal subscription
 client as well as a browser. Super Bot Fight Mode has different skip behavior;
 do not confuse these two products.
 
-A Python-urllib probe still receives 403 while v2rayNG and browser probes reach
-Keyholder with the expected 404. Inspect Security → Analytics → Events for hostname Keyholder and
-path `/s/invalid`, recording only the action and service/rule name. Check Browser
-Integrity Check and Security Level settings as additional possible causes; do
-not attribute a 403 to a specific service without event evidence.
+Python-urllib initially received 403, while v2rayNG/browser probes reached
+Keyholder. The owner identified Browser Integrity Check in Cloudflare Events
+and deployed the following scoped Configuration Rule:
+
+1. Rules → Configuration Rules → Create rule: `Keyholder subscription clients`.
+2. Match the expression below.
+3. Set Browser Integrity Check to Off and deploy. Keep unrelated security settings.
+4. Retest `/s/invalid` with a nonbrowser User-Agent; expect Keyholder JSON 404.
+
+```text
+(http.host eq "keyholder.javatechpack.ir" and starts_with(http.request.uri.path, "/s/"))
+```
+
+This removes browser-header heuristics only from subscription delivery. It does
+not bypass token authentication, application rate limiting, or other Cloudflare
+protections. The owner confirmed deployment; Python-urllib, v2rayNG and browser probes now
+return Keyholder JSON 404 for `/s/invalid`, without challenges, with `no-store`
+and Cloudflare `DYNAMIC` cache status.
+
+Reference: [Selective Browser Integrity Check](https://developers.cloudflare.com/waf/tools/browser-integrity-check/).
 
 Reference: [Bot Fight Mode limitation](https://developers.cloudflare.com/bots/get-started/bot-fight-mode/).
 

@@ -12,7 +12,7 @@ remain private on the VPS. Shared OS packages and network tuning were retained.
 - `/srv/keyholder` still has its original unfinished changes (14 modified and
   two untracked files), branch `master`, HEAD `5236238`. Do not reset or build it.
 - Releases live separately in `/srv/keyholder-releases/<commit>` and use the
-  existing root-only `/srv/keyholder/.env`. The initial release was `b2fb14c`.
+  existing root-only `/srv/keyholder/.env`. The active code release is `f692e52`; the initial cutover was `b2fb14c`.
   Check the active container's Compose labels and the release `deployment.json`
   for the current commit and immutable image, rather than trusting a mutable tag.
 - Production SQLite revision is `0002`; all existing customer policies enable
@@ -25,12 +25,12 @@ remain private on the VPS. Shared OS packages and network tuning were retained.
   Only `/s/` is exposed for Keyholder; admin and health routes stay private.
 - All five profiles passed real HTTPS connectivity through temporary Xray
   clients, including Cloudflare gRPC and both IPv6 profiles.
-- Cloudflare Full (strict) for Keyholder and disabling Bot Fight Mode were
-  reported by the owner. Browser/v2rayNG routing checks reach Keyholder; a
-  Python-urllib request still receives 403. Identify the service in Cloudflare
-  Events before changing additional protections. See `CLOUDFLARE.md`.
-- Post-removal snapshot: 386 MiB available RAM, 166 MiB swap used, 9.1 GiB free
-  disk. These are observations, not guaranteed capacity.
+- Cloudflare Full (strict), disabling Bot Fight Mode, and a `/s/`-scoped Browser
+  Integrity Check exception were reported by the owner. Python, v2rayNG and
+  browser probes now reach Keyholder without a challenge, returning the expected
+  JSON 404 for `/s/invalid`, `no-store` and `DYNAMIC`. See `CLOUDFLARE.md`.
+- Final resource snapshot: 410 MiB available RAM, 164 MiB swap used, 8.9 GiB
+  free disk. These are observations, not guaranteed capacity.
 - Existing failed Cloudzy agent / netfilter-persistence state remains outside
   this cutover. It does not establish whether active firewall rules are absent.
 
@@ -161,7 +161,53 @@ after that snapshot; the owner must approve that recovery action.
 - Choose canonical private Git hosting and deployment credentials.
 - Choose backup storage, encryption, retention and recovery objectives.
 - Retain gateway image pinning and rotated logs; review Marzban log retention separately.
-- Resolve the remaining Cloudflare Python-client 403 and confirm owner client refresh.
+- Confirm owner client import/refresh; consider an explicit Cloudflare cache-bypass rule.
 - Keep health checks lightweight. Add canary delivery monitoring separately from DB liveness.
 
 Production changes require the owner's authorized scope; do not broaden a release to unrelated infrastructure.
+
+## Production commands and isolation
+
+Read the active release from the API container's Compose labels:
+
+```bash
+ssh braavos "docker inspect keyholder-api-1 --format '{{index .Config.Labels \"com.docker.compose.project.config_files\"}}'"
+```
+
+An authorized API replacement uses the recorded commit directory and existing
+root-only environment file, without a build or dependency restart:
+
+```bash
+KEYHOLDER_ENV_FILE=/srv/keyholder/.env docker compose -p keyholder \
+  -f /srv/keyholder-releases/<commit>/docker-compose.yml \
+  -f /srv/keyholder-releases/<commit>/production.override.yml \
+  up -d --no-build --no-deps api
+```
+
+The production override pins the image, limits API memory to 256 MiB and processes
+to 128. These are ceilings, not reservations. Keyholder liveness checks the DB only.
+The original workspace is excluded from deployment changes.
+
+Gateway recreation must include its hardening override:
+
+```bash
+docker compose -p braavos-gateway \
+  -f /opt/braavos-gateway/docker-compose.yml \
+  -f /opt/braavos-gateway/production.override.json \
+  up -d --no-build --no-deps gateway
+```
+
+The gateway uses its original image by immutable identity, read-only filesystem,
+only CHOWN/SETUID/SETGID/NET_BIND_SERVICE capabilities, no-new-privileges, bounded
+tmpfs, 128 MiB memory and 128 processes. Its healthcheck runs `nginx -t`; it checks
+configuration/certificate readability rather than public delivery or gRPC.
+Access/error logs are suppressed; Docker logs rotate at 10 MiB × 3.
+Do not recreate from the base Compose file alone unless intentionally rolling
+back hardening. A gateway recreation briefly interrupts gRPC and HTTP requests.
+
+The validator `scripts/validate_server_release.py` refuses an unmarked/live
+volume. It requires an isolated `/data` clone and `.release-rehearsal` marker,
+then uses a synthetic clone token, real mapped upstream reads and the installed
+Xray binary. `--connectivity` launches and cleans up temporary loopback clients;
+it does not provision users or alter server inbounds. Run it only in a bounded,
+nonroot disposable container as done during this cutover.

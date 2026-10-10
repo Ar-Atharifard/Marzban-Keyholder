@@ -24,8 +24,9 @@ an isolated clone with a synthetic token; the live customer token was unchanged.
 The independent Cloudflare Origin CA certificate covers the apex and wildcard,
 expires in October 2041, and lives outside the removed Hiddify directory. It is
 for Cloudflare origin verification, not direct browser trust. The owner reported
-Keyholder Full (strict) and disabled Bot Fight Mode. Normal client/browser checks
-reach Keyholder with `DYNAMIC` cache status; Python-urllib still receives 403.
+Keyholder Full (strict), disabled Bot Fight Mode, and deployed a `/s/`-scoped
+Browser Integrity Check exception. Python-urllib, v2rayNG and browser probes now
+reach Keyholder without challenges, with `no-store` and `DYNAMIC` cache status.
 See `CLOUDFLARE.md` for event investigation and explicit cache bypass.
 
 ## Private recovery inventory
@@ -35,6 +36,8 @@ Never download or publish it. Inspect `manifest.json` for artifact hashes.
 
 - `keyholder.sqlite3`: original revision 0001 snapshot.
 - `keyholder-predeploy.sqlite3`: fresh pre-migration snapshot, checked integrity.
+- `keyholder-prefinal.sqlite3`: revision-0002 snapshot before the final code-only
+  concurrency fix (`f692e52`); identities and policies verified unchanged.
 - `marzban.sqlite3`: consistent online SQLite backup, isolated restore verified.
 - `recovery-files.tar`: old Hiddify installation, generated configuration and
   environment; old gateway certificates/configuration; dirty Keyholder workspace;

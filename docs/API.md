@@ -1,8 +1,9 @@
 # API reference
 
-This documents the proposed release in this checkout. The VPS still runs the
-previous image until an approved deployment. All paths are relative to Keyholder's
-configured public base. Use HTTPS externally. Keep administration private.
+This documents the deployed Marzban-only release. Public `/s/` uses Keyholder's
+configured HTTPS base. Admin and health routes are loopback-only through the
+production gateway; access them through an approved SSH tunnel, never by adding
+a public admin route.
 
 ## Authentication and response conventions
 
@@ -174,14 +175,16 @@ Static tokens are not refreshed. Password-login tokens get one refresh/retry.
 Redirects are refused, HTTPS is verified, responses are bounded to 1 MiB and the
 entire login/fetch sequence has a configured deadline. No stale output is served.
 
-The installed OpenAPI was checked as 0.8.4 on October 10, 2026. User ownership,
-generated live links and each client import/connectivity require separate release
-validation. Protocol parsing does not certify external gateway or CDN behavior.
+The installed OpenAPI was checked as 0.8.4 on October 10, 2026. A guarded isolated
+clone of the production Keyholder database accepted all five Marzban-issued link
+families and rendered both formats without exposing credentials. XHTTP `extra`
+was present upstream and omitted in both outputs. Customer identities, mappings,
+token hashes and statuses survived migration and the final code-only release.
 
-A subsequent bounded read-only check accepted all five Marzban-issued link families
-with the proposed normalizer and rendered both formats on the VPS without exporting
-credentials. XHTTP `extra` was present upstream and omitted in both outputs. The
-issued gRPC link uses public port 443; the gateway origin listens on 2053. Preserve
-the upstream link's destination/port. The external routing between these endpoints
-and live client connectivity remain unverified. The aggregate current-policy check
-found no customers with an empty retained selection.
+All five generated configurations passed installed Xray validation and real HTTPS
+requests through the current Marzban inbounds, including IPv6 and gRPC through
+Cloudflare. The issued gRPC destination stays on public 443; titan/sealord Origin
+Rules use 2053, which Nginx retains alongside 443. Public Python/v2rayNG/browser
+routing checks pass after the scoped Browser Integrity Check exception. These
+results do not certify every customer client version; the owner should refresh
+and import their own subscription without sharing its private URL.
