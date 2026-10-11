@@ -1,6 +1,6 @@
 # Active transport configurations
 
-Both current Marzban users select all ten profiles. The previous WS/XHTTP pilot
+The current Marzban users select all ten profiles. The previous WS/XHTTP pilot
 has ended with the owner's approval. Keyholder follows current supported panel
 selections on every fetch, so later user edits require no backend policy/code change.
 
@@ -84,3 +84,69 @@ only affected new host rows. A core reload briefly reconnects proxy sessions.
 Preserve live databases and canonical tokens; never restore a whole user DB merely
 to remove protocol additions. Retest the retained seven paths and subscriptions.
 See [operations](OPERATIONS.md) for image/schema rollback and vault-key custody.
+
+## Native ECH and MCI IPv4 investigation (October 11, 2026)
+
+An IPv4-only MCI hotspot test reached ordinary external websites but Titan and
+Keyholder HTTPS stalled after TLS. The same Cloudflare edge answered its own
+website; Titan worked with accepted native ECH. All five CDN transports then
+carried verified HTTPS with synthetic runtime-only credentials and native ECH.
+The matching ordinary-TLS gRPC control timed out. Alternate Cloudflare IPs/ports,
+HTTP versions and the tested TCP ClientHello fragmentation patterns did not fix
+ordinary Titan TLS. These observations suggest hostname-sensitive filtering;
+they do not identify ISP internals or prove ECH is the only possible workaround.
+
+Production delivery uses:
+
+```dotenv
+KEYHOLDER_CDN_ECH_CONFIG=cloudflare-ech.com+https://8.8.8.8/dns-query
+```
+
+This is a public ECH lookup, not a secret. Xray obtains current ECH metadata through
+certificate-verified DoH and refreshes it according to DNS TTL. The exact suggested
+`cloudflare-ech.com+udp://1.1.1.1` failed on this connection: public UDP replies did
+not contain usable ECH metadata. Google DoH at its certificate-valid literal IPv4
+address supplied metadata and all five authenticated proxy tests passed. No fixed
+ECH key, background polling service or custom DNS resolver was added. CDN addresses
+remain Titan hostnames; no transient scanned Cloudflare edge IP is hardcoded.
+The resolver is operator-configurable and itself remains a reachability dependency.
+
+Chrome fingerprint is used. TLS certificate checks stay enabled; arbitrary upstream
+ECH, cipher suites, FinalMask and XHTTP `extra` remain excluded. Transport-specific
+ALPN is preserved. No Marzban users, quotas, expiry, inbounds or credentials need to
+change for this delivery setting. Native ECH is applied only to allowlisted TLS
+address/SNI pairs, including VLESS gRPC/WS/XHTTP, Trojan gRPC and VMess HTTPUpgrade.
+
+Refresh the existing subscription using a working connection (for example the
+previously working IPv4/IPv6 APN), then test the saved new profiles on IPv4-only MCI.
+A blocked subscription-download hostname does not become reachable until the client
+uses a working proxy or another route; ECH in delivered profiles does not change the
+application's separate HTTP subscription downloader. No subscription URL replacement
+is needed. Exact installed v2rayNG version must be checked; current upstream source
+imports ECH as `ech` in common URI queries, including standard VMess URIs.
+
+Both IPv4 REALITY profiles pass origin-side authenticated HTTPS, with matching
+key pairs and clocks. IPv4-only MCI failures require separate client/path tests;
+changing the target arbitrarily is not justified by these findings. The three
+IPv6-only profiles inherently require IPv6 connectivity under the owner's policy.
+
+The supplied community guide also recommends client-specific F&F, WARP-in-WARP
+and MASQUE/H2. Its reported carrier/firewall mapping is unverified. The installed
+Xray feature names/configuration must be checked rather than copying client UI
+labels into JSON. In particular zero-length TLS handshake fragmentation is tolerated
+by some servers but rejected by Go TLS/REALITY. WARP/MASQUE introduce external
+providers and different client/account integration; they are not automatically
+Marzban-managed customer inbounds and were not added to this ten-profile deployment.
+Irancell settings need an actual Irancell connection before any global rollout.
+
+Primary references: [Xray native TLS/ECH](https://xtls.github.io/en/config/transports/tls.html),
+[Xray FinalMask](https://xtls.github.io/en/config/transports/finalmask.html),
+[v2rayNG common URI parsing](https://github.com/2dust/v2rayNG/blob/master/V2rayNG/app/src/main/java/com/v2ray/ang/fmt/FmtBase.kt),
+[v2rayNG VMess parsing](https://github.com/2dust/v2rayNG/blob/master/V2rayNG/app/src/main/java/com/v2ray/ang/fmt/VmessFmt.kt).
+
+ECH rollback affects only Keyholder delivery: recreate the API with the previous
+immutable image and restore the previous environment (or clear CDN_ECH_CONFIG for
+a compatible current image). Preserve live DBs and vault key; no migration or
+Marzban/Nginx reload is required. Existing connections are unaffected; API recreation
+briefly interrupts subscription requests. Verify API health, unchanged registration
+rows, both rendered formats and actual CDN traffic after any release or rollback.

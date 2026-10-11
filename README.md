@@ -23,7 +23,7 @@ is required after panel edits. Legacy policy mode retains the original five defa
 for compatibility. Endpoints are never synthesized by the subscription renderer.
 All CDN profiles advertise Titan only; existing Sealord routing is untouched.
 
-ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy names remain retired. The new TLS CDN profiles use distinct opt-in names; old stored policies do not reactivate them. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. In legacy policy mode, a policy with no compatible profiles returns 503; production follows supported Marzban selections.
+Legacy ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` policy names remain retired. The new TLS CDN profiles use distinct opt-in names; old stored policies do not reactivate them. Legacy ECH application data remains stored for recovery. Migration `0002` archives policies and enables the owner-approved five-profile policy for existing customers. It preserves customer IDs, token hashes, mappings and URLs. It enables gRPC, IPv6 TCP REALITY and IPv6 Shadowsocks alongside TCP/XHTTP REALITY. In legacy policy mode, a policy with no compatible profiles returns 503; production follows supported Marzban selections.
 
 ## Documentation
 
@@ -75,6 +75,7 @@ All settings use the `KEYHOLDER_` prefix and can be loaded from `.env`.
 | `TOKEN_ENCRYPTION_KEY` | Server-only Fernet key for retrievable stable URLs; back up with DB |
 | `PROFILE_SOURCE` | `marzban` in production; legacy `policy` default retained |
 | `ALLOWED_CDN_HOSTS` | JSON array; production permits only titan.javatechpack.ir |
+| `CDN_ECH_CONFIG` | Optional native ECH HTTPS DNS lookup; empty disables; only allowlisted CDN address/SNI |
 | `ADMIN_KEY` | Required bearer key, minimum 32 characters; placeholders rejected |
 | `DATABASE_URL` | SQLite development path; Compose overrides it to `/data/keyholder.db` |
 | `PUBLIC_BASE_URL` | Permanent public base; returned URLs append `/s/{token}` |
@@ -106,7 +107,7 @@ Disable/revoke stops Keyholder delivery only. It does not revoke already-downloa
 Each subscription fetch awaits Marzban with a bounded deadline. The database read
 transaction is closed first so slow upstream requests cannot exhaust its pool. Only active users are accepted. There is no stale cache, snapshot store, background synchronization or automatic failover. The adapter verifies HTTPS, refuses redirects, ignores proxy environment variables, limits decompressed responses to 1 MiB and accepts at most 128 links. Password-login authentication allows one refresh/retry after a 401.
 
-Normalization reconstructs recognized fields. XHTTP `extra` is omitted from URI query output and Xray `xhttpSettings`; host/path and supported upstream modes are retained. ECH and upstream MUX settings are not imported; JSON MUX is disabled. Unsupported or malformed links are omitted and empty output fails closed with 503. TCP/RAW flow is preserved when supported; XHTTP, WebSocket and gRPC never receive Vision flow.
+Normalization reconstructs recognized fields. XHTTP `extra` is omitted from URI query output and Xray `xhttpSettings`; host/path and supported upstream modes are retained. Upstream ECH and MUX settings are not imported; operator-configured native CDN ECH is documented in [transports](docs/TRANSPORTS.md). JSON MUX is disabled. Unsupported or malformed links are omitted and empty output fails closed with 503. TCP/RAW flow is preserved when supported; XHTTP, WebSocket and gRPC never receive Vision flow.
 
 Request logs contain route templates, method, status and duration, without tokens, raw paths, query strings, bodies or upstream responses. HTTP library INFO logging is suppressed. Responses use `no-store`. Validation errors do not echo input values.
 

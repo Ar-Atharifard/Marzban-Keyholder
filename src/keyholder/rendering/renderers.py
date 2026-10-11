@@ -32,7 +32,7 @@ class URIRenderer:
                 )
                 links.append(f"ss://{userinfo}@{host}:{p.port}#{name}")
                 continue
-            if p.protocol == "vmess":
+            if p.protocol == "vmess" and not p.ech_config_list:
                 payload = {
                     "v": "2",
                     "ps": p.name,
@@ -58,6 +58,10 @@ class URIRenderer:
                 "sni": p.sni,
                 "fp": p.fingerprint,
             }
+            if p.ech_config_list:
+                q["ech"] = p.ech_config_list
+            if p.protocol == "vmess":
+                q["encryption"] = p.cipher
             if p.security == "reality":
                 q.update(pbk=p.public_key, sid=p.short_id)
                 if p.spider_x:
@@ -66,7 +70,7 @@ class URIRenderer:
                 q["alpn"] = ",".join(p.alpn)
             if p.transport == "xhttp":
                 q.update(host=p.host, path=p.path, mode=p.mode)
-            if p.transport == "ws":
+            if p.transport in {"ws", "httpupgrade"}:
                 q.update(host=p.host, path=p.path)
             if p.transport == "grpc":
                 q.update(serviceName=p.service_name, mode=p.mode)
@@ -123,6 +127,8 @@ class XrayRenderer:
                     stream["realitySettings"] = tls
                 else:
                     tls["allowInsecure"] = False
+                    if p.ech_config_list:
+                        tls["echConfigList"] = p.ech_config_list
                     stream["tlsSettings"] = tls
                 if p.transport == "xhttp":
                     stream["xhttpSettings"] = {"host": p.host, "path": p.path, "mode": p.mode}

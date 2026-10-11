@@ -16,9 +16,40 @@ class Settings(BaseSettings):
     marzban_password: SecretStr = SecretStr("")
     marzban_token: SecretStr = SecretStr("")
     allowed_cdn_hosts: tuple[str, ...] = ()
+    cdn_ech_config: str = ""
     profile_source: Literal["policy", "marzban"] = "policy"
     upstream_timeout: float = Field(default=10, ge=1, le=60)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
+
+    @field_validator("cdn_ech_config")
+    @classmethod
+    def validate_ech_lookup(cls, value: str) -> str:
+        if not value:
+            return value
+        import re
+
+        lookup, separator, resolver = value.partition("+")
+        if separator:
+            if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", lookup):
+                raise ValueError("Invalid ECH lookup domain")
+        else:
+            resolver = lookup
+        u = urlsplit(resolver)
+        if (
+            len(value) > 1024
+            or any(ord(c) <= 32 or ord(c) == 127 for c in value)
+            or u.scheme != "https"
+            or not u.hostname
+            or u.username
+            or u.password
+            or u.path != "/dns-query"
+            or u.query
+            or u.fragment
+        ):
+            raise ValueError("ECH requires a dynamic HTTPS DNS resolver")
+        # Force port parsing here so invalid ports fail at startup, not on clients.
+        _ = u.port
+        return value
 
     @field_validator("token_encryption_key")
     @classmethod

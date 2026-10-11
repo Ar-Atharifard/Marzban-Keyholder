@@ -35,6 +35,7 @@ class Profile:
     password: str = ""
     protocol: str = "vless"
     cipher: str = "auto"
+    ech_config_list: str = ""
 
 
 def decode_base64(value: str) -> bytes:
@@ -211,6 +212,20 @@ def generate_profiles(links: list[str], policy: Policy) -> list[Profile]:
     return [p for link in links if (p := normalize(link)) is not None and p.kind in policy.profiles]
 
 
+def apply_cdn_ech(
+    profiles: list[Profile], config: str, allowed_hosts: tuple[str, ...]
+) -> list[Profile]:
+    """Apply trusted delivery settings only to explicitly permitted CDN TLS hosts."""
+    if not config:
+        return profiles
+    return [
+        replace(p, ech_config_list=config, fingerprint="chrome")
+        if p.security == "tls" and p.address in allowed_hosts and p.sni in allowed_hosts
+        else p
+        for p in profiles
+    ]
+
+
 def normalize_trojan(link: str) -> Profile | None:
     u = urlsplit(link)
     if not u.hostname or not u.port or u.password or u.path not in {"", "/"}:
@@ -241,6 +256,31 @@ def normalize_trojan(link: str) -> Profile | None:
 
 
 def normalize_vmess(link: str) -> Profile | None:
+    if "@" in link and "?" in link:
+        u = urlsplit(link)
+        if not u.hostname or not u.port or u.password or u.path not in {"", "/"}:
+            return None
+        q = parse_qs(u.query, keep_blank_values=True, max_num_fields=64, errors="strict")
+        if any(len(v) != 1 for v in q.values()):
+            return None
+        params = {k: text(v[0]) for k, v in q.items()}
+        if any(params.get(k, "0") != "0" for k in ("insecure", "allowInsecure")):
+            return None
+        # Current v2rayNG imports ECH only through standard URI query parameters.
+        # Upstream ECH is still ignored; only the operator's trusted setting is used.
+        payload = {
+            "add": u.hostname,
+            "port": u.port,
+            "id": unquote(u.username or ""),
+            "net": params.get("type"),
+            "tls": params.get("security"),
+            "ps": unquote(u.fragment),
+            "sni": params.get("sni"),
+            "host": params.get("host", ""),
+            "path": params.get("path", "/"),
+            "scy": params.get("encryption", "auto"),
+        }
+        return normalize_vmess("vmess://" + base64.b64encode(json.dumps(payload).encode()).decode())
     data = json.loads(decode_base64(link[8:]).decode("utf-8"))
     if not isinstance(data, dict):
         return None

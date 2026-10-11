@@ -74,3 +74,17 @@ Encrypted off-host backups and recovery drills are essential: backups on the sam
 VPS do not survive provider/disk loss. Domain renewal/ownership, certificate expiry,
 canary delivery and alerting need deliberate operating procedures. Future CI should
 make contract tests mandatory; local tests alone do not enforce deployment policy.
+
+## Optional native CDN ECH
+
+The owner-approved native ECH setting changes configuration contents, not customer
+URLs, IDs, tokens, endpoints, schemas, credentials or Marzban selections. It is off
+by default; legacy contract fixtures still compare byte-for-byte with it disabled.
+Enabled TLS profiles carry `ech` in URI output and `tlsSettings.echConfigList` in
+Xray JSON, only for allowlisted address AND SNI. REALITY/IPv6 Shadowsocks are unaffected.
+
+VMess uses the standard `vmess://UUID@host:port?...` URI when ECH is enabled:
+current v2rayNG imports ECH from the common query parser, whereas its legacy VMess
+base64 JSON parser ignores ECH. With ECH disabled, legacy VMess output remains
+unchanged. Use a client/core that supports native ECH and standard VMess URI import;
+older clients are not guaranteed compatible. No legacy ECH settings API is restored.

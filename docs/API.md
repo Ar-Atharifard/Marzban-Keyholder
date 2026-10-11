@@ -87,7 +87,7 @@ format values return 422.
 Only active local and upstream customers can receive output. Unsupported/malformed
 links are omitted. Empty compatible output returns 503. XHTTP `extra` is omitted
 from the URI query and JSON `xhttpSettings`, while allowed host/path/mode fields
-are retained. ECH is not generated. This processing never rewrites panel inbounds.
+are retained. Legacy ECH is not generated. Optional trusted native CDN ECH is added by delivery configuration (see TRANSPORTS.md); upstream ECH remains ignored. This processing never rewrites panel inbounds.
 
 ### POST `/admin/customers`
 
