@@ -3,7 +3,38 @@
 This runbook prepares a release. Production operations require explicit approval.
 Run development checks on the workstation with synthetic data, not on the VPS.
 
-## Current baseline (October 11, 2026)
+## Current baseline (October 12, 2026)
+
+Active API code release: `f19e6e3`; immutable image
+`sha256:f082c912e3798ccb938d7c6fe9d16ebaa236c231c11c2dfb5a570ab60baf39ac`.
+Previous compatible API release `35180a5` is retained. SQLite remains at `0003`;
+five current users have canonical registrations. No token rotation or migration
+was performed in this rollout. Marzban selections remain authoritative.
+
+Twelve inbounds render nineteen configurations: seven Titan CDN inbounds each
+have DNS/ECH and IPv6-without-ECH templates, plus five direct profiles. Two new
+loopback stream-up inbounds use ports 12089/12090. All nineteen configurations
+passed VPS HTTPS checks; seven ECH CDN inbounds passed current Irancell IPv4
+HTTPS checks, including 3 MiB uploads through both additions. Existing IPv4
+REALITY paths failed on that network; ordinary non-ECH subscription downloads
+also timed out. Earlier public HTTPS success is historical, not a current ISP guarantee.
+
+Domestic blocking uses separate `geoip:private`, `geosite:category-ir`/`.ir`, and
+`geoip:ir` rules with `IPIfNonMatch` and the blackhole outbound. Domain, literal
+Iranian IP, and hostname resolving to an Iranian IP checks passed.
+
+Transport rollback materials are private under
+`/var/lib/marzban/streaming-recovery-20261012`; the pre-change backup is
+`/var/backups/keyholder/20261011T214219.848765Z`. Restore previous panel selections,
+core and hosts via Marzban API, then restore Nginx in place and syntax-check before
+its graceful reload. Core rollback briefly restarts Xray; API image rollback
+recreates only Keyholder. Preserve the database and vault key.
+
+The owner confirmed Full (strict), HTTP/2, HTTP/3, HTTP/2 to Origin, gRPC and
+WebSockets, and deployed the Titan plus Keyholder `/s/` Cache Bypass rule.
+See `PERFORMANCE-AND-RELIABILITY.md` for measured limitations and next decisions.
+
+## Historical cutover baseline (October 11, 2026)
 
 The approved Marzban-only cutover has been executed. Hiddify's application,
 services, maintenance jobs and shell hooks have been removed. Recovery archives

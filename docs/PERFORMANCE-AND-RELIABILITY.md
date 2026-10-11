@@ -16,7 +16,7 @@
   proxy-session timeouts. Subscription and panel access logs are disabled to avoid
   recording bearer URLs. Keyholder returns `Cache-Control: no-store`.
 - The owner reports Cloudflare Full (strict), HTTP/2, HTTP/3, HTTP/2 to Origin,
-  WebSockets and gRPC enabled, with no Cache Rules. These dashboard values were
+  WebSockets and gRPC enabled, and subsequently confirmed deploying the scoped Cache Bypass rule below. These dashboard values were
   reported by the owner, not inspected through a Cloudflare API credential.
 - All five original ECH CDN profiles passed a clean test from current Irancell
   IPv4. Ordinary Titan/Keyholder HTTPS requests timed out. Existing IPv4 REALITY,
@@ -27,7 +27,7 @@
 
 ### 1. Preserve non-browser delivery in Cloudflare
 
-Add an explicit Cache Rule with this expression and **Cache eligibility: Bypass**:
+The owner confirmed deploying this Cache Rule with **Cache eligibility: Bypass**:
 
 ```text
 (http.host eq "titan.javatechpack.ir") or
@@ -35,8 +35,7 @@ Add an explicit Cache Rule with this expression and **Cache eligibility: Bypass*
 ```
 
 This guards proxy traffic and bearer subscriptions against future cache changes.
-Apex/other decoy assets can retain normal caching. No such rule was created by the
-agent; Cloudflare dashboard access is required. Validate an authorized canary
+Apex/other decoy assets can retain normal caching. The rule was deployed by the owner in the dashboard; the agent did not use Cloudflare credentials. Validate an authorized canary
 subscription and every transport after the rule. Rollback disables only this rule;
 no origin or customer URL change is involved.
 

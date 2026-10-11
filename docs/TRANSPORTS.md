@@ -1,6 +1,6 @@
 # Active transport configurations
 
-The current Marzban users select all ten profiles. The previous WS/XHTTP pilot
+The five current Marzban users select twelve inbounds across eleven profile families, rendering nineteen configurations. The previous WS/XHTTP pilot
 has ended with the owner's approval. Keyholder follows current supported panel
 selections on every fetch, so later user edits require no backend policy/code change.
 
@@ -15,7 +15,9 @@ selections on every fetch, so later user edits require no backend policy/code ch
 | `xhttp_tls_cdn` | VLESS XHTTP packet-up TLS | Titan / Cloudflare | Loopback:12086 |
 | `trojan_grpc_cdn` | Trojan gRPC TLS | Titan / Cloudflare | Loopback:12087 |
 | `vmess_httpupgrade_cdn` | VMess AEAD HTTPUpgrade TLS | Titan / Cloudflare | Loopback:12088 |
-| `trojan_reality_ipv6` | Trojan TCP REALITY | IPv6-only:11443 | New inbound |
+| `trojan_reality_ipv6` | Trojan TCP REALITY | IPv6-only:11443 | Existing inbound |
+| `xhttp_tls_cdn` | VLESS XHTTP stream-up TLS | Titan / Cloudflare | Loopback:12089 |
+| `trojan_xhttp_cdn` | Trojan XHTTP stream-up TLS | Titan / Cloudflare | Loopback:12090 |
 
 The original seven inbounds remain unchanged. Existing proxy credentials,
 quota/expiry/status were preserved while granting the new families to both users.
@@ -44,7 +46,7 @@ possible. NLnet is a validated alternative, not a claim of optimal ASN camouflag
 or superior Iranian-network reachability. Public targets can change; retest before
 switching existing target/SNI pairs. Do not pick a target solely for obscurity.
 
-## Validation and operating constraints
+## Historical initial expansion validation and operating constraints
 
 The installed Marzban parser, host schema and Xray startup checks accept all ten
 inbounds. Nginx syntax validation passed before a graceful reload. After applying
@@ -291,3 +293,18 @@ represented as Marzban-accounted customer profiles.
 
 Primary preset source:
 https://github.com/patterniha/PattNG/blob/my-releases/V2rayNG/app/src/main/res/values/arrays.xml
+
+Completed rollout: five current users retain their original customer IDs, tokens,
+mappings, credentials, quota and expiry. Each canonical URL renders nineteen
+configurations. Both production-rendered additions passed HTTPS on Irancell IPv4
+and a bounded 3 MiB upload (single observations: 1.33 seconds VLESS, 0.90 seconds
+Trojan). All nineteen passed VPS HTTPS checks. Temporary runtime accounts were
+confirmed absent, and the private rehearsal clone was removed. Exact F&F also
+failed using the DNS-selected Titan edge; it remains diagnostic-only.
+
+Recovery materials: `/var/lib/marzban/streaming-recovery-20261012` and the private
+pre-change backup `20261011T214219.848765Z`. API rollback uses release `35180a5`;
+transport rollback restores previous user selections, core and host templates,
+then Nginx in place with syntax validation and graceful reload. Applying core
+configuration briefly restarts Xray, while the API release replaces only its own
+container. No production migration or subscription rotation was required.

@@ -2,7 +2,7 @@
 
 Keyholder provides stable customer subscriptions at `/s/{token}` while an operator can change the upstream mapping. Its subscription API reads Marzban through HTTP. Explicit operator CLI commands separately provision or update panel users; the application never reads the panel database or changes proxy services.
 
-This release supports ten configured Marzban profile families:
+This release supports eleven configured Marzban profile families across twelve inbounds:
 
 | Policy profile | Accepted upstream configuration |
 |---|---|
@@ -16,9 +16,10 @@ This release supports ten configured Marzban profile families:
 | `trojan_grpc_cdn` | Trojan gRPC + TLS on titan |
 | `vmess_httpupgrade_cdn` | VMess AEAD HTTPUpgrade + TLS on titan |
 | `trojan_reality_ipv6` | IPv6 Trojan TCP + REALITY |
+| `trojan_xhttp_cdn` | Trojan XHTTP stream-up + TLS on Titan |
 
 Production follows each user's current Marzban inbound selections automatically.
-Both current users have all ten profiles; no per-customer Keyholder policy change
+The five current users have nineteen rendered configurations; no per-customer Keyholder policy change
 is required after panel edits. Legacy policy mode retains the original five defaults
 for compatibility. Endpoints are never synthesized by the subscription renderer.
 All CDN profiles advertise Titan only; existing Sealord routing is untouched.
@@ -35,6 +36,7 @@ Legacy ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` poli
 - [Database and authority](docs/IDENTITY-AND-AUTHORITY.md): schema, canonical registrations and vault recovery.
 - [Management](docs/MANAGEMENT.md): public browser panel, Java homepage and daily workflow.
 - [Transport configuration](docs/TRANSPORTS.md): activated titan profiles, validation and rollback.
+- [Performance and reliability](docs/PERFORMANCE-AND-RELIABILITY.md): measured network results and prioritized improvements.
 
 The Marzban-only backend is deployed with database revision `0003`. Hiddify has
 been removed. Nginx owns public 80/443 and retains 2053 for existing Cloudflare
@@ -113,5 +115,5 @@ Request logs contain route templates, method, status and duration, without token
 
 The rate limiter is bounded and in-memory. Run one worker. Subscription buckets use token hashes; admin buckets use the immediate peer, ignoring forwarded headers. This is a local abuse guard, not distributed DDoS protection. SQLite uses foreign keys, WAL and a five-second busy timeout. `/health` checks the DB, not subscriptions.
 
-All ten profiles passed real HTTPS connectivity for both current users through installed Xray clients, including the new titan routes through Cloudflare.
+The October 12 release validated all nineteen configurations from the VPS. Seven CDN inbounds passed authenticated HTTPS from the current Irancell IPv4 network with ECH. Both new stream-up profiles also passed a bounded 3 MiB upload. IPv6 needs IPv6 access; the existing IPv4 REALITY paths did not pass this Irancell test.
 Owner client import/refresh remains the final compatibility check. Verify each client's support for IPv6, XHTTP, gRPC and REALITY fields; renderer tests alone do not prove live access. CLI user provisioning is implemented. Billing, multi-node orchestration and further protocol families remain future work.
