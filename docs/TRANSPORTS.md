@@ -230,3 +230,29 @@ preset, not the structured Xray final-mask configuration. No unverified F&F
 preset, WARP account, MASQUE account, Worker service or mandatory client setup is
 installed. WARP/MASQUE recovery instructions from Aether cannot simply be added
 as authenticated Marzban profiles with its quotas and user management.
+
+Deployment validation: release `35180a5` now delivers fifteen entries to each of
+three current canonical registrations. Every generated entry passed installed
+Xray validation and authenticated foreign HTTPS from the VPS. The original ten
+entries and all customer URLs/credentials were preserved. For VLESS/Trojan host
+settings, Marzban 0.8.4 needs address `[2a06:98c1:3121::7]` to emit valid URI
+brackets; VMess host settings need the bare address for its JSON payload. Both
+normalize to the same IPv6 endpoint. Manage these alternatives in Marzban's host
+settings for the corresponding five Titan inbounds; disabling the added host
+entry removes just that IPv6 alternative on the next subscription refresh.
+
+A temporary MCI experiment also tested supported structured zero-length TLS
+record fragmentation with the native Go (`unsafe`) TLS fingerprint on WebSocket
+and XHTTP, with ECH absent and without the unrecognized `semi-python` preset.
+Both timed out. This was an approximation, not a verified test of the guide's
+complete client-specific F&F implementation; no Irancell test was available.
+Temporary accounts were removed and no final mask was deployed. MCI IPv4 ECH
+checks still succeeded on WS, XHTTP and VMess; both gRPC checks showed transient
+resets in this run. VPS validation passed for all profiles. This is not a claim
+that every method is reliable on every carrier or APN.
+
+Code-only rollback: use release `248804f` and its pinned image. To remove the
+host expansion, restore the root-only `previous-hosts.json` from
+`/var/lib/marzban/routing-recovery-20261011` through Marzban's authenticated
+`PUT /api/hosts`; this does not restart Xray. The domestic routing policy is a
+separate change and has its own rollback described in OPERATIONS.md.
