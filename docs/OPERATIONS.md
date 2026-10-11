@@ -321,3 +321,42 @@ all other values including the vault key. Do not restore a database snapshot:
 canonical URLs and later legitimate writes must survive. API recreation briefly
 interrupts subscription HTTP requests; proxy sessions continue. Validate health,
 CLI doctor, registration invariants and both output formats afterward.
+
+## Iranian destination policy (October 11, 2026)
+
+Marzban's authoritative `/var/lib/marzban/xray_config.json` now blocks Iranian
+proxy destinations for every inbound and user, independently of client routing:
+
+```json
+{
+  "domainStrategy": "IPIfNonMatch",
+  "rules": [
+    {"type": "field", "ip": ["geoip:private"], "outboundTag": "BLOCK"},
+    {"type": "field", "domain": ["geosite:category-ir", "domain:ir"], "outboundTag": "BLOCK"},
+    {"type": "field", "ip": ["geoip:ir"], "outboundTag": "BLOCK"}
+  ]
+}
+```
+
+Keep domain and IP conditions in separate rules: fields in one rule are ANDed.
+`IPIfNonMatch` also checks resolved IPs for unknown domains. Existing inbound
+settings, sniffing, user credentials, private-network block, and outbounds were
+preserved. The installed geodata supports both country labels. Geodata age and
+coverage matter: this blocks known domains, `.ir`, and Iranian address ranges;
+it cannot identify every Iranian-owned service hosted overseas. HTTPS requests
+that specify a foreign literal IP may conceal their destination hostname on
+inbounds without existing sniffing. Traffic routed directly by a client bypasses
+the server entirely. Tunnels through an allowed foreign proxy can also evade a
+destination block; this is not an exhaustive content filter.
+
+The pre-change private backup is
+`/var/backups/keyholder/20261011T011106.144826Z`. Previous and validated candidate
+core JSON are root-only in `/var/lib/marzban/routing-recovery-20261011`.
+For rollback, submit `previous.json` to authenticated `PUT /api/core/config`
+from the VPS using locally configured operator credentials; never print the file
+or bearer token. This restarts Xray briefly. Do not restart Docker or Marzban,
+restore customer databases, regenerate credentials or alter subscriptions.
+After a change, validate the core version, all listeners, known `.ir`/Iranian
+`.com`/Iranian IP routing to BLOCK, foreign HTTPS, and both subscription formats.
+The configuration is panel-managed: future core edits must retain these rules.
+No geodata update schedule has been installed.

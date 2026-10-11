@@ -62,6 +62,42 @@ def destination(address: str) -> bool:
         return False
 
 
+# Published Cloudflare edge ranges: https://www.cloudflare.com/ips-v6
+# Never use this exception for arbitrary direct/origin IP destinations.
+CLOUDFLARE_IPV6 = tuple(
+    ipaddress.ip_network(prefix)
+    for prefix in (
+        "2400:cb00::/32",
+        "2606:4700::/32",
+        "2803:f800::/32",
+        "2405:b500::/32",
+        "2405:8100::/32",
+        "2a06:98c0::/29",
+        "2c0f:f248::/32",
+    )
+)
+
+
+def cloudflare_ipv6(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return ip.version == 6 and any(ip in network for network in CLOUDFLARE_IPV6)
+
+
+def allowed_cdn(profile: Profile, allowed_hosts: tuple[str, ...]) -> bool:
+    """Permit DNS CDN hosts or trusted Cloudflare IPv6 edges with an allowed TLS/HTTP identity."""
+    if profile.security != "tls":
+        return True
+    if cloudflare_ipv6(profile.address):
+        if not allowed_hosts or profile.sni not in allowed_hosts:
+            return False
+        identity = profile.authority if profile.transport == "grpc" else profile.host
+        return identity == profile.sni
+    return not allowed_hosts or profile.address in allowed_hosts
+
+
 def normalize(link: str) -> Profile | None:
     """Normalize supported links; omit unsupported or malformed links."""
     if len(link) > 16384 or any(ord(c) < 32 or ord(c) == 127 for c in link):
@@ -101,15 +137,19 @@ def normalize(link: str) -> Profile | None:
             except ValueError:
                 kind = "grpc_cdn"
             else:
-                return None
+                if not cloudflare_ipv6(u.hostname):
+                    return None
+                kind = "grpc_cdn"
         elif security == "tls" and transport in {"ws", "xhttp"}:
-            # CDN profiles must use DNS names, never a literal origin IP.
+            # Accept only DNS names or published Cloudflare IPv6 edges, never an origin IP.
             try:
                 ipaddress.ip_address(u.hostname)
             except ValueError:
                 kind = "ws_tls_cdn" if transport == "ws" else "xhttp_tls_cdn"
             else:
-                return None
+                if not cloudflare_ipv6(u.hostname):
+                    return None
+                kind = "ws_tls_cdn" if transport == "ws" else "xhttp_tls_cdn"
         else:
             return None
         sni = get("sni", u.hostname)
@@ -245,7 +285,9 @@ def normalize_trojan(link: str) -> Profile | None:
         except ValueError:
             kind: ProfileKind = "trojan_grpc_cdn"
         else:
-            return None
+            if not cloudflare_ipv6(parsed.address):
+                return None
+            kind = "trojan_grpc_cdn"
     elif parsed.security == "reality" and parsed.transport in {"tcp", "raw"}:
         if not destination(parsed.address):
             return None
@@ -291,7 +333,8 @@ def normalize_vmess(link: str) -> Profile | None:
     except ValueError:
         pass
     else:
-        return None
+        if not cloudflare_ipv6(address):
+            return None
     port = int(data.get("port", 0))
     if not 1 <= port <= 65535:
         return None

@@ -88,6 +88,12 @@ async def validate() -> None:
     assert os.environ["KEYHOLDER_DATABASE_URL"] == "sqlite:////data/keyholder.db"
     database = directory / "keyholder.db"
     expected = list(SUPPORTED_KINDS) if "--pilot-expansion" in sys.argv else default_profiles()
+    expected_count = (
+        int(sys.argv[sys.argv.index("--expected-count") + 1])
+        if "--expected-count" in sys.argv
+        else len(expected)
+    )
+    assert len(expected) <= expected_count <= 128
     with closing(sqlite3.connect(database)) as db:
         before = db.execute("SELECT id,status,token_hash FROM customers ORDER BY id").fetchall()
         mappings = db.execute("SELECT * FROM customer_mappings ORDER BY customer_id").fetchall()
@@ -140,15 +146,15 @@ async def validate() -> None:
             assert uri.status_code == xray.status_code == 200
             links = base64.b64decode(uri.text, validate=True).decode().splitlines()
             profiles = [normalize(link) for link in links]
-            assert len(profiles) == len(expected) and all(p is not None for p in profiles)
+            assert len(profiles) == expected_count and all(p is not None for p in profiles)
             assert {p.kind for p in profiles if p is not None} == set(expected)
             for link in links:
                 query = parse_qs(urlsplit(link).query)
                 if query.get("type") == ["xhttp"]:
                     assert "extra" not in query
             configs = xray.json()
-            assert isinstance(configs, list) and len(configs) == len(expected)
-            print("real_marzban_canary_both_formats_profiles_ok", len(expected), flush=True)
+            assert isinstance(configs, list) and len(configs) == expected_count
+            print("real_marzban_canary_both_formats_profiles_ok", expected_count, flush=True)
             path = directory / "xray-validation.json"
             try:
                 for config in configs:
@@ -162,7 +168,7 @@ async def validate() -> None:
                         timeout=15,
                     )
                     assert result.returncode == 0
-                print("installed_xray_accepts_generated_configs", len(expected), flush=True)
+                print("installed_xray_accepts_generated_configs", expected_count, flush=True)
                 if "--connectivity" in sys.argv:
                     failed = False
                     for profile, config in zip(profiles, configs, strict=True):

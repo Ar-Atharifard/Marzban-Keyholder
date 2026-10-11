@@ -200,3 +200,33 @@ fault. No existing target, port or customer profile was changed by the investiga
 Temporary users/listeners were removed. Zero diagnostic user counters were not
 used as proof of dropped payload, because enabled counter policy was not established.
 The two IPv4 REALITY paths remain unresolved on this MCI connection.
+
+## Managed Cloudflare IPv6 alternatives (October 11, 2026)
+
+The five Titan CDN inbounds can each have a second Marzban host entry using
+`2a06:98c1:3121::7:443`, with Titan as both TLS SNI and HTTP Host/gRPC authority.
+This is a Cloudflare edge address, not the VPS origin. All five transports passed
+certificate-verified HTTPS tests from the IPv6-capable VPS without ECH. This
+establishes server and transport compatibility; it does not establish reachability
+on every Iranian access network. An IPv4-only APN cannot use these alternatives.
+
+These are five address-family alternatives, not five new protocols or inbounds.
+Marzban host settings control their presence, names and address; Marzban user
+inbound selections still control access. Existing DNS/ECH entries stay intact.
+Keyholder accepts literal CDN IPv6 addresses only inside Cloudflare's published
+IPv6 ranges, with explicit allowed TLS SNI and matching HTTP identity. Arbitrary
+IPv6 origins and all literal IPv4 CDN destinations remain rejected. Update this
+checked-in range list only against https://www.cloudflare.com/ips-v6.
+The IPv6 entries use Chrome, certificate validation, no ECH, no custom cipher
+suites and no final mask. XHTTP `extra` remains omitted in both output formats.
+
+The supplied community guide is not a guarantee of current ISP behavior. Two
+methods are deliverable through this architecture: native ECH over CDN and
+Cloudflare IPv6 CDN. Its `semi-python` cipher label is not a cipher-suite name
+recognized by stock Xray 26.9.30: the TLS parser accepts colon-separated Go TLS
+cipher names and silently ignores unknown names. Do not claim this label works
+because configuration validation succeeds. `tlshello-0-len` is also a client UI
+preset, not the structured Xray final-mask configuration. No unverified F&F
+preset, WARP account, MASQUE account, Worker service or mandatory client setup is
+installed. WARP/MASQUE recovery instructions from Aether cannot simply be added
+as authenticated Marzban profiles with its quotas and user management.

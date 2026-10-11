@@ -94,7 +94,7 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
     from keyholder.backends.base import UpstreamError, UpstreamUnavailable
     from keyholder.backends.marzban import MarzbanBackend
     from keyholder.config import Settings
-    from keyholder.rendering.profiles import generate_profiles
+    from keyholder.rendering.profiles import allowed_cdn, generate_profiles
     from keyholder.schemas import Policy
 
     settings = Settings()  # type: ignore[call-arg]
@@ -106,12 +106,7 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
                 result = generate_profiles(
                     links, Policy.model_validate({"profiles": KINDS if authoritative else profiles})
                 )
-                if settings.allowed_cdn_hosts:
-                    result = [
-                        p
-                        for p in result
-                        if p.security != "tls" or p.address in settings.allowed_cdn_hosts
-                    ]
+                result = [p for p in result if allowed_cdn(p, settings.allowed_cdn_hosts)]
                 if not result:
                     raise ValueError("No allowed profiles")
     except (UpstreamError, UpstreamUnavailable, TimeoutError, ValueError):

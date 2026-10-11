@@ -8,7 +8,7 @@ from keyholder.api.dependencies import DB
 from keyholder.backends.base import UpstreamError, UpstreamUnavailable
 from keyholder.models import Customer
 from keyholder.policies import SUPPORTED_KINDS, stored_policy
-from keyholder.rendering.profiles import apply_cdn_ech, generate_profiles
+from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
 from keyholder.rendering.renderers import select_renderer
 from keyholder.schemas import ErrorResponse, Policy
 from keyholder.security import hash_token, valid_token, verify_token
@@ -75,8 +75,7 @@ async def subscription(
             links = await adapter.configurations(username)
         profiles = generate_profiles(links, Policy.model_validate(policy))
         allowed_hosts = request.app.state.settings.allowed_cdn_hosts
-        if allowed_hosts:
-            profiles = [p for p in profiles if p.security != "tls" or p.address in allowed_hosts]
+        profiles = [p for p in profiles if allowed_cdn(p, allowed_hosts)]
         profiles = apply_cdn_ech(profiles, request.app.state.settings.cdn_ech_config, allowed_hosts)
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)
