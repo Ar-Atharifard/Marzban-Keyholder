@@ -391,3 +391,10 @@ After a change, validate the core version, all listeners, known `.ir`/Iranian
 `.com`/Iranian IP routing to BLOCK, foreign HTTPS, and both subscription formats.
 The configuration is panel-managed: future core edits must retain these rules.
 No geodata update schedule has been installed.
+
+Final live inventory check: five canonical registrations, four active Marzban
+accounts. `test1` is `limited` after exceeding its 1 GiB allowance; its preserved
+URL correctly returns subscription unavailable. The other four canonical URLs
+render nineteen entries in both URI and Xray formats, with seven ECH and seven
+IPv6 CDN entries and no XHTTP extra. No quota/status reset was performed.
+Post-deployment backup: `/var/backups/keyholder/20261011T221705.872533Z`, integrity OK.
