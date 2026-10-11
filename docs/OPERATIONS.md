@@ -291,3 +291,33 @@ and detailed diagnostics root-private and never transfer them to the workstation
 Iranian ISP reachability/client compatibility still needs customer-side testing.
 Panel browser checks and owner confirmation passed; Cloudflare can reject generic
 Python panel requests. The SSH panel command remains a recovery option.
+
+## Native ECH API release (October 11, 2026)
+
+The active API code is `248804f`, under `/srv/keyholder-releases/248804f`.
+The production override pins image
+`sha256:99f70ac196811264514bdee61543afdf790bd99e56580cd856a2b1e3211d7e2a`.
+The previous `8e0a5ff` image/release remains available. Only the API was recreated;
+no live migration, proxy restart, gateway reload, account/credential change or
+subscription URL rotation was performed. The candidate reused byte-identical
+pyproject/lock manifests and existing dependencies, built offline on the workstation.
+All 131 tests, lint/format and strict source/operator type checks passed. Private
+on-server clone validation passed both formats and all ten HTTPS transports for
+OWNER, test1 and KasraRezaei. Live internal checks and `keyholder doctor` passed.
+
+The private predeploy recovery set is
+`/var/backups/keyholder/20261011T002618.220236Z`. Native ECH configuration is in
+`/srv/keyholder/.env`; do not download the file. The release's `deployment.json`
+and `predeploy-state.json` record identity/plan/config preservation and validation.
+To invoke the CLI while already SSH'd into Braavos, use `keyholder --local doctor`
+or `keyholder --local backup`; without `--local`, it intentionally initiates SSH
+from the invoking workstation. The marked disposable rehearsal database contains
+customer credentials and must stay server-private; remove it after validation.
+
+For API rollback, use the previous release and its pinned image with the current
+live volume/environment; schema stays 0003. The old code ignores the new native
+ECH setting. Clear only that new setting if reverting the environment, preserving
+all other values including the vault key. Do not restore a database snapshot:
+canonical URLs and later legitimate writes must survive. API recreation briefly
+interrupts subscription HTTP requests; proxy sessions continue. Validate health,
+CLI doctor, registration invariants and both output formats afterward.

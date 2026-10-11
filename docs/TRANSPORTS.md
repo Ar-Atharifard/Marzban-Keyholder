@@ -150,3 +150,53 @@ a compatible current image). Preserve live DBs and vault key; no migration or
 Marzban/Nginx reload is required. Existing connections are unaffected; API recreation
 briefly interrupts subscription requests. Verify API health, unchanged registration
 rows, both rendered formats and actual CDN traffic after any release or rollback.
+
+### Deployment results and direct subscription access
+
+Code release `248804f` is active, with immutable image identity
+`sha256:99f70ac196811264514bdee61543afdf790bd99e56580cd856a2b1e3211d7e2a`.
+All three canonical registrations retain exactly their IDs, hashes, encrypted
+retrievable tokens and mappings. Marzban plans/proxy credentials, core/gateway
+files and proxy containers were compared unchanged. Live checks confirm ten
+profiles per user, native ECH on five CDN profiles in both formats, no-store
+responses and removal of XHTTP `extra`. Candidate private-clone tests carried
+HTTPS through all ten transports for each of the three users. Workstation MCI
+checks passed all five CDN transports with dynamic DoH; an additional renderer
+check observed one transient gRPC reset, followed by a successful gRPC request to
+the subscription endpoint. Reachability remains variable; do not promise every
+attempt succeeds on every network.
+
+The owner clarified that the desktop client is **v2rayN 7.25.4**, rather than
+v2rayNG. Its standard VMess and common URI parsers accept `ech`, so the ECH-enabled
+VMess URI format is supported. Its separate subscription downloader uses .NET
+SocketsHttpHandler and has no ECH lookup/configuration in that code path. Profile
+ECH settings apply to the proxy core, not to this independent downloader. See
+[v2rayN 7.25.4 download implementation](https://github.com/2dust/v2rayN/blob/7.25.4/v2rayN/ServiceLib/Services/DownloadService.cs)
+and [URI parsing](https://github.com/2dust/v2rayN/blob/7.25.4/v2rayN/ServiceLib/Handler/Fmt/BaseFmt.cs).
+
+A direct IPv4 Go TLS test to Keyholder, with no proxy, returned the expected
+HTTP 404 for the non-secret `/s/invalid` route and confirmed ECH was accepted.
+The otherwise matching request without ECH timed out. A native-ECH gRPC proxy
+also reached this endpoint from MCI IPv4. Keyholder therefore has no proxy
+requirement: network interference affects ordinary hostname-visible HTTPS,
+while direct ECH-aware HTTPS works. No route/authentication change at the server
+can retrofit ECH into a client's TLS downloader. Keep the canonical URL. Initial
+refresh can use the working IPv4/IPv6 APN; subsequent proxy-assisted downloads
+can use an established ECH profile. Alternatively direct downloads require an
+ECH-capable downloader. Do not switch to plaintext HTTP or disable certificate
+checks to work around this problem. A separately tested download domain would be
+an optional mirror/business decision, not an automatic customer URL migration.
+
+Additional REALITY findings: Microsoft-target inbounds have matching keys and
+server/workstation clocks. Both pass origin-side HTTPS. On MCI, Chrome, Firefox
+and Safari authenticate REALITY but subsequent HTTP and HTTPS traffic stalls;
+Edge did not authenticate in the tested runs. Supported nonzero TLS-record
+fragmentation and smaller client TCP segments did not restore traffic. Temporary
+Microsoft/NLnet REALITY listeners on unused ports also failed after authentication.
+Ordinary, unauthenticated Microsoft HTTPS through the original REALITY fallback
+ports completed TLS then stalled, while the normal Microsoft route returned 200.
+This supports direct-path network filtering, not a demonstrated Marzban credential
+fault. No existing target, port or customer profile was changed by the investigation.
+Temporary users/listeners were removed. Zero diagnostic user counters were not
+used as proof of dropped payload, because enabled counter policy was not established.
+The two IPv4 REALITY paths remain unresolved on this MCI connection.
