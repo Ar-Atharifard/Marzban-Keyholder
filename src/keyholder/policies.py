@@ -13,6 +13,7 @@ SUPPORTED_KINDS = (
     "trojan_grpc_cdn",
     "vmess_httpupgrade_cdn",
     "trojan_reality_ipv6",
+    "trojan_xhttp_cdn",
 )
 LEGACY_DEFAULTS = ("xhttp_reality", "tcp_reality")
 

@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from keyholder.policies import stored_policy
+from keyholder.policies import SUPPORTED_KINDS, stored_policy
 
 ProfileKind = Literal[
     "tcp_reality",
@@ -16,6 +16,7 @@ ProfileKind = Literal[
     "trojan_grpc_cdn",
     "vmess_httpupgrade_cdn",
     "trojan_reality_ipv6",
+    "trojan_xhttp_cdn",
 ]
 
 
@@ -27,7 +28,7 @@ class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profiles: list[ProfileKind] = Field(
         default_factory=default_profiles,
-        max_length=10,
+        max_length=len(SUPPORTED_KINDS),
     )
 
 

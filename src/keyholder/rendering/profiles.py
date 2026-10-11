@@ -288,6 +288,8 @@ def normalize_trojan(link: str) -> Profile | None:
             if not cloudflare_ipv6(parsed.address):
                 return None
             kind = "trojan_grpc_cdn"
+    elif parsed.security == "tls" and parsed.transport == "xhttp":
+        kind = "trojan_xhttp_cdn"
     elif parsed.security == "reality" and parsed.transport in {"tcp", "raw"}:
         if not destination(parsed.address):
             return None

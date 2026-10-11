@@ -38,8 +38,9 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
                 "trojan_grpc_cdn",
                 "vmess_httpupgrade_cdn",
                 "trojan_reality_ipv6",
+                "trojan_xhttp_cdn",
             ]
-            assert new["maxItems"] == 10 and old["maxItems"] == 5
+            assert new["maxItems"] == 11 and old["maxItems"] == 5
             new["items"]["enum"] = old["items"]["enum"]
             new["maxItems"] = old["maxItems"]
         assert actual == model

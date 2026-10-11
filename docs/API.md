@@ -33,7 +33,7 @@ Only `marzban-default` has a runtime adapter. A backend row does not automatical
 enable a provider. Mapping changes do not contact Marzban or validate user existence;
 missing users or permission failures surface when fetching the subscription.
 
-`Policy` has one field, `profiles`: a list of at most ten supported profile names.
+`Policy` has one field, `profiles`: a list of at most eleven supported profile names.
 The defaults retain the original five profiles for compatibility. An empty list is allowed
 and disables compatible output in legacy policy mode, producing 503.
 Production uses `KEYHOLDER_PROFILE_SOURCE=marzban`: supported current upstream
@@ -49,6 +49,7 @@ selections control output; stored policy is retained for compatibility. Supporte
 - `trojan_grpc_cdn`
 - `vmess_httpupgrade_cdn`
 - `trojan_reality_ipv6`
+- `trojan_xhttp_cdn`
 
 Unknown request fields/profile names are rejected. `ech_enabled`,
 `include_base_cdn`, `xhttp_cdn` and `ws_cdn` are no longer accepted API inputs.
@@ -207,3 +208,8 @@ The gRPC public destination stays on 443; existing Titan/Sealord origin-port rul
 use 2053, retained by Nginx. New CDN templates use Titan only. VPS validation does
 not guarantee every Iranian ISP or client version; refresh the same URL and test
 on the actual client without sharing its credential.
+
+The October 12 streaming expansion adds `trojan_xhttp_cdn` without changing existing
+endpoints, subscription paths, tokens, defaults or legacy output fixtures. VLESS
+streaming XHTTP uses the existing `xhttp_tls_cdn` family. Multiple Marzban host
+entries can produce multiple configurations in the same family.

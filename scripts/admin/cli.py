@@ -19,6 +19,7 @@ KINDS = [
     "trojan_grpc_cdn",
     "vmess_httpupgrade_cdn",
     "trojan_reality_ipv6",
+    "trojan_xhttp_cdn",
 ]
 REMOTE = "python3 /usr/local/lib/keyholder-admin/host.py"
 

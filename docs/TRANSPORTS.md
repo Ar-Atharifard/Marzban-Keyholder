@@ -256,3 +256,38 @@ host expansion, restore the root-only `previous-hosts.json` from
 `/var/lib/marzban/routing-recovery-20261011` through Marzban's authenticated
 `PUT /api/hosts`; this does not restart Xray. The domestic routing policy is a
 separate change and has its own rollback described in OPERATIONS.md.
+
+## IPv4 streaming CDN expansion (October 12, 2026)
+
+Two additional Titan inbounds use XHTTP `stream-up` over TLS HTTP/2: VLESS and
+Trojan. Streaming upload produces a different HTTP request pattern from the
+existing `packet-up` profile and avoids repeated upload POSTs. This is a transport
+alternative, not proof that its TLS handshake bypasses every firewall. Both
+isolated candidates passed certificate-verified HTTPS from the owner's current
+IPv4-only Irancell connection, with native ECH and Chrome. Existing packet-up,
+gRPC, WebSocket, HTTPUpgrade and REALITY profiles are preserved.
+
+The gateway must forward the new routes with `grpc_pass` to their plaintext,
+loopback-only XHTTP listeners. Ordinary `proxy_pass` HTTP/1.1 is not substituted
+for the validated HTTP/2 streaming path. The server uses explicit `stream-up`,
+and Marzban advertises that mode. XHTTP `extra` remains excluded from URI and JSON
+subscriptions. Trojan XHTTP is the additive `trojan_xhttp_cdn` profile family;
+existing family values/defaults, endpoints, token handling, URL paths and database
+schema remain unchanged. The policy capacity increases from ten to eleven
+families. Production's `profile_source=marzban` follows each user's panel selection
+without backend database or per-user source changes.
+
+Irancell diagnostics: all five existing native-ECH CDN transports passed a clean
+run. Original IPv4 REALITY and an XHTTP HTTP/3 candidate failed. The initial
+parallel exploratory probes shared a SOCKS port and are excluded from evidence;
+clean repeats used separate ports. The guide's exact F&F settings were located in
+PattNG's `my-releases` branch, `res/values/arrays.xml`. `semi-python` is a UI preset
+that expands to explicit TLS cipher names; `tlshello-0-len` expands to two precise
+structured fragment masks. Earlier approximate fragmentation was not the whole
+method. Exact-mask tests with and without the cipher preset timed out at the
+example Cloudflare address. No failed candidate is added to subscriptions.
+WARP/MASQUE still require separate provider/client integration and are not
+represented as Marzban-accounted customer profiles.
+
+Primary preset source:
+https://github.com/patterniha/PattNG/blob/my-releases/V2rayNG/app/src/main/res/values/arrays.xml
