@@ -398,3 +398,17 @@ URL correctly returns subscription unavailable. The other four canonical URLs
 render nineteen entries in both URI and Xray formats, with seven ECH and seven
 IPv6 CDN entries and no XHTTP extra. No quota/status reset was performed.
 Post-deployment backup: `/var/backups/keyholder/20261011T221705.872533Z`, integrity OK.
+
+## Keyholder subscription routing exception (October 12)
+
+The owner approved an exact-host DIRECT exception for
+`full:keyholder.javatechpack.ir` before Iranian domain/IP blocks. This allows
+subscription updates through existing proxy profiles while other Iranian
+destinations remain blocked. Synthetic tests confirmed the hostname is DIRECT,
+Iranian domains/IPs and lookalikes ending in `.ir` remain BLOCK, and both streaming
+CDN profiles deliver the public invalid-token endpoint in approximately one second.
+The change does not make an ISP-filtered direct downloader ECH-capable.
+
+Recovery core: `/var/lib/marzban/keyholder-routing-recovery-20261011T223835Z`.
+Pre-change backup: `/var/backups/keyholder/20261011T223740.858352Z`.
+See `NETWORK-DIAGNOSTICS.md` for evidence and `DEVELOPMENT.md` for the code map.

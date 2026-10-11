@@ -28,6 +28,8 @@ Legacy ECH generation, its settings API and the legacy `ws_cdn`/`xhttp_cdn` poli
 
 ## Documentation
 
+- [Developer quick guide](docs/DEVELOPMENT.md): code map, changes, protocols and maintenance.
+
 - [API reference](docs/API.md): authentication, payloads, endpoints and errors.
 - [Operations](docs/OPERATIONS.md): local workflow, backup, release and recovery gates.
 - [Architecture](ARCHITECTURE.md): application boundaries and limitations.
