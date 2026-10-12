@@ -272,17 +272,28 @@ def generate_profiles(
 
 
 def apply_cdn_ech(
-    profiles: list[Profile], config: str, allowed_hosts: tuple[str, ...]
+    profiles: list[Profile],
+    config: str,
+    allowed_hosts: tuple[str, ...],
+    include_plain_tls: bool = False,
 ) -> list[Profile]:
-    """Apply trusted delivery settings only to explicitly permitted CDN TLS hosts."""
+    """Prefer plain TLS when enabled; retain labelled ECH CDN fallbacks."""
     if not config:
         return profiles
-    return [
-        replace(p, ech_config_list=config, fingerprint="chrome")
-        if p.security == "tls" and p.address in allowed_hosts and p.sni in allowed_hosts
-        else p
-        for p in profiles
-    ]
+    delivered: list[Profile] = []
+    fallbacks: list[Profile] = []
+    for p in profiles:
+        eligible = p.security == "tls" and p.address in allowed_hosts and p.sni in allowed_hosts
+        if eligible:
+            ech = replace(p, ech_config_list=config, fingerprint="chrome")
+            if include_plain_tls:
+                delivered.append(replace(p, ech_config_list="", fingerprint="chrome"))
+                fallbacks.append(replace(ech, name=p.name[:176] + " [ECH fallback]"))
+            else:
+                delivered.append(ech)
+        else:
+            delivered.append(p)
+    return delivered + fallbacks
 
 
 def normalize_trojan(link: str, networks: tuple[str, ...] = ()) -> Profile | None:

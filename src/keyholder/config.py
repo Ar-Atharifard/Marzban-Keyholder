@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     marzban_token: SecretStr = SecretStr("")
     allowed_cdn_hosts: tuple[str, ...] = ()
     cdn_ech_config: str = ""
+    cdn_tls_compatibility: bool = False
     profile_source: Literal["policy", "marzban", "upstream"] = "policy"
     backends: list[BackendConfig] = Field(default_factory=list, repr=False)
     # Configured CIDRs are a trusted deployment decision, never imported from links.

@@ -19,6 +19,7 @@ not comma-separated text. Keep credentials in private server-side configuration.
 | `ALLOWED_CDN_HOSTS` | Optional JSON hostname list restricting TLS CDN delivery |
 | `ALLOWED_CDN_NETWORKS` | Optional trusted edge CIDRs; literal IPs require allowed SNI and matching HTTP identity |
 | `CDN_ECH_CONFIG` | Optional dynamic HTTPS DNS ECH lookup; empty disables |
+| `CDN_TLS_COMPATIBILITY` | Default false; prefer non-ECH TLS and append labelled ECH fallbacks for selected, permitted hostname CDN TLS profiles |
 | `UPSTREAM_TIMEOUT` | Total fetch/login deadline, default 10 seconds, range 1–60 |
 | `RATE_LIMIT_PER_MINUTE` | In-memory per-bucket limit, default 60; single worker |
 
@@ -48,3 +49,9 @@ CLI client settings use `KEYHOLDER_ADMIN_CONFIG`; dispatcher settings use
 
 Changing domain/path or losing the database/vault key can break customer links.
 Changing an upstream does not require changing the public hostname or token.
+
+TLS-first delivery and ECH fallbacks retain upstream credentials, SNI, Host, paths, ports
+and protocol selection. Primary entries retain their names and prefer plain TLS. ECH alternatives follow
+with an explicit `[ECH fallback]` label. Direct and
+literal-IP profiles are never duplicated by this setting. Certificate verification
+remains enabled. This does not provide automatic failover or guarantee ISP access.

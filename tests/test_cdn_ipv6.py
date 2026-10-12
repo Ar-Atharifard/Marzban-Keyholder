@@ -40,6 +40,7 @@ def test_all_five_ipv6_variants_keep_tls_verification_and_omit_ech() -> None:
     accepted = [p for p in profiles if p is not None and allowed_cdn(p, HOSTS)]
     assert len(accepted) == 5
     assert apply_cdn_ech(accepted, ECH, HOSTS) == accepted
+    assert apply_cdn_ech(accepted, ECH, HOSTS, include_plain_tls=True) == accepted
     uris = base64.b64decode(URIRenderer().render(accepted)).decode().splitlines()
     configs = json.loads(XrayRenderer().render(accepted))
     for uri, config in zip(uris, configs, strict=True):

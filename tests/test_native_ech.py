@@ -122,3 +122,53 @@ def test_ech_rejects_static_or_invalid_resolvers(value: str) -> None:
 
 def test_ech_accepts_dynamic_https_configuration() -> None:
     assert Settings(admin_key=SecretStr(ADMIN_KEY), cdn_ech_config=ECH).cdn_ech_config == ECH
+
+
+def test_compatibility_keeps_existing_entries_and_verifies_plain_tls() -> None:
+    grpc = normalize(GRPC.replace("sni=tls.example", "sni=titan.example"))
+    direct = normalize(TCP)
+    assert grpc is not None and direct is not None
+    originals = [grpc, direct]
+    existing = apply_cdn_ech(originals, ECH, HOSTS)
+    paired = apply_cdn_ech(originals, ECH, HOSTS, include_plain_tls=True)
+    assert paired[:2] == originals
+    assert len(paired) == 3
+    plain = paired[0]
+    assert plain == replace(grpc, fingerprint="chrome")
+    assert paired[-1] == replace(existing[0], name=grpc.name + " [ECH fallback]")
+    assert plain.uuid == grpc.uuid and plain.kind == grpc.kind
+    assert not plain.ech_config_list
+    stream = json.loads(XrayRenderer().render([plain]))[0]["outbounds"][0]["streamSettings"]
+    assert stream["tlsSettings"]["allowInsecure"] is False
+    assert "echConfigList" not in stream["tlsSettings"]
+    assert apply_cdn_ech(originals, "", HOSTS, True) == originals
+    assert apply_cdn_ech(originals, ECH, (), True) == originals
+
+
+def test_compatibility_follows_upstream_selection_and_preserves_url(client: TestClient) -> None:
+    app = cast(FastAPI, client.app)
+    registered = create(client)
+    url = "/s/" + str(registered["token"])
+
+    class Backend:
+        links = [GRPC.replace("sni=tls.example", "sni=titan.example"), TCP]
+
+        async def configurations(self, username: str) -> list[str]:
+            return self.links
+
+    upstream = Backend()
+    app.state.backends = {"marzban-default": upstream}
+    app.state.settings.profile_source = "upstream"
+    app.state.settings.allowed_cdn_hosts = HOSTS
+    app.state.settings.cdn_ech_config = ECH
+    before = client.get(url)
+    app.state.settings.cdn_tls_compatibility = True
+    after = client.get(url)
+    assert before.status_code == after.status_code == 200
+    old_uris = base64.b64decode(before.text).decode().splitlines()
+    uris = base64.b64decode(after.text).decode().splitlines()
+    assert "ech" not in parse_qs(urlsplit(uris[0]).query)
+    assert uris[1] == old_uris[1]
+    assert len(uris) == 3 and parse_qs(urlsplit(uris[-1]).query)["ech"] == [ECH]
+    upstream.links = [TCP]
+    assert client.get(url).text == URIRenderer().render([p for p in [normalize(TCP)] if p])

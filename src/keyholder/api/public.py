@@ -82,7 +82,9 @@ async def subscription(
         profiles = [
             p for p in profiles if allowed_cdn(p, allowed_hosts, settings.allowed_cdn_networks)
         ]
-        profiles = apply_cdn_ech(profiles, request.app.state.settings.cdn_ech_config, allowed_hosts)
+        profiles = apply_cdn_ech(
+            profiles, settings.cdn_ech_config, allowed_hosts, settings.cdn_tls_compatibility
+        )
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)
     except UpstreamUnavailable:
