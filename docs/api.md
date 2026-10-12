@@ -220,3 +220,26 @@ and `registered`. No source URLs or credentials are returned.
 idempotent; existing provider/config-reference mismatches return 409 and are not
 overwritten. Both endpoints require the same administrator bearer authentication.
 Server configuration, not this API, controls adapter credentials and URLs.
+
+### Subscription usage information
+
+Successful subscriptions include `subscription-userinfo` when the provider supplies
+usage: `upload=0; download=1024; total=4096; expire=1893456000`. Counters are bytes;
+expiry is Unix seconds. Zero total/expiry means unlimited/no expiry. Marzban supplies
+combined traffic usage, represented as download with upload zero, not a directional
+breakdown. The figures follow Marzban's current quota/reset accounting and refresh
+when the subscription is fetched. Client support for displaying headers varies.
+
+`GET /s/{token}?format=info` returns a small HTML page with remaining traffic, used
+traffic, allowance, account status, remaining time and UTC expiry. It uses the same
+bearer token and current upstream data. Limited/expired upstream accounts may view
+information while configuration delivery remains unavailable. Disabled/revoked
+Keyholder tokens remain denied. Missing provider statistics return 503 rather than
+inventing a quota. No configurations, credentials, scripts or external assets are
+included. The page uses no-store, no-referrer and a restrictive content security
+policy. It adds no dummy profile and never changes the subscription URL.
+
+Administrators can retrieve the usage-page URL with `keyholder link USER --info`
+(or append `?format=info` to the existing subscription URL). This retrieves the
+existing canonical identity; it does not create a new subscription. As with link
+retrieval, use an interactive terminal or explicit private `--save-link` file.

@@ -5,13 +5,21 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from keyholder.backends.base import UpstreamError, UpstreamUnavailable
+from keyholder.backends.base import (
+    SubscriptionData,
+    SubscriptionInfo,
+    UpstreamError,
+    UpstreamUnavailable,
+)
 from keyholder.config import Settings
 
 
 class UserResponse(BaseModel):
     status: str
     links: list[str] = Field(max_length=128)
+    used_traffic: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+    data_limit: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+    expire: int | None = Field(default=None, ge=0, le=253402300799, strict=True)
 
 
 class MarzbanBackend:
@@ -69,6 +77,12 @@ class MarzbanBackend:
                 raise UpstreamError("Upstream authentication failed") from None
 
     async def configurations(self, username: str) -> list[str]:
+        data = await self.subscription_details(username)
+        if data.status != "active":
+            raise UpstreamUnavailable("Upstream user inactive")
+        return data.links
+
+    async def subscription_details(self, username: str) -> SubscriptionData:
         if not re.fullmatch(r"[a-zA-Z0-9_]{3,32}", username):
             raise UpstreamError("Invalid mapping")
         await self.login()
@@ -81,9 +95,15 @@ class MarzbanBackend:
                     headers={"Authorization": f"Bearer {used_token}"},
                 )
                 user = UserResponse.model_validate(r.json())
-                if user.status != "active":
-                    raise UpstreamUnavailable("Upstream user inactive")
-                return user.links
+                info = None
+                if (
+                    user.used_traffic is not None
+                    and {"data_limit", "expire"} <= user.model_fields_set
+                ):
+                    info = SubscriptionInfo(
+                        0, user.used_traffic, user.data_limit or 0, user.expire or 0
+                    )
+                return SubscriptionData(user.links, user.status, info)
             except PermissionError:
                 if attempt or self.settings.marzban_token.get_secret_value():
                     raise UpstreamError("Upstream authentication failed") from None

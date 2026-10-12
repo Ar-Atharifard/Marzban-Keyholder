@@ -19,3 +19,7 @@ Provider/CLI additions do not make every panel, Xray feature or client supported
 Publish tested capabilities and use new backend IDs for different account systems.
 Changes to shared Docker/ingress settings require a deployment review even when
 application API contracts are unchanged.
+
+The optional `format=info` usage view and `subscription-userinfo` response header
+are additive. Existing URI/Xray formats, token validation, defaults and URLs retain
+their semantics. The API contract test allows only this explicit format addition.

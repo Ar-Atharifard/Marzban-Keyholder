@@ -5,9 +5,10 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sqlalchemy import select, text
 
 from keyholder.api.dependencies import DB
-from keyholder.backends.base import UpstreamError, UpstreamUnavailable
+from keyholder.backends.base import SubscriptionData, UpstreamError, UpstreamUnavailable
 from keyholder.models import Customer
 from keyholder.policies import stored_policy
+from keyholder.rendering.information import render_information
 from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
 from keyholder.rendering.renderers import select_renderer
 from keyholder.schemas import ErrorResponse, Policy
@@ -51,7 +52,7 @@ async def subscription(
     token: str,
     request: Request,
     db: DB,
-    output: Annotated[Literal["uri", "xray"] | None, Query(alias="format")] = None,
+    output: Annotated[Literal["uri", "xray", "info"] | None, Query(alias="format")] = None,
 ) -> Response:
     if not valid_token(token):
         raise HTTPException(404, "Subscription not found")
@@ -72,7 +73,36 @@ async def subscription(
     db.close()
     try:
         async with asyncio.timeout(request.app.state.settings.upstream_timeout):
-            links = await adapter.configurations(username)
+            load = getattr(adapter, "subscription_details", None)
+            if callable(load):
+                data = await load(username)
+                if not isinstance(data, SubscriptionData):
+                    raise UpstreamError("Upstream schema mismatch")
+            else:
+                data = SubscriptionData(await adapter.configurations(username))
+            links = data.links
+        headers = {"subscription-userinfo": data.info.header()} if data.info else {}
+        if output == "info":
+            if data.info is None:
+                raise HTTPException(503, "Subscription information unavailable")
+            headers.update(
+                {
+                    "Cache-Control": "no-store",
+                    "Referrer-Policy": "no-referrer",
+                    "X-Robots-Tag": "noindex, nofollow, nosnippet",
+                    "Content-Security-Policy": (
+                        "default-src 'none'; style-src 'unsafe-inline'; "
+                        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+                    ),
+                }
+            )
+            return Response(
+                render_information(data.info, data.status),
+                media_type="text/html",
+                headers=headers,
+            )
+        if data.status != "active":
+            raise UpstreamUnavailable("Upstream user inactive")
         settings = request.app.state.settings
         profiles = generate_profiles(
             links, Policy.model_validate(policy), settings.allowed_cdn_networks
@@ -93,4 +123,4 @@ async def subscription(
         raise HTTPException(502, "Upstream unavailable") from None
     except ValueError:
         raise HTTPException(503, "No compatible subscription profiles") from None
-    return Response(content, media_type=renderer.media_type)
+    return Response(content, media_type=renderer.media_type, headers=headers)

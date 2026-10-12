@@ -52,6 +52,6 @@ Changing an upstream does not require changing the public hostname or token.
 
 TLS-first delivery and ECH fallbacks retain upstream credentials, SNI, Host, paths, ports
 and protocol selection. Primary entries retain their names and prefer plain TLS. ECH alternatives follow
-with an explicit `[ECH fallback]` label. Direct and
+with an explicit `ECH FALLBACK` label. Direct and
 literal-IP profiles are never duplicated by this setting. Certificate verification
 remains enabled. This does not provide automatic failover or guarantee ISP access.

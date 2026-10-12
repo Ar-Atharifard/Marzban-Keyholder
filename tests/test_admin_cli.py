@@ -143,3 +143,28 @@ def test_panel_bookmark_saved_explicitly_without_cookie(
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text()) == {"panel_url": url, "active": False}
     assert url not in capsys.readouterr().out
+
+
+def test_usage_link_reuses_existing_identity_and_stays_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def request(host: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert payload["operation"] == "link"
+        assert payload["args"]["customer"] == "alice"
+        assert payload["args"]["backend_id"] == "marzban-default"
+        assert "info" not in payload["args"]
+        return {
+            "result": {
+                "customer": {"id": "existing"},
+                "subscription_url": "https://sub.example/s/synthetic",
+            }
+        }
+
+    monkeypatch.setattr(cli, "request", request)
+    path = tmp_path / "usage.json"
+    assert cli.main(["link", "alice", "--info", "--save-link", str(path)]) == 0
+    data = json.loads(path.read_text())
+    assert data["usage_url"] == data["subscription_url"] + "?format=info"
+    assert data["customer_id"] == "existing"
+    assert "synthetic" not in capsys.readouterr().out
+    assert path.stat().st_mode & 0o777 == 0o600

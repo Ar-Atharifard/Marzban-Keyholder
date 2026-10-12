@@ -46,3 +46,11 @@ in `registry.py` and typed configuration. Add mocked provider contract tests.
 Provisioning is a separate capability: do not force read-only adapters to implement
 panel management. Extend operator dispatch only for providers that support it.
 No runtime executable-plugin loader or multi-node orchestrator is required.
+
+Adapters may optionally expose `subscription_details(username)` returning
+`SubscriptionData(links, status, info)`. This obtains request-local usage and links
+in one upstream call; existing `configurations` adapters remain compatible and
+omit unavailable usage information. `SubscriptionInfo` validates byte counters and
+Unix expiry. The Marzban adapter uses current `used_traffic`, `data_limit`, `expire`;
+the HTTP adapter accepts a validated standard `subscription-userinfo` header.
+No shared adapter field stores another customer's metadata.

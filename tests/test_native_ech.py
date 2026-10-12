@@ -135,7 +135,7 @@ def test_compatibility_keeps_existing_entries_and_verifies_plain_tls() -> None:
     assert len(paired) == 3
     plain = paired[0]
     assert plain == replace(grpc, fingerprint="chrome")
-    assert paired[-1] == replace(existing[0], name=grpc.name + " [ECH fallback]")
+    assert paired[-1] == replace(existing[0], name=grpc.name + " | ECH FALLBACK")
     assert plain.uuid == grpc.uuid and plain.kind == grpc.kind
     assert not plain.ech_config_list
     stream = json.loads(XrayRenderer().render([plain]))[0]["outbounds"][0]["streamSettings"]

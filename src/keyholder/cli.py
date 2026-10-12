@@ -140,6 +140,8 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("profiles", nargs="+", choices=KINDS)
         if op in {"revoke", "rotate-token"}:
             command.add_argument("--confirm", action="store_true", dest="confirmed")
+        if op == "link":
+            command.add_argument("--info", action="store_true", help="Show the usage-page URL")
         if op in {"rotate-token", "link"}:
             command.add_argument("--save-link", type=Path)
     return p
@@ -312,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             "args": {
                 k: v
                 for k, v in vars(args).items()
-                if k not in {"operation", "host", "json", "save_link", "local"}
+                if k not in {"operation", "host", "json", "save_link", "local", "info"}
             },
         }
         result = (
@@ -327,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
                     "subscription_url": result["subscription_url"],
                 }
             )
+            if getattr(args, "info", False):
+                credentials["usage_url"] = result["subscription_url"] + "?format=info"
             if fd is not None:
                 with os.fdopen(fd, "w") as file:
                     fd = None
@@ -340,7 +344,10 @@ def main(argv: list[str] | None = None) -> int:
                     print("Prepared only: public access is not active yet.")
             else:
                 print("Customer ID:", result["customer"]["id"])
-                print("Subscription URL:", result["subscription_url"])
+                if getattr(args, "info", False):
+                    print("Usage URL:", credentials["usage_url"])
+                else:
+                    print("Subscription URL:", result["subscription_url"])
                 print(
                     "Retrieve this same link later with keyholder link USER; rotation is explicit."
                 )

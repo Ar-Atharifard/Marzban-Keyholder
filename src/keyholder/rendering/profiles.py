@@ -288,7 +288,7 @@ def apply_cdn_ech(
             ech = replace(p, ech_config_list=config, fingerprint="chrome")
             if include_plain_tls:
                 delivered.append(replace(p, ech_config_list="", fingerprint="chrome"))
-                fallbacks.append(replace(ech, name=p.name[:176] + " [ECH fallback]"))
+                fallbacks.append(replace(ech, name=p.name[:176] + " | ECH FALLBACK"))
             else:
                 delivered.append(ech)
         else:

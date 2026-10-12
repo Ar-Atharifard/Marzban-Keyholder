@@ -25,7 +25,14 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
     baseline = json.loads((CONTRACTS / "api-v1.json").read_text())
     for path, operations in baseline["paths"].items():
         for method, operation in operations.items():
-            assert schema["paths"][path][method] == operation
+            actual_operation = json.loads(json.dumps(schema["paths"][path][method]))
+            if path == "/s/{token}" and method == "get":
+                parameter = next(p for p in actual_operation["parameters"] if p["name"] == "format")
+                choices = parameter["schema"]["anyOf"][0]["enum"]
+                assert choices == ["uri", "xray", "info"]
+                # Explicit additive usage view: existing formats/defaults remain frozen.
+                parameter["schema"]["anyOf"][0]["enum"] = ["uri", "xray"]
+            assert actual_operation == operation
     for name, model in baseline["schemas"].items():
         actual = json.loads(json.dumps(schema["components"]["schemas"][name]))
         if name == "Policy":

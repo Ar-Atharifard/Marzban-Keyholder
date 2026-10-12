@@ -6,7 +6,12 @@ from urllib.parse import quote
 
 import httpx
 
-from keyholder.backends.base import UpstreamError, UpstreamUnavailable
+from keyholder.backends.base import (
+    SubscriptionData,
+    SubscriptionInfo,
+    UpstreamError,
+    UpstreamUnavailable,
+)
 from keyholder.config import BackendConfig
 
 
@@ -16,6 +21,9 @@ class SubscriptionBackend:
         self.client = client
 
     async def configurations(self, username: str) -> list[str]:
+        return (await self.subscription_details(username)).links
+
+    async def subscription_details(self, username: str) -> SubscriptionData:
         if not re.fullmatch(r"[a-zA-Z0-9_]{3,32}", username):
             raise UpstreamError("Invalid mapping")
         headers = {"Accept": "text/plain"}
@@ -34,6 +42,7 @@ class SubscriptionBackend:
                 response.raise_for_status()
                 if response.is_redirect:
                     raise UpstreamError("Redirect refused")
+                info = SubscriptionInfo.from_header(response.headers.get("subscription-userinfo"))
                 body = bytearray()
                 async for chunk in response.aiter_bytes():
                     body.extend(chunk)
@@ -48,6 +57,6 @@ class SubscriptionBackend:
             links = [line.strip() for line in text.splitlines() if line.strip()]
             if not links or len(links) > 128 or any(len(link) > 16384 for link in links):
                 raise UpstreamError("Invalid subscription body")
-            return links
+            return SubscriptionData(links, info=info)
         except (httpx.HTTPError, ValueError, UnicodeError):
             raise UpstreamError("Upstream request failed") from None
