@@ -8,7 +8,7 @@ when supported. `/health` does not establish panel or proxy connectivity.
 
 `keyholder backup` makes a private same-server recovery set: an online SQLite
 snapshot and its vault-key environment, plus explicitly configured files/SQLite
-sources. Include private panel access metadata when using a secret panel prefix.
+sources. Include private panel access metadata when using a secret panel entry.
 Root-owned mode-0600 configuration selects paths; backup directories are root-only.
 A copy on the same disk is not protection against host loss. Choose encrypted
 external storage, retention and restore objectives separately.
@@ -31,7 +31,7 @@ Git pulls over production-only changes, or migrate on every application startup.
 Shared ingress changes require syntax checks and graceful reload with recovery
 copies. Core changes can interrupt active proxy sessions even if URLs stay stable.
 
-## Private panel prefix
+## Private panel entry
 
 The optional `scripts/render_panel_gate.py` generator creates a private Nginx
 snippet and access metadata, refusing overwrite and not printing the entry URL.
@@ -47,9 +47,13 @@ Include the snippet in your gateway's `http` block with the referenced certifica
 files. Configure `panel_access_file` in the dispatcher, then retrieve the bookmark
 with `keyholder panel-url` in a terminal. Validate HTML, module assets, login/API
 and WebSocket traffic against your installed panel version before activation.
-The example targets Marzban's `/dashboard/`, `/statics/` and `/api/` layout; verify
-the layout again after panel upgrades. Old public dashboard/API/asset paths return
-404 on this hostname. Existing subscriptions on other hostnames remain separate.
+Opening the private bookmark sets a Secure, HttpOnly, SameSite=Strict gate cookie
+for 30 days and redirects to the native `/dashboard/` path. Dashboard, API, locale,
+asset and WebSocket routes retain their native paths; JavaScript is not rewritten.
+Requests without the gate cookie return 404, except the public decoy root. The
+native dashboard URL will appear in an admitted browser; it remains inaccessible
+to visitors without the gate cookie. Reopen the bookmark after cookie expiry or
+when switching browsers. Existing subscriptions on other hostnames remain separate.
 
 A random path reduces discovery; it is not a substitute for authentication and
 cannot hide the hostname or guarantee resistance to ISP filtering. Disable path

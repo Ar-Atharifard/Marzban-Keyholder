@@ -7,12 +7,19 @@ import pytest
 from scripts.render_panel_gate import main, render
 
 
-def test_private_prefix_routes_and_login_are_preserved() -> None:
+def test_private_entry_preserves_native_frontend_routes() -> None:
     prefix = "/manage-" + "a" * 43
     s = render("panel.example", prefix, "127.0.0.1:8000")
-    assert "location / { return 404; }" in s
-    assert "proxy_pass http://127.0.0.1:8000/dashboard/;" in s
-    assert "sub_filter" in s and prefix + "/api/" in s
+    assert "map $cookie_panel_gate $panel_allowed" in s
+    assert 'default 0; "' + "a" * 43 + '" 1;' in s
+    assert "return 302 /dashboard/;" in s
+    assert "Secure; HttpOnly; SameSite=Strict; Max-Age=2592000" in s
+    assert s.count("if ($panel_allowed = 0) { return 404; }") == 2
+    assert "location = /api/admin/token" in s
+    assert "proxy_pass http://127.0.0.1:8000;" in s
+    assert "sub_filter '/api/'" not in s
+    assert "sub_filter '/statics/'" not in s
+    assert "sub_filter_types" not in s
     assert 'Referrer-Policy "no-referrer"' in s
     assert "limit_req zone=panel_login" in s
 

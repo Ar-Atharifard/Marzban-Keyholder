@@ -1,4 +1,4 @@
-"""Generate a private panel-prefix gateway snippet; never print its entry URL."""
+"""Generate a private-entry cookie gateway snippet; never print its entry URL."""
 
 import argparse
 import json
@@ -17,6 +17,7 @@ def render(hostname: str, prefix: str, upstream: str) -> str:
         raise ValueError("Panel must remain on loopback")
     return f"""# Include in http. The prefix is an access secret; keep this file private.
 map $http_upgrade $panel_connection {{ default upgrade; '' close; }}
+map $cookie_panel_gate $panel_allowed {{ default 0; "{prefix[8:]}" 1; }}
 limit_req_zone $server_name zone=panel_login:1m rate=10r/m;
 server {{
     listen 443 ssl;
@@ -45,24 +46,28 @@ server {{
     proxy_cache off;
     proxy_max_temp_file_size 0;
     sub_filter_once off;
-    sub_filter_types application/javascript text/javascript text/css;
-    sub_filter '/statics/' '{prefix}/statics/';
-    sub_filter '/api/' '{prefix}/api/';
     sub_filter '<title>Marzban</title>' '<title>Management</title>';
     sub_filter 'content="Marzban"' 'content="Management"';
     location = / {{ root /usr/share/nginx/html; try_files /index.html =404; }}
     location = {prefix} {{ return 302 {prefix}/; }}
-    location = {prefix}/ {{ proxy_pass http://{upstream}/dashboard/; }}
-    location = {prefix}/api/admin/token {{
+    location = {prefix}/ {{
+        add_header Set-Cookie
+            "panel_gate={prefix[8:]}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000"
+            always;
+        add_header Cache-Control "private, no-store" always;
+        add_header Referrer-Policy "no-referrer" always;
+        return 302 /dashboard/;
+    }}
+    location = /api/admin/token {{
+        if ($panel_allowed = 0) {{ return 404; }}
         limit_req zone=panel_login burst=10 nodelay;
         limit_req_status 429;
         proxy_pass http://{upstream}/api/admin/token;
     }}
-    location ^~ {prefix}/ {{
-        rewrite ^{prefix}/(.*)$ /$1 break;
+    location / {{
+        if ($panel_allowed = 0) {{ return 404; }}
         proxy_pass http://{upstream};
     }}
-    location / {{ return 404; }}
 }}
 server {{
     listen 80;
