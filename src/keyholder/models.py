@@ -18,7 +18,7 @@ class Backend(Base):
     __tablename__ = "backends"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     provider: Mapped[str] = mapped_column(String(32), default="marzban")
-    # Environment prefix references, never credentials or caller-controlled URLs.
+    # Nonsecret configuration identities, never credentials or caller-controlled URLs.
     config_ref: Mapped[str] = mapped_column(String(64), default="default")
 
 

@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 from keyholder.api.dependencies import DB
 from keyholder.backends.base import UpstreamError, UpstreamUnavailable
 from keyholder.models import Customer
-from keyholder.policies import SUPPORTED_KINDS, stored_policy
+from keyholder.policies import stored_policy
 from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
 from keyholder.rendering.renderers import select_renderer
 from keyholder.schemas import ErrorResponse, Policy
@@ -63,8 +63,8 @@ async def subscription(
         raise HTTPException(503, "Backend unavailable")
     username = customer.mapping.upstream_username
     policy = (
-        {"profiles": list(SUPPORTED_KINDS)}
-        if request.app.state.settings.profile_source == "marzban"
+        {"profiles": list(request.app.state.settings.enabled_profiles)}
+        if request.app.state.settings.profile_source in {"marzban", "upstream"}
         else stored_policy(customer.policy)
     )
     # Release the read transaction before waiting for Marzban. Otherwise slow
@@ -73,9 +73,15 @@ async def subscription(
     try:
         async with asyncio.timeout(request.app.state.settings.upstream_timeout):
             links = await adapter.configurations(username)
-        profiles = generate_profiles(links, Policy.model_validate(policy))
+        settings = request.app.state.settings
+        profiles = generate_profiles(
+            links, Policy.model_validate(policy), settings.allowed_cdn_networks
+        )
+        profiles = [p for p in profiles if p.kind in settings.enabled_profiles]
         allowed_hosts = request.app.state.settings.allowed_cdn_hosts
-        profiles = [p for p in profiles if allowed_cdn(p, allowed_hosts)]
+        profiles = [
+            p for p in profiles if allowed_cdn(p, allowed_hosts, settings.allowed_cdn_networks)
+        ]
         profiles = apply_cdn_ech(profiles, request.app.state.settings.cdn_ech_config, allowed_hosts)
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
         content = renderer.render(profiles)

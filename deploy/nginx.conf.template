@@ -1,6 +1,5 @@
-# Cutover candidate only. Replace placeholders on the VPS; do not commit real
-# hostnames, private gRPC paths or certificates. Existing 2053 remains during
-# the transition until the external origin-port configuration is verified.
+# Generic host-Nginx example. Replace __PUBLIC_HOST__ and certificate paths.
+# Never enable access/error path logging for bearer subscriptions.
 worker_processes 1;
 error_log /dev/null crit;
 pid /tmp/nginx.pid;
@@ -33,16 +32,12 @@ http {
     server {
         listen 443 ssl default_server;
         listen [::]:443 ssl default_server;
-        listen 2053 ssl default_server;
-        listen [::]:2053 ssl default_server;
         ssl_reject_handshake on;
     }
 
     server {
         listen 443 ssl;
         listen [::]:443 ssl;
-        listen 2053 ssl;
-        listen [::]:2053 ssl;
         http2 on;
         server_name __PUBLIC_HOST__;
         ssl_certificate /etc/nginx/certs/origin.pem;
@@ -67,15 +62,6 @@ http {
             proxy_buffering off;
             proxy_cache off;
             add_header Cache-Control "private, no-store" always;
-        }
-
-        # Preserve the exact existing location matcher and path semantics.
-        # Fill this placeholder only on the VPS from its current configuration.
-        location __GRPC_LOCATION__ {
-            grpc_pass grpc://127.0.0.1:12084;
-            grpc_connect_timeout 3s;
-            grpc_read_timeout 1h;
-            grpc_send_timeout 1h;
         }
 
         # Administrator APIs and health checks remain loopback-only.

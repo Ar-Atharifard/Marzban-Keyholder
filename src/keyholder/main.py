@@ -9,12 +9,14 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from starlette.exceptions import HTTPException
 
 from keyholder.api import admin, public
-from keyholder.backends.marzban import MarzbanBackend
+from keyholder.backends.registry import backend_configs, build_backends
 from keyholder.config import Settings
 from keyholder.db import make_database
+from keyholder.models import Backend
 from keyholder.rate_limit import MemoryRateLimiter
 
 logger = logging.getLogger("keyholder")
@@ -34,15 +36,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(settings.upstream_timeout, connect=5),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            app.state.backends = {"marzban-default": MarzbanBackend(settings, client)}
-            yield
-        engine.dispose()
+        try:
+            configured = {c.id: c for c in backend_configs(settings)}
+            with sessions() as db:
+                for row in db.scalars(select(Backend)):
+                    spec = configured.get(row.id)
+                    if spec and (
+                        row.provider != spec.provider or row.config_ref != spec.config_ref
+                    ):
+                        raise RuntimeError("Registered backend identity differs from configuration")
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(settings.upstream_timeout, connect=5),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
+                app.state.backends = build_backends(settings, client)
+                yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(
         title="Keyholder", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None

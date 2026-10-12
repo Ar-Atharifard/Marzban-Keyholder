@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
-from keyholder.schemas import Policy, ProfileKind
+from keyholder.profile_types import ProfileKind
+from keyholder.schemas import Policy
 
 
 @dataclass(frozen=True, repr=False)
@@ -86,11 +87,23 @@ def cloudflare_ipv6(address: str) -> bool:
     return ip.version == 6 and any(ip in network for network in CLOUDFLARE_IPV6)
 
 
-def allowed_cdn(profile: Profile, allowed_hosts: tuple[str, ...]) -> bool:
+def trusted_cdn_ip(address: str, networks: tuple[str, ...] = ()) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return cloudflare_ipv6(address) or any(
+        ip in ipaddress.ip_network(network) for network in networks
+    )
+
+
+def allowed_cdn(
+    profile: Profile, allowed_hosts: tuple[str, ...], networks: tuple[str, ...] = ()
+) -> bool:
     """Permit DNS CDN hosts or trusted Cloudflare IPv6 edges with an allowed TLS/HTTP identity."""
     if profile.security != "tls":
         return True
-    if cloudflare_ipv6(profile.address):
+    if trusted_cdn_ip(profile.address, networks):
         if not allowed_hosts or profile.sni not in allowed_hosts:
             return False
         identity = profile.authority if profile.transport == "grpc" else profile.host
@@ -98,15 +111,15 @@ def allowed_cdn(profile: Profile, allowed_hosts: tuple[str, ...]) -> bool:
     return not allowed_hosts or profile.address in allowed_hosts
 
 
-def normalize(link: str) -> Profile | None:
+def normalize(link: str, networks: tuple[str, ...] = ()) -> Profile | None:
     """Normalize supported links; omit unsupported or malformed links."""
     if len(link) > 16384 or any(ord(c) < 32 or ord(c) == 127 for c in link):
         return None
     try:
         if link.startswith("vmess://"):
-            return normalize_vmess(link)
+            return normalize_vmess(link, networks)
         if link.startswith("trojan://"):
-            return normalize_trojan(link)
+            return normalize_trojan(link, networks)
         if link.startswith("ss://"):
             return normalize_shadowsocks(link)
         u = urlsplit(link)
@@ -137,7 +150,7 @@ def normalize(link: str) -> Profile | None:
             except ValueError:
                 kind = "grpc_cdn"
             else:
-                if not cloudflare_ipv6(u.hostname):
+                if not trusted_cdn_ip(u.hostname, networks):
                     return None
                 kind = "grpc_cdn"
         elif security == "tls" and transport in {"ws", "xhttp"}:
@@ -147,7 +160,7 @@ def normalize(link: str) -> Profile | None:
             except ValueError:
                 kind = "ws_tls_cdn" if transport == "ws" else "xhttp_tls_cdn"
             else:
-                if not cloudflare_ipv6(u.hostname):
+                if not trusted_cdn_ip(u.hostname, networks):
                     return None
                 kind = "ws_tls_cdn" if transport == "ws" else "xhttp_tls_cdn"
         else:
@@ -248,8 +261,14 @@ def normalize_shadowsocks(link: str) -> Profile | None:
     )
 
 
-def generate_profiles(links: list[str], policy: Policy) -> list[Profile]:
-    return [p for link in links if (p := normalize(link)) is not None and p.kind in policy.profiles]
+def generate_profiles(
+    links: list[str], policy: Policy, networks: tuple[str, ...] = ()
+) -> list[Profile]:
+    return [
+        p
+        for link in links
+        if (p := normalize(link, networks)) is not None and p.kind in policy.profiles
+    ]
 
 
 def apply_cdn_ech(
@@ -266,7 +285,7 @@ def apply_cdn_ech(
     ]
 
 
-def normalize_trojan(link: str) -> Profile | None:
+def normalize_trojan(link: str, networks: tuple[str, ...] = ()) -> Profile | None:
     u = urlsplit(link)
     if not u.hostname or not u.port or u.password or u.path not in {"", "/"}:
         return None
@@ -276,7 +295,7 @@ def normalize_trojan(link: str) -> Profile | None:
     # Reuse the strict TLS/REALITY transport parser, never import arbitrary settings.
     endpoint = f"[{u.hostname}]" if ":" in u.hostname else u.hostname
     synthetic = f"vless://00000000-0000-4000-8000-000000000000@{endpoint}:{u.port}"
-    parsed = normalize(synthetic + "?" + u.query + "#" + u.fragment)
+    parsed = normalize(synthetic + "?" + u.query + "#" + u.fragment, networks)
     if parsed is None:
         return None
     if parsed.security == "tls" and parsed.transport == "grpc":
@@ -285,7 +304,7 @@ def normalize_trojan(link: str) -> Profile | None:
         except ValueError:
             kind: ProfileKind = "trojan_grpc_cdn"
         else:
-            if not cloudflare_ipv6(parsed.address):
+            if not trusted_cdn_ip(parsed.address, networks):
                 return None
             kind = "trojan_grpc_cdn"
     elif parsed.security == "tls" and parsed.transport == "xhttp":
@@ -299,7 +318,7 @@ def normalize_trojan(link: str) -> Profile | None:
     return replace(parsed, kind=kind, protocol="trojan", password=password, uuid="", flow="")
 
 
-def normalize_vmess(link: str) -> Profile | None:
+def normalize_vmess(link: str, networks: tuple[str, ...] = ()) -> Profile | None:
     if "@" in link and "?" in link:
         u = urlsplit(link)
         if not u.hostname or not u.port or u.password or u.path not in {"", "/"}:
@@ -324,7 +343,9 @@ def normalize_vmess(link: str) -> Profile | None:
             "path": params.get("path", "/"),
             "scy": params.get("encryption", "auto"),
         }
-        return normalize_vmess("vmess://" + base64.b64encode(json.dumps(payload).encode()).decode())
+        return normalize_vmess(
+            "vmess://" + base64.b64encode(json.dumps(payload).encode()).decode(), networks
+        )
     data = json.loads(decode_base64(link[8:]).decode("utf-8"))
     if not isinstance(data, dict):
         return None
@@ -335,7 +356,7 @@ def normalize_vmess(link: str) -> Profile | None:
     except ValueError:
         pass
     else:
-        if not cloudflare_ipv6(address):
+        if not trusted_cdn_ip(address, networks):
             return None
     port = int(data.get("port", 0))
     if not 1 <= port <= 65535:

@@ -5,21 +5,21 @@ import json
 import logging
 import os
 import sys
+from contextvars import ContextVar
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-DEFAULT_KINDS = ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
-KINDS = [
-    *DEFAULT_KINDS,
-    "ws_tls_cdn",
-    "xhttp_tls_cdn",
-    "trojan_grpc_cdn",
-    "vmess_httpupgrade_cdn",
-    "trojan_reality_ipv6",
-    "trojan_xhttp_cdn",
-]
+from keyholder.profile_types import DEFAULT_PROFILES, SUPPORTED_KINDS
+
+DEFAULT_KINDS: list[str] = list(DEFAULT_PROFILES)
+KINDS = list(SUPPORTED_KINDS)
+SELECTED: ContextVar[str] = ContextVar("backend_id", default="marzban-default")
+
+
+def backend_id() -> str:
+    return SELECTED.get()
 
 
 class OperatorError(Exception):
@@ -35,7 +35,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
     request = Request(
-        "http://127.0.0.1:18000" + path,
+        os.getenv("KEYHOLDER_OPERATOR_API_URL", "http://127.0.0.1:18000").rstrip("/") + path,
         data=json.dumps(body).encode() if body is not None else None,
         headers={
             "Authorization": "Bearer " + os.environ["KEYHOLDER_ADMIN_KEY"],
@@ -74,7 +74,9 @@ def resolve(selector: str) -> dict[str, Any]:
         matches = [
             c
             for c in customers()
-            if c["mapping"]["upstream_username"] == selector and c["status"] != "revoked"
+            if c["mapping"]["upstream_username"] == selector
+            and c["mapping"]["backend_id"] == backend_id()
+            and c["status"] != "revoked"
         ]
         if not matches:
             raise OperatorError(
@@ -93,7 +95,7 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
     import httpx
 
     from keyholder.backends.base import UpstreamError, UpstreamUnavailable
-    from keyholder.backends.marzban import MarzbanBackend
+    from keyholder.backends.registry import build_backends
     from keyholder.config import Settings
     from keyholder.rendering.profiles import allowed_cdn, generate_profiles
     from keyholder.schemas import Policy
@@ -102,16 +104,30 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
     try:
         async with asyncio.timeout(settings.upstream_timeout):
             async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
-                links = await MarzbanBackend(settings, client).configurations(username)
-                authoritative = settings.profile_source == "marzban"
+                adapters = build_backends(settings, client)
+                adapter = adapters.get(backend_id())
+                if adapter is None:
+                    raise ValueError("Backend not configured")
+                links = await adapter.configurations(username)
+                authoritative = settings.profile_source in {"marzban", "upstream"}
                 result = generate_profiles(
-                    links, Policy.model_validate({"profiles": KINDS if authoritative else profiles})
+                    links,
+                    Policy.model_validate(
+                        {"profiles": list(settings.enabled_profiles) if authoritative else profiles}
+                    ),
+                    settings.allowed_cdn_networks,
                 )
-                result = [p for p in result if allowed_cdn(p, settings.allowed_cdn_hosts)]
+                result = [
+                    p
+                    for p in result
+                    if allowed_cdn(p, settings.allowed_cdn_hosts, settings.allowed_cdn_networks)
+                ]
                 if not result:
                     raise ValueError("No allowed profiles")
     except (UpstreamError, UpstreamUnavailable, TimeoutError, ValueError):
-        raise OperatorError("Marzban user is unavailable or has no compatible profiles.") from None
+        raise OperatorError(
+            "Upstream account is unavailable or has no compatible profiles."
+        ) from None
     kinds = sorted({p.kind for p in result})
     return {
         "available_profiles": kinds,
@@ -120,6 +136,20 @@ async def upstream(username: str, profiles: list[str]) -> dict[str, Any]:
 
 
 def execute(operation: str, args: dict[str, Any]) -> Any:
+    token = SELECTED.set(
+        args.get("backend_id", os.getenv("KEYHOLDER_OPERATOR_BACKEND_ID", "marzban-default"))
+    )
+    try:
+        return _execute(operation, args)
+    finally:
+        SELECTED.reset(token)
+
+
+def _execute(operation: str, args: dict[str, Any]) -> Any:
+    if operation == "backends":
+        return api("GET", "/admin/backends")
+    if operation == "backend-register":
+        return api("POST", "/admin/backends/register")
     if operation in {
         "users",
         "inbounds",
@@ -148,12 +178,18 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
             revision = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
             rows = db.execute(
                 "SELECT c.token_encrypted,c.token_hash FROM registrations r "
-                "JOIN customers c ON c.id=r.customer_id WHERE c.status!='revoked'"
+                "JOIN customers c ON c.id=r.customer_id "
+                "WHERE c.status!='revoked' AND r.backend_id=?",
+                (backend_id(),),
             ).fetchall()
             archived = db.execute(
-                "SELECT count(*) FROM customers WHERE status='revoked'"
+                "SELECT count(*) FROM customers c JOIN customer_mappings m ON m.customer_id=c.id "
+                "WHERE c.status='revoked' AND m.backend_id=?",
+                (backend_id(),),
             ).fetchone()[0]
-            canonical = db.execute("SELECT upstream_username FROM registrations").fetchall()
+            canonical = db.execute(
+                "SELECT upstream_username FROM registrations WHERE backend_id=?", (backend_id(),)
+            ).fetchall()
         retrievable = 0
         for encrypted, digest in rows:
             try:
@@ -161,49 +197,70 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
                 retrievable += 1
             except ValueError:
                 pass
-        users = asyncio.run(panel_operation("users", {}))
-        names = {u["username"] for u in users}
+        from keyholder.backends.registry import backend_configs
+
+        selected = next((c for c in backend_configs(settings) if c.id == backend_id()), None)
+        if selected is None:
+            raise OperatorError("Backend not configured.")
+        users = (
+            asyncio.run(panel_operation("users", {})) if selected.provider == "marzban" else None
+        )
+        names = {u["username"] for u in users} if users is not None else None
         mapped = {r[0] for r in canonical}
         return {
+            "backend_id": backend_id(),
             "database_integrity": integrity,
             "foreign_keys": foreign_keys,
             "revision": revision,
-            "marzban_users": len(users),
+            "marzban_users": len(users) if users is not None else None,
             "canonical_registrations": len(canonical),
             "revoked_history": archived,
             "retrievable_links": retrievable,
             "profile_source": settings.profile_source,
             "cdn_hosts": settings.allowed_cdn_hosts,
-            "registration_inventory_matches": names == mapped,
-            "healthy": integrity and foreign_keys and names == mapped and retrievable == len(rows),
+            "registration_inventory_matches": names == mapped if names is not None else None,
+            "healthy": integrity
+            and foreign_keys
+            and (names is None or names == mapped)
+            and retrievable == len(rows),
         }
     if operation == "health":
         return api("GET", "/health")
     if operation == "list":
-        rows = customers()
+        rows = [c for c in customers() if c["mapping"]["backend_id"] == backend_id()]
         if not args.get("history"):
             rows = [c for c in rows if c["status"] != "revoked"]
         return rows[args["offset"] : args["offset"] + args["limit"]]
     if operation == "create":
         username = args["username"]
-        matches = [c for c in customers() if c["mapping"]["upstream_username"] == username]
+        matches = [
+            c
+            for c in customers()
+            if c["mapping"]["upstream_username"] == username
+            and c["mapping"]["backend_id"] == backend_id()
+        ]
         active = [c for c in matches if c["status"] != "revoked"]
         if len(active) == 1:
             return api("GET", "/admin/customers/" + active[0]["id"] + "/subscription")
         if len(active) > 1:
             raise OperatorError("Legacy duplicates require keyholder reconcile --confirm.")
         profiles = args.get("profiles") or (
-            KINDS if os.getenv("KEYHOLDER_PROFILE_SOURCE") == "marzban" else DEFAULT_KINDS
+            KINDS
+            if os.getenv("KEYHOLDER_PROFILE_SOURCE") in {"marzban", "upstream"}
+            else DEFAULT_KINDS
         )
         check = asyncio.run(upstream(username, profiles))
         if check["missing_profiles"]:
-            raise OperatorError("Selected profiles are missing in Marzban; check user inbounds.")
+            raise OperatorError(
+                "Selected profiles are missing upstream; check provider selections."
+            )
         return api(
             "POST",
             "/admin/customers",
             {
                 "name": args["name"],
                 "upstream_username": username,
+                "backend_id": backend_id(),
                 "policy": {"profiles": profiles},
             },
         )
@@ -214,6 +271,7 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
     if operation == "show":
         return {**customer, "profile_source": os.getenv("KEYHOLDER_PROFILE_SOURCE", "policy")}
     if operation == "check":
+        SELECTED.set(customer["mapping"]["backend_id"])
         return {
             "customer_id": customer["id"],
             "local_status": customer["status"],
@@ -224,11 +282,11 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
     if operation == "remap":
         check = asyncio.run(upstream(args["username"], customer["policy"]["profiles"]))
         if check["missing_profiles"]:
-            raise OperatorError("Replacement Marzban user lacks selected profiles.")
+            raise OperatorError("Replacement upstream account lacks selected profiles.")
         return api(
             "PUT",
             path + "/mapping",
-            {"backend_id": "marzban-default", "upstream_username": args["username"]},
+            {"backend_id": backend_id(), "upstream_username": args["username"]},
         )
     if operation == "rotate-token":
         if not args.get("confirmed"):
@@ -243,14 +301,15 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
     if operation == "rename":
         return api("PATCH", path, {"name": args["name"]})
     if operation == "profiles":
-        if os.getenv("KEYHOLDER_PROFILE_SOURCE") == "marzban":
-            raise OperatorError("Marzban controls profiles; use user-inbounds or the panel.")
+        SELECTED.set(customer["mapping"]["backend_id"])
+        if os.getenv("KEYHOLDER_PROFILE_SOURCE") in {"marzban", "upstream"}:
+            raise OperatorError("The provider controls profiles; use its management interface.")
         if args["profiles"]:
             check = asyncio.run(
                 upstream(customer["mapping"]["upstream_username"], args["profiles"])
             )
             if check["missing_profiles"]:
-                raise OperatorError("Selected profiles are missing in Marzban.")
+                raise OperatorError("Selected profiles are missing upstream.")
         return api("PATCH", path, {"policy": {"profiles": args["profiles"]}})
     raise OperatorError("Unsupported operation.")
 
@@ -268,13 +327,17 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
     import httpx
 
     from keyholder.backends.marzban import MarzbanBackend
+    from keyholder.backends.registry import build_backends
     from keyholder.config import Settings
 
     settings = Settings()  # type: ignore[call-arg]
     async with httpx.AsyncClient(
         trust_env=False, follow_redirects=False, timeout=settings.upstream_timeout
     ) as client:
-        backend = MarzbanBackend(settings, client)
+        adapter = build_backends(settings, client).get(backend_id())
+        if not isinstance(adapter, MarzbanBackend):
+            raise OperatorError("Selected provider does not support panel management.")
+        backend = adapter
         await backend.login()
 
         async def call(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
@@ -310,7 +373,9 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                     [
                         c
                         for c in existing
-                        if c["mapping"]["upstream_username"] == name and c["status"] != "revoked"
+                        if c["mapping"]["upstream_username"] == name
+                        and c["mapping"]["backend_id"] == backend_id()
+                        and c["status"] != "revoked"
                     ],
                     key=lambda c: (c["created_at"], c["id"]),
                 )
@@ -326,7 +391,11 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                         api("PATCH", "/admin/customers/" + duplicate["id"], {"status": "revoked"})
                         revoked += 1
                 elif not matches:
-                    api("POST", "/admin/customers", {"name": name, "upstream_username": name})
+                    api(
+                        "POST",
+                        "/admin/customers",
+                        {"name": name, "upstream_username": name, "backend_id": backend_id()},
+                    )
                     count += 1
             return {"marzban_users": len(users), "registered": count, "duplicates_revoked": revoked}
         name = args["username"]
@@ -346,7 +415,11 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                 "expire": int(time.time()) + args["days"] * 86400 if args["days"] else 0,
             }
             await call("POST", "/api/user", body)
-            return api("POST", "/admin/customers", {"name": name, "upstream_username": name})
+            return api(
+                "POST",
+                "/admin/customers",
+                {"name": name, "upstream_username": name, "backend_id": backend_id()},
+            )
         user = await call("GET", path)
         if operation == "user-update":
             body = {}

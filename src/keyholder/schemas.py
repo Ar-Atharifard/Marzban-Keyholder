@@ -3,25 +3,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from keyholder.policies import SUPPORTED_KINDS, stored_policy
-
-ProfileKind = Literal[
-    "tcp_reality",
-    "xhttp_reality",
-    "grpc_cdn",
-    "tcp_reality_ipv6",
-    "shadowsocks_ipv6",
-    "ws_tls_cdn",
-    "xhttp_tls_cdn",
-    "trojan_grpc_cdn",
-    "vmess_httpupgrade_cdn",
-    "trojan_reality_ipv6",
-    "trojan_xhttp_cdn",
-]
+from keyholder.policies import stored_policy
+from keyholder.profile_types import DEFAULT_PROFILES, SUPPORTED_KINDS, ProfileKind
 
 
 def default_profiles() -> list[ProfileKind]:
-    return ["tcp_reality", "xhttp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
+    return list(DEFAULT_PROFILES)
 
 
 class Policy(BaseModel):
@@ -80,3 +67,10 @@ class TokenResult(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class BackendView(BaseModel):
+    id: str
+    provider: str
+    config_ref: str
+    registered: bool

@@ -14,6 +14,7 @@ def test_offline_schema_export_is_secret_free_and_matches_response_contracts(
     secret = "fixture-sensitive-value-never-in-schema"
     monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", secret)
     monkeypatch.setenv("KEYHOLDER_MARZBAN_TOKEN", secret)
+    monkeypatch.setenv("KEYHOLDER_BACKENDS", "malformed-private-config-" + secret)
     monkeypatch.setenv("KEYHOLDER_DATABASE_URL", f"sqlite:///{would_be_database}")
     root = Path(__file__).resolve().parents[1]
     subprocess.run(

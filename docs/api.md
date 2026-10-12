@@ -1,9 +1,7 @@
 # API reference
 
-This documents the deployed Marzban-only release. Public `/s/` uses Keyholder's
-configured HTTPS base. Admin and health routes are loopback-only through the
-production gateway; access them through an approved SSH tunnel, never by adding
-a public admin route.
+This documents the application API. Public `/s/` uses the configured subscription
+base. Keep admin and health routes private behind your ingress or SSH access.
 
 ## Authentication and response conventions
 
@@ -29,14 +27,14 @@ validation errors return `{"detail":"Invalid request"}` without echoing inputs.
 | `backend_id` | Default `marzban-default`; 1–64 ASCII letters, digits, `_` or `-` |
 | `upstream_username` | Required; 3–32 ASCII letters, digits or `_` |
 
-Only `marzban-default` has a runtime adapter. A backend row does not automatically
-enable a provider. Mapping changes do not contact Marzban or validate user existence;
+Adapters are registered from server-owned configuration. A backend row does not automatically
+enable a provider. Mapping changes do not contact upstream providers or validate user existence;
 missing users or permission failures surface when fetching the subscription.
 
 `Policy` has one field, `profiles`: a list of at most eleven supported profile names.
 The defaults retain the original five profiles for compatibility. An empty list is allowed
 and disables compatible output in legacy policy mode, producing 503.
-Production uses `KEYHOLDER_PROFILE_SOURCE=marzban`: supported current upstream
+With `KEYHOLDER_PROFILE_SOURCE=upstream`: supported current upstream
 selections control output; stored policy is retained for compatibility. Supported choices are:
 
 - `tcp_reality`
@@ -88,7 +86,7 @@ format values return 422.
 Only active local and upstream customers can receive output. Unsupported/malformed
 links are omitted. Empty compatible output returns 503. XHTTP `extra` is omitted
 from the URI query and JSON `xhttpSettings`, while allowed host/path/mode fields
-are retained. Legacy ECH is not generated. Optional trusted native CDN ECH is added by delivery configuration (see TRANSPORTS.md); upstream ECH remains ignored. This processing never rewrites panel inbounds.
+are retained. Legacy ECH is not generated. Optional trusted native CDN ECH is added by delivery configuration (see [configuration](configuration.md)); upstream ECH remains ignored. This processing never rewrites panel inbounds.
 
 ### POST `/admin/customers`
 
@@ -213,3 +211,12 @@ The October 12 streaming expansion adds `trojan_xhttp_cdn` without changing exis
 endpoints, subscription paths, tokens, defaults or legacy output fixtures. VLESS
 streaming XHTTP uses the existing `xhttp_tls_cdn` family. Multiple Marzban host
 entries can produce multiple configurations in the same family.
+
+## Provider metadata endpoints
+
+`GET /admin/backends` lists configured adapters as `id`, `provider`, `config_ref`
+and `registered`. No source URLs or credentials are returned.
+`POST /admin/backends/register` explicitly registers configured metadata. It is
+idempotent; existing provider/config-reference mismatches return 409 and are not
+overwritten. Both endpoints require the same administrator bearer authentication.
+Server configuration, not this API, controls adapter credentials and URLs.

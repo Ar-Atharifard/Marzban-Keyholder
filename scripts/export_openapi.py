@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -14,6 +15,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    # This offline process must not read deployment configuration, including new providers.
+    for key in list(os.environ):
+        if key.startswith("KEYHOLDER_"):
+            del os.environ[key]
     settings = Settings(  # type: ignore[call-arg]  # _env_file is a BaseSettings runtime option.
         _env_file=None,
         admin_key=SecretStr("offline-schema-fixture-" + "x" * 32),

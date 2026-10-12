@@ -8,7 +8,28 @@ import sys
 from pathlib import Path
 from typing import Any
 
-CONTAINER = "keyholder-api-1"
+
+def configuration() -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "api_container": "keyholder-api-1",
+        "status_containers": ["keyholder-api-1"],
+        "container_python": "/app/.venv/bin/python",
+        "api_url": "http://127.0.0.1:18000",
+        "panel_access_file": "/etc/keyholder/panel-access.json",
+        "backup_dir": "/var/backups/keyholder",
+        "env_file": "/etc/keyholder/keyholder.env",
+        "extra_backups": {},
+        "sqlite_backups": {},
+    }
+    file = Path(os.getenv("KEYHOLDER_HOST_CONFIG", str(Path(__file__).with_name("host.json"))))
+    if file.exists():
+        if file.is_symlink() or file.stat().st_uid != 0 or file.stat().st_mode & 0o077:
+            raise ValueError("Host configuration must be root-owned and private")
+        supplied = json.loads(file.read_text())
+        if not isinstance(supplied, dict) or not supplied.keys() <= defaults.keys():
+            raise ValueError("Unknown host configuration field")
+        defaults.update(supplied)
+    return defaults
 
 
 def inspect(name: str) -> dict[str, Any]:
@@ -19,10 +40,12 @@ def inspect(name: str) -> dict[str, Any]:
 
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
+    config = configuration()
+    container = str(config["api_container"])
     operation = payload["operation"]
     if operation == "status":
         states = []
-        for name in [CONTAINER, "braavos-gateway", "marzban-marzban-1"]:
+        for name in config["status_containers"]:
             item = inspect(name)
             states.append(
                 {
@@ -34,16 +57,16 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             )
         return {"ok": True, "result": states}
     if operation == "panel-url":
-        state = json.loads(Path("/opt/braavos-panel/access.json").read_text())
+        state = json.loads(Path(config["panel_access_file"]).read_text())
         return {"ok": True, "result": {"panel_url": state["panel_url"], "active": state["active"]}}
     if operation == "backup":
-        item = inspect(CONTAINER)
+        item = inspect(container)
         source = next(
             Path(m["Source"]) / "keyholder.db"
             for m in item["Mounts"]
             if m["Destination"] == "/data" and m["Type"] == "volume"
         )
-        folder = Path("/var/backups/keyholder")
+        folder = Path(config["backup_dir"])
         folder.mkdir(mode=0o700, exist_ok=True)
         if folder.is_symlink() or folder.stat().st_uid != 0 or folder.stat().st_mode & 0o077:
             raise ValueError("Backup directory must be root-only")
@@ -64,38 +87,50 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         recovery = folder / destination.stem
         recovery.mkdir(mode=0o700)
         shutil.copy2(destination, recovery / "keyholder.sqlite3")
-        shutil.copy2("/srv/keyholder/.env", recovery / "keyholder.env")
+        shutil.copy2(config["env_file"], recovery / "keyholder.env")
         (recovery / "keyholder.env").chmod(0o600)
-        for backup_source, name in [
-            ("/var/lib/marzban/xray_config.json", "xray.json"),
-            ("/opt/braavos-gateway/nginx/nginx.conf", "nginx.conf"),
-        ]:
+        for name, backup_source in config["extra_backups"].items():
+            if Path(name).name != name or name in {"keyholder.env", "keyholder.sqlite3"}:
+                raise ValueError("Invalid backup destination")
             shutil.copy2(backup_source, recovery / name)
             (recovery / name).chmod(0o600)
-        subprocess.run(
-            [
-                sys.executable,
-                str(tool),
-                "--source",
-                "/var/lib/marzban/db.sqlite3",
-                "--destination",
-                str(recovery / "marzban.sqlite3"),
-            ],
-            capture_output=True,
-            timeout=40,
-            check=True,
-        )
+        for name, source in config["sqlite_backups"].items():
+            if Path(name).name != name or name in {"keyholder.env", "keyholder.sqlite3"}:
+                raise ValueError("Invalid SQLite backup destination")
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(tool),
+                    "--source",
+                    str(source),
+                    "--destination",
+                    str(recovery / name),
+                ],
+                capture_output=True,
+                timeout=40,
+                check=True,
+            )
         return {
             "ok": True,
             "result": {
                 "backup": str(recovery),
                 "integrity": "ok",
-                "includes": ["keyholder", "vault-key-env", "marzban"],
+                "includes": ["keyholder", "vault-key-env", *config["sqlite_backups"]],
             },
         }
     worker = Path(__file__).with_name("worker.py").read_text()
     result = subprocess.run(
-        ["docker", "exec", "-i", CONTAINER, "/app/.venv/bin/python", "-c", worker],
+        [
+            "docker",
+            "exec",
+            "-i",
+            "-e",
+            "KEYHOLDER_OPERATOR_API_URL=" + config["api_url"],
+            container,
+            config["container_python"],
+            "-c",
+            worker,
+        ],
         input=json.dumps(payload).encode(),
         capture_output=True,
         timeout=60,

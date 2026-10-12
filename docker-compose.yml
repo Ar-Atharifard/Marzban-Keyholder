@@ -2,14 +2,17 @@ name: keyholder
 services:
   api:
     build: .
-    network_mode: host
-    command: [/app/.venv/bin/uvicorn, "keyholder.main:create_app", --factory, --host, "127.0.0.1", --port, "18000", --workers, "1", --no-access-log, --no-proxy-headers, --log-level, info]
+    ports:
+      - "${KEYHOLDER_PUBLISH_ADDRESS:-127.0.0.1}:${KEYHOLDER_PUBLISH_PORT:-18000}:18000"
+    command: [/app/.venv/bin/uvicorn, "keyholder.main:create_app", --factory, --host, "0.0.0.0", --port, "18000", --workers, "1", --no-access-log, --no-proxy-headers, --log-level, info]
     env_file: ${KEYHOLDER_ENV_FILE:-.env}
     environment:
       KEYHOLDER_DATABASE_URL: sqlite:////data/keyholder.db
     volumes:
       - keyholder-data:/data
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777

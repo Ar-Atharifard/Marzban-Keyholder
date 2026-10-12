@@ -1,0 +1,12 @@
+title = "Keyholder secret scanning"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "The exact example Docker container identifier is not a credential"
+condition = "AND"
+paths = ['''scripts/admin/(host\.py|README\.md)$''']
+regexTarget = "line"
+regexes = ['''^\s*"api_container":\s*"keyholder-api-1",?\s*$''']

@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from scripts.admin.cli import main, parser
+from keyholder.cli import main, parser
 
 
 def test_management_commands_cover_provisioning_and_panel_selection() -> None:
@@ -140,7 +140,7 @@ def test_panel_selection_preserves_credentials_and_accepts_empty_selection(
 
 
 def test_doctor_failed_health_has_nonzero_cli_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.admin import cli
+    from keyholder import cli
 
     monkeypatch.setattr(cli, "request", lambda *a, **kw: {"ok": True, "result": {"healthy": False}})
     assert main(["doctor"]) == 1
@@ -173,9 +173,13 @@ def test_lookup_distinguishes_missing_registration_from_duplicates(
         worker,
         "customers",
         lambda: [
-            {"mapping": {"upstream_username": "OWNER"}, "status": "active"} for _ in range(count)
+            {
+                "mapping": {"upstream_username": "ALICE", "backend_id": "marzban-default"},
+                "status": "active",
+            }
+            for _ in range(count)
         ],
     )
     expected = "run keyholder create USER first" if count == 0 else "multiple registrations"
     with pytest.raises(worker.OperatorError, match=expected):
-        worker.resolve("OWNER")
+        worker.resolve("ALICE")

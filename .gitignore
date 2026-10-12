@@ -23,3 +23,10 @@ logs/
 
 # Code-only onboarding snapshots; keep outside releases.
 .audit/
+
+# Personal notes, deployment records and publication artifacts stay local.
+.private/
+.keyholder-admin.json
+dist/
+build/
+*.egg-info/

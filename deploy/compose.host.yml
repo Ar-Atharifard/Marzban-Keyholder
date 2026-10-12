@@ -1,0 +1,6 @@
+# Same-host Linux deployment: reach an existing panel bound to host loopback.
+services:
+  api:
+    network_mode: host
+    ports: !reset []
+    command: [/app/.venv/bin/uvicorn, "keyholder.main:create_app", --factory, --host, "127.0.0.1", --port, "18000", --workers, "1", --no-access-log, --no-proxy-headers, --log-level, info]

@@ -2,19 +2,8 @@
 
 from typing import Any
 
-SUPPORTED_KINDS = (
-    "tcp_reality",
-    "xhttp_reality",
-    "grpc_cdn",
-    "tcp_reality_ipv6",
-    "shadowsocks_ipv6",
-    "ws_tls_cdn",
-    "xhttp_tls_cdn",
-    "trojan_grpc_cdn",
-    "vmess_httpupgrade_cdn",
-    "trojan_reality_ipv6",
-    "trojan_xhttp_cdn",
-)
+from keyholder.profile_types import SUPPORTED_KINDS as SUPPORTED_KINDS
+
 LEGACY_DEFAULTS = ("xhttp_reality", "tcp_reality")
 
 

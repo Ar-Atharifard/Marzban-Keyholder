@@ -5,8 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from keyholder.api.dependencies import DB, admin
+from keyholder.backends.registry import backend_configs
 from keyholder.models import Backend, Customer, CustomerMapping, Registration, now
 from keyholder.schemas import (
+    BackendView,
     CustomerCreate,
     CustomerUpdate,
     CustomerView,
@@ -29,6 +31,47 @@ router = APIRouter(
 )
 
 
+@router.get("/backends", response_model=list[BackendView])
+def backends(request: Request, db: DB) -> list[BackendView]:
+    return [
+        BackendView(
+            id=c.id,
+            provider=c.provider,
+            config_ref=c.config_ref,
+            registered=db.get(Backend, c.id) is not None,
+        )
+        for c in backend_configs(request.app.state.settings)
+    ]
+
+
+@router.post(
+    "/backends/register",
+    response_model=list[BackendView],
+    responses={
+        409: {"model": ErrorResponse, "description": "Backend registration conflict"},
+    },
+)
+def register_backends(request: Request, db: DB) -> list[BackendView]:
+    configs = backend_configs(request.app.state.settings)
+    for c in configs:
+        row = db.get(Backend, c.id)
+        if row and (row.provider != c.provider or row.config_ref != c.config_ref):
+            raise HTTPException(409, "Existing backend identity differs; use a new backend ID")
+    for c in configs:
+        if db.get(Backend, c.id) is None:
+            db.add(Backend(id=c.id, provider=c.provider, config_ref=c.config_ref))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # A concurrent registration may win; verify its metadata before success.
+        for c in configs:
+            row = db.get(Backend, c.id)
+            if not row or row.provider != c.provider or row.config_ref != c.config_ref:
+                raise HTTPException(409, "Backend registration conflict") from None
+    return backends(request, db)
+
+
 def find(db: DB, customer_id: str) -> Customer:
     customer = db.get(Customer, customer_id)
     if not customer:
@@ -46,7 +89,7 @@ def token_result(request: Request, customer: Customer, token: str) -> TokenResul
 
 @router.post("/customers", response_model=TokenResult, status_code=201)
 def create(body: CustomerCreate, request: Request, db: DB) -> TokenResult:
-    if not db.get(Backend, body.backend_id):
+    if not db.get(Backend, body.backend_id) or body.backend_id not in request.app.state.backends:
         raise HTTPException(422, "Unknown backend")
     existing = db.get(Registration, (body.backend_id, body.upstream_username))
     if existing:
@@ -135,11 +178,11 @@ def update(customer_id: str, body: CustomerUpdate, db: DB) -> Customer:
         409: {"model": ErrorResponse, "description": "Revoked customers are terminal"},
     },
 )
-def mapping(customer_id: str, body: MappingInput, db: DB) -> Customer:
+def mapping(customer_id: str, body: MappingInput, db: DB, request: Request) -> Customer:
     customer = find(db, customer_id)
     if customer.status == "revoked":
         raise HTTPException(409, "Revoked customers are terminal")
-    if not db.get(Backend, body.backend_id):
+    if not db.get(Backend, body.backend_id) or body.backend_id not in request.app.state.backends:
         raise HTTPException(422, "Unknown backend")
     existing = db.get(Registration, (body.backend_id, body.upstream_username))
     if existing and existing.customer_id != customer.id:

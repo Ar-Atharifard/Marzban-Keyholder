@@ -6,7 +6,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from scripts.admin import cli, worker
+from keyholder import cli
+from scripts.admin import worker
 from tests.conftest import ADMIN_KEY
 
 
