@@ -8,7 +8,7 @@ from keyholder.api.dependencies import DB
 from keyholder.backends.base import SubscriptionData, UpstreamError, UpstreamUnavailable
 from keyholder.models import Customer
 from keyholder.policies import stored_policy
-from keyholder.rendering.information import render_information
+from keyholder.rendering.information import information_profile, render_information
 from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
 from keyholder.rendering.renderers import select_renderer
 from keyholder.schemas import ErrorResponse, Policy
@@ -116,6 +116,8 @@ async def subscription(
             profiles, settings.cdn_ech_config, allowed_hosts, settings.cdn_tls_compatibility
         )
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
+        if data.info is not None and output in {None, "uri"}:
+            profiles.insert(0, information_profile(data.info, data.status))
         content = renderer.render(profiles)
     except UpstreamUnavailable:
         raise HTTPException(404, "Subscription unavailable") from None

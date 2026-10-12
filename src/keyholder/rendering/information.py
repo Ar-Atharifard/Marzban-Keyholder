@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from html import escape
 
 from keyholder.backends.base import SubscriptionInfo
+from keyholder.rendering.profiles import Profile
 
 
 def byte_count(value: int) -> str:
@@ -14,6 +15,30 @@ def byte_count(value: int) -> str:
             return f"{amount:.2f} {unit}"
         amount /= 1024
     raise AssertionError("Unreachable")
+
+
+def information_profile(info: SubscriptionInfo, status: str, now: int | None = None) -> Profile:
+    """Return a local-only URI record for clients that ignore subscription metadata."""
+    used = info.upload + info.download
+    traffic = (
+        f"{byte_count(max(0, info.total - used)).upper()} LEFT" if info.total else "UNLIMITED DATA"
+    )
+    current = int(time.time()) if now is None else now
+    if info.expire:
+        seconds = max(0, info.expire - current)
+        time_left = "EXPIRED" if seconds == 0 else f"{(seconds + 86399) // 86400}D LEFT"
+    else:
+        time_left = "AWAITING ACTIVATION" if status == "on_hold" else "NO EXPIRY"
+    return Profile(
+        kind="tcp_reality",
+        name=f"ACCOUNT INFO | {traffic} | {time_left} | DO NOT USE",
+        address="127.0.0.1",
+        port=1,
+        transport="tcp",
+        security="none",
+        uuid="00000000-0000-4000-8000-000000000000",
+        fingerprint="",
+    )
 
 
 def render_information(info: SubscriptionInfo, status: str) -> str:

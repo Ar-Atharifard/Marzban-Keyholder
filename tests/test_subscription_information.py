@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from typing import cast
 
 import httpx
@@ -41,6 +42,16 @@ def test_metadata_and_usage_share_original_token(client: TestClient, format: str
         assert r.headers["referrer-policy"] == "no-referrer"
         assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
         assert "<script" not in r.text
+    elif format == "uri":
+        links = base64.b64decode(r.text, validate=True).decode().splitlines()
+        assert len(links) == 2
+        assert links[0].startswith("vless://00000000-0000-4000-8000-000000000000@127.0.0.1:1?")
+        assert "ACCOUNT%20INFO" in links[0] and "DO%20NOT%20USE" in links[0]
+        assert "@192.0.2.1:9443?" in links[1]
+        assert "extra=" not in links[1]
+    else:
+        assert len(r.json()) == 1
+        assert r.json()[0]["outbounds"][0]["settings"]["vnext"][0]["address"] != "127.0.0.1"
 
 
 def test_limited_account_can_view_information_but_not_configurations(client: TestClient) -> None:

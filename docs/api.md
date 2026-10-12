@@ -54,8 +54,9 @@ Unknown request fields/profile names are rejected. `ech_enabled`,
 Legacy stored policies are read conservatively: supported selections remain, old
 fields are omitted, and new families are not added automatically.
 
-`CustomerView` contains `id`, `name`, `status`, `policy`, `created_at`, `updated_at`,
-`revoked_at` and `mapping`. IDs are opaque strings generated as UUIDs. Timestamps
+`CustomerView` contains `id`, private `name`, nullable `telegram` and `phone`,
+`status`, `policy`, `created_at`, `updated_at`, `revoked_at` and `mapping`. IDs are
+opaque strings generated as UUIDs. Timestamps
 are ISO datetime values; `revoked_at` is null until revocation. SQLite may serialize
 timestamps internally without an offset; API views normalize them to UTC. No token
 hash or raw token is included in this view.
@@ -78,6 +79,12 @@ returns `application/json`: an array of individual Xray client configurations,
 each with remarks, a loopback SOCKS inbound and one proxy outbound. These formats
 include supported profiles selected by Marzban in production; legacy policy mode
 uses the stored selection. The configured CDN allowlist applies in either mode.
+
+When validated usage metadata exists, URI output begins with one deliberately
+unusable informational record because common clients ignore the standard header.
+Its name shows remaining traffic and time, and it points only to `127.0.0.1:1`.
+It must not be selected. Its failed delay result is expected. Xray JSON output
+does not include this record, and every real profile remains unchanged.
 
 With no format, URI output is the default. An opt-in `Keyholder-Xray` User-Agent
 marker selects Xray JSON. Other client names/versions are not guessed. Invalid

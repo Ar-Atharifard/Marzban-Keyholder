@@ -21,5 +21,7 @@ Changes to shared Docker/ingress settings require a deployment review even when
 application API contracts are unchanged.
 
 The optional `format=info` usage view and `subscription-userinfo` response header
-are additive. Existing URI/Xray formats, token validation, defaults and URLs retain
-their semantics. The API contract test allows only this explicit format addition.
+are additive. When metadata exists, URI output also has one leading local-only
+informational record; existing real profile URIs and their relative order remain
+unchanged, and Xray JSON output is unchanged. Token validation, defaults and URLs
+retain their semantics. Contract tests explicitly review these additions.
