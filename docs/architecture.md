@@ -35,7 +35,7 @@ Changing the panel selection does not require per-user source changes.
 
 | Table | Stores |
 |---|---|
-| `customers` | ID, name, local status, token hash/encrypted token, legacy policy and timestamps |
+| `customers` | ID, private name, nullable unique Telegram/phone, local status, token hash/encrypted token, legacy policy and timestamps |
 | `customer_mappings` | Customer → backend ID and upstream account reference |
 | `registrations` | Unique canonical customer per backend/account namespace |
 | `backends` | Nonsecret provider/config-reference metadata |
@@ -45,6 +45,8 @@ Changing the panel selection does not require per-user source changes.
 Tokens use a high-entropy random value; hashes identify incoming requests, while a
 server-only Fernet key enables authenticated retrieval. Token expiry is not scheduled.
 Explicit rotation/revocation and domain/database/key loss affect availability.
+Customer contact fields are plaintext administrator metadata in the private
+database and backups. They never appear in subscriptions or provider mappings.
 
 ## Boundaries
 

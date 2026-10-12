@@ -180,6 +180,6 @@ def test_lookup_distinguishes_missing_registration_from_duplicates(
             for _ in range(count)
         ],
     )
-    expected = "run keyholder create USER first" if count == 0 else "multiple registrations"
+    expected = "No Keyholder registration" if count == 0 else "selector is ambiguous"
     with pytest.raises(worker.OperatorError, match=expected):
         worker.resolve("ALICE")

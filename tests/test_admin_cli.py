@@ -51,6 +51,56 @@ def test_attach_preflight_duplicate_and_link_preserving_management(
     assert worker.execute("show", {"customer": "replacement"})["id"] == cid
 
 
+def test_customer_identity_cli_update_and_contact_lookup(operator: None) -> None:
+    result = worker.execute(
+        "create",
+        {
+            "username": "alice",
+            "name": "Alice",
+            "telegram": "@Alice_Handle",
+            "phone": "+989121234567",
+        },
+    )
+    cid = result["customer"]["id"]
+    assert worker.execute("show", {"customer": "alice_handle"})["id"] == cid
+    assert worker.execute("show", {"customer": "+989121234567"})["id"] == cid
+    updated = worker.execute(
+        "customer-update",
+        {
+            "customer": cid,
+            "name": "Alice Example",
+            "clear_telegram": True,
+            "clear_phone": True,
+        },
+    )
+    assert updated["name"] == "Alice Example"
+    assert updated["telegram"] is None and updated["phone"] is None
+
+
+def test_user_create_accepts_private_identity_fields() -> None:
+    args = cli.parser().parse_args(
+        [
+            "user-create",
+            "opaque_01",
+            "--name",
+            "Full Name",
+            "--telegram",
+            "@handle",
+            "--phone",
+            "+989121234567",
+            "--quota-gb",
+            "10",
+            "--days",
+            "30",
+            "--protocols",
+            "vless",
+        ]
+    )
+    assert args.name == "Full Name"
+    assert args.telegram == "@handle"
+    assert args.phone == "+989121234567"
+
+
 def test_missing_upstream_profiles_never_creates_customer(
     operator: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

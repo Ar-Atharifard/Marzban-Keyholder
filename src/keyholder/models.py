@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -29,6 +29,8 @@ class Customer(Base):
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(200))
+    telegram: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active")
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     token_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -37,6 +39,20 @@ class Customer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mapping: Mapped["CustomerMapping"] = relationship(cascade="all, delete-orphan", uselist=False)
+
+
+Index(
+    "uq_customers_telegram",
+    Customer.telegram.collate("NOCASE"),
+    unique=True,
+    sqlite_where=text("telegram IS NOT NULL"),
+)
+Index(
+    "uq_customers_phone",
+    Customer.phone,
+    unique=True,
+    sqlite_where=text("phone IS NOT NULL"),
+)
 
 
 class CustomerMapping(Base):

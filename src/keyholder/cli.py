@@ -76,6 +76,11 @@ def parser() -> argparse.ArgumentParser:
         "user-create", help="Provision Marzban and register a stable link"
     )
     user_create.add_argument("username")
+    user_create.add_argument("--name", help="Private customer name; defaults to username")
+    user_create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
+    user_create.add_argument(
+        "--phone", help="Unique international phone number, for example +98912..."
+    )
     user_create.add_argument(
         "--quota-gb", type=float, required=True, help="0 explicitly means unlimited"
     )
@@ -114,10 +119,21 @@ def parser() -> argparse.ArgumentParser:
     create = commands.add_parser("create", help="Attach an existing active Marzban user")
     create.add_argument("username")
     create.add_argument("--name", help="Display name; defaults to Marzban username")
+    create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
+    create.add_argument("--phone", help="Unique international phone number, for example +98912...")
     create.add_argument("--profiles", nargs="+", choices=KINDS)
     create.add_argument(
         "--save-link", type=Path, help="Explicit private local file, never overwritten"
     )
+    customer_update = commands.add_parser(
+        "customer-update", help="Update private customer identity metadata"
+    )
+    customer_update.add_argument("customer", help="Customer ID, username, Telegram or phone")
+    customer_update.add_argument("--name")
+    customer_update.add_argument("--telegram")
+    customer_update.add_argument("--phone")
+    customer_update.add_argument("--clear-telegram", action="store_true")
+    customer_update.add_argument("--clear-phone", action="store_true")
     for op in [
         "link",
         "show",
@@ -186,7 +202,9 @@ def display(result: Any, as_json: bool) -> None:
     for item in result:
         if "mapping" in item:
             print(
-                "\t".join(safe(item[k]) for k in ["id", "name", "status"]),
+                "\t".join(
+                    safe(item.get(k, "")) for k in ["id", "name", "telegram", "phone", "status"]
+                ),
                 safe(item["mapping"]["upstream_username"]),
                 sep="\t",
             )
@@ -282,10 +300,27 @@ def main(argv: list[str] | None = None) -> int:
         p.error(
             "Use --confirm: revocation, token rotation and traffic reset are explicit operations."
         )
-    if args.operation == "create":
+    if args.operation in {"create", "user-create"}:
         args.name = args.name or args.username
-    if args.operation in {"create", "rename"} and not 1 <= len(args.name) <= 200:
+    if args.operation in {"create", "user-create", "rename"} and not 1 <= len(args.name) <= 200:
         p.error("Name must contain 1–200 characters.")
+    if args.operation == "customer-update":
+        if args.clear_telegram and args.telegram is not None:
+            p.error("Use either --telegram or --clear-telegram.")
+        if args.clear_phone and args.phone is not None:
+            p.error("Use either --phone or --clear-phone.")
+        if args.name is not None and not 1 <= len(args.name) <= 200:
+            p.error("Name must contain 1–200 characters.")
+        if not any(
+            [
+                args.name is not None,
+                args.telegram is not None,
+                args.phone is not None,
+                args.clear_telegram,
+                args.clear_phone,
+            ]
+        ):
+            p.error("Specify at least one customer identity change.")
     if args.local and (os.geteuid() != 0 or args.operation == "panel"):
         p.error("--local is for root on the VPS; panel forwarding runs on the workstation.")
     if args.operation in {"user-create", "user-update"}:

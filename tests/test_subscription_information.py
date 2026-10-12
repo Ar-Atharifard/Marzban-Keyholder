@@ -57,7 +57,9 @@ def test_limited_account_can_view_information_but_not_configurations(client: Tes
     r = client.get(url + "?format=info")
     assert r.status_code == 200 and "0.00 B" in r.text and "Expired" in r.text
     assert client.get("/s/invalid?format=info").status_code == 404
-    cid = registered["customer"]["id"]
+    customer = registered["customer"]
+    assert isinstance(customer, dict)
+    cid = customer["id"]
     disabled = client.patch(
         f"/admin/customers/{cid}",
         json={"status": "disabled"},
@@ -108,7 +110,9 @@ def test_marzban_metadata_is_request_local_and_preserves_inactive_contract() -> 
             )
 
         settings = Settings(
-            admin_key=SecretStr(ADMIN_KEY), marzban_username="admin", marzban_password="test"
+            admin_key=SecretStr(ADMIN_KEY),
+            marzban_username=SecretStr("admin"),
+            marzban_password=SecretStr("test"),
         )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             backend = MarzbanBackend(settings, client)

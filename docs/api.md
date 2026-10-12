@@ -92,12 +92,17 @@ are retained. Legacy ECH is not generated. Optional trusted native CDN ECH is ad
 
 Create the Marzban user separately first. This endpoint atomically registers or retrieves only local identity
 and mapping. A database constraint guarantees one canonical registration per
-backend/username, including concurrent calls. Body combines MappingInput with required `name` (1–200 characters)
-and optional `policy`. Example with all current families explicitly selected:
+backend/username, including concurrent calls. Body combines MappingInput with
+required private `name` (1–200 characters), nullable `telegram` and `phone`, and
+optional `policy`. Telegram and phone are administrator-only and unique when
+present. Telegram usernames are stored lowercase with `@`; phone numbers are
+stored in international `+digits` form. Example:
 
 ```json
 {
   "name": "Example customer",
+  "telegram": "@example_customer",
+  "phone": "+989121234567",
   "upstream_username": "alice",
   "backend_id": "marzban-default",
   "policy": {
@@ -130,9 +135,10 @@ can retrieve their URL, but delivery remains disabled.
 
 ### PATCH `/admin/customers/{customer_id}`
 
-Optional fields: `name`, `status`, `policy`. Omitted/null fields leave the
-corresponding value unchanged. Name length is 1–200. Status is `active`, `disabled`
-or `revoked`. Example: `{"status":"disabled"}`.
+Optional fields: `name`, `telegram`, `phone`, `status`, `policy`. Omitted fields
+remain unchanged. Explicit `null` clears Telegram or phone; name cannot be null.
+Duplicate contacts return 409. Status is `active`, `disabled` or `revoked`.
+Example: `{"telegram":"@new_handle","phone":null}`.
 
 **A supplied policy replaces the complete policy; it is not merged.**
 In production Marzban-authority mode it does not override panel inbound selections.

@@ -57,19 +57,27 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 | Attach an existing account / retrieve same URL | `keyholder create alice`, `link alice` |
 | Customer / live compatible profiles | `keyholder show alice`, `check alice` |
 | Register missing panel accounts | `keyholder sync` |
-| Provision Marzban account | `keyholder user-create alice --quota-gb 20 --days 30 --protocols vless trojan` |
+| Provision Marzban account with private identity | `keyholder user-create customer_001 --name 'Alice Example' --telegram @alice --phone +989121234567 --quota-gb 20 --days 30 --protocols vless trojan` |
 | Update plan / traffic | `keyholder user-update alice --quota-gb 30 --days 30`, `user-usage alice` |
 | Explicit usage reset | `keyholder user-reset-usage alice --confirm` |
 | Select one protocol's inbounds | `keyholder user-inbounds alice --protocol trojan --tags 'TROJAN TLS'` |
-| Rename / remap without URL rotation | `keyholder rename alice 'Alice'`, `remap alice replacement` |
+| Update private identity / clear contact | `keyholder customer-update customer_001 --name 'Alice Example' --telegram @alice`, `customer-update customer_001 --clear-phone` |
+| Rename / remap without URL rotation | `keyholder rename customer_001 'Alice'`, `remap customer_001 replacement` |
 | Pause local delivery / resume | `keyholder disable alice`, `enable alice` |
 | Terminal revocation / token rotation | `keyholder revoke alice --confirm`, `rotate-token alice --confirm` |
 | Recovery snapshot | `keyholder backup` |
 | Private bookmark / SSH recovery tunnel | `keyholder panel-url`, `panel` |
 
-Global `--backend ID` selects an account namespace. Username selectors are case
-sensitive; customer UUIDs remain unambiguous. HTTP-source providers support local
+Global `--backend ID` selects an account namespace. Commands accepting a customer
+selector support customer UUID, exact upstream username, Telegram handle/ID or
+phone. Customer UUIDs remain unambiguous. HTTP-source providers support local
 customer/link operations but not Marzban-specific provisioning/inventory commands.
+
+`user-create` defaults the private customer name to the Marzban username when
+`--name` is omitted. `create USER --name ...` does the same when attaching an
+existing panel user. Telegram and phone are nullable but unique when present;
+use international `+digits` phone format. These fields stay in Keyholder and are
+never copied to Marzban or customer subscription output.
 
 `create` is idempotent. Links require an interactive terminal or explicit
 `--save-link /new/private/file.json`; overwrite/symlinks are refused. `--json`

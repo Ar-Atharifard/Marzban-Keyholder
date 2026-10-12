@@ -50,6 +50,18 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
             assert new["maxItems"] == 11 and old["maxItems"] == 5
             new["items"]["enum"] = old["items"]["enum"]
             new["maxItems"] = old["maxItems"]
+        if name in {"CustomerCreate", "CustomerUpdate", "CustomerView"}:
+            # Additive private contact metadata; existing fields and requirements stay frozen.
+            for field, maximum in [("telegram", 64), ("phone", 16)]:
+                added = actual["properties"].pop(field)
+                string_schema: dict[str, object] = {"type": "string"}
+                if name != "CustomerView":
+                    string_schema["maxLength"] = maximum
+                assert added["anyOf"] == [string_schema, {"type": "null"}]
+                assert "default" not in added
+            if name == "CustomerView":
+                actual["required"].remove("telegram")
+                actual["required"].remove("phone")
         assert actual == model
 
 

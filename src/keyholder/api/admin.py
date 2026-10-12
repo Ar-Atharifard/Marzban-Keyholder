@@ -98,6 +98,8 @@ def create(body: CustomerCreate, request: Request, db: DB) -> TokenResult:
     token = generate_token()
     customer = Customer(
         name=body.name,
+        telegram=body.telegram,
+        phone=body.phone,
         token_hash=hash_token(token),
         token_encrypted=encrypt(request.app.state.settings, token),
         policy=body.policy.model_dump(),
@@ -159,6 +161,10 @@ def update(customer_id: str, body: CustomerUpdate, db: DB) -> Customer:
         raise HTTPException(409, "Revoked customers are terminal")
     if body.name is not None:
         customer.name = body.name
+    if "telegram" in body.model_fields_set:
+        customer.telegram = body.telegram
+    if "phone" in body.model_fields_set:
+        customer.phone = body.phone
     if body.policy is not None:
         customer.policy = body.policy.model_dump()
     if body.status is not None:
@@ -166,7 +172,11 @@ def update(customer_id: str, body: CustomerUpdate, db: DB) -> Customer:
         if body.status == "revoked":
             customer.revoked_at = now()
     customer.updated_at = now()
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Telegram or phone already registered") from None
     return customer
 
 

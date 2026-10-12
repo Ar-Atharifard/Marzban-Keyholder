@@ -132,4 +132,10 @@ def test_backup_restore_rehearsal_preserves_complete_legacy_state(
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert after == before
     with sqlite3.connect(database) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0004",)
+        assert db.execute("SELECT telegram,phone FROM customers").fetchall() == [
+            (None, None),
+            (None, None),
+        ]
+        indexes = {row[1] for row in db.execute("PRAGMA index_list('customers')")}
+        assert {"uq_customers_telegram", "uq_customers_phone"} <= indexes

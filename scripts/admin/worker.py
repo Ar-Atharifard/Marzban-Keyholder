@@ -71,22 +71,22 @@ def resolve(selector: str) -> dict[str, Any]:
     try:
         identifier = str(UUID(selector))
     except ValueError:
+        needle = selector.lower().removeprefix("@")
         matches = [
             c
             for c in customers()
-            if c["mapping"]["upstream_username"] == selector
+            if (
+                c["mapping"]["upstream_username"] == selector
+                or c.get("phone") == selector
+                or str(c.get("telegram") or "").lower().removeprefix("@") == needle
+            )
             and c["mapping"]["backend_id"] == backend_id()
             and c["status"] != "revoked"
         ]
         if not matches:
-            raise OperatorError(
-                "No Keyholder registration for this username; run keyholder create USER first. "
-                "Use the exact Marzban username."
-            ) from None
+            raise OperatorError("No Keyholder registration for this customer selector.") from None
         if len(matches) > 1:
-            raise OperatorError(
-                "Username has multiple registrations; use its customer ID."
-            ) from None
+            raise OperatorError("Customer selector is ambiguous; use its customer ID.") from None
         return matches[0]
     return api("GET", "/admin/customers/" + identifier)  # type: ignore[no-any-return]
 
@@ -259,6 +259,8 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
             "/admin/customers",
             {
                 "name": args["name"],
+                "telegram": args.get("telegram"),
+                "phone": args.get("phone"),
                 "upstream_username": username,
                 "backend_id": backend_id(),
                 "policy": {"profiles": profiles},
@@ -270,6 +272,15 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
         return api("GET", path + "/subscription")
     if operation == "show":
         return {**customer, "profile_source": os.getenv("KEYHOLDER_PROFILE_SOURCE", "policy")}
+    if operation == "customer-update":
+        body = {}
+        if args.get("name") is not None:
+            body["name"] = args["name"]
+        if args.get("telegram") is not None or args.get("clear_telegram"):
+            body["telegram"] = args.get("telegram")
+        if args.get("phone") is not None or args.get("clear_phone"):
+            body["phone"] = args.get("phone")
+        return api("PATCH", path, body)
     if operation == "check":
         SELECTED.set(customer["mapping"]["backend_id"])
         return {
@@ -407,6 +418,18 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                 raise OperatorError("Traffic reset requires --confirm; used traffic becomes zero.")
             return summary(await call("POST", path + "/reset"))
         if operation == "user-create":
+            from keyholder.schemas import normalize_phone, normalize_telegram
+
+            try:
+                telegram = normalize_telegram(args.get("telegram"))
+                phone = normalize_phone(args.get("phone"))
+            except ValueError as error:
+                raise OperatorError(str(error)) from None
+            for customer in customers():
+                if telegram is not None and customer.get("telegram") == telegram:
+                    raise OperatorError("Telegram is already registered.")
+                if phone is not None and customer.get("phone") == phone:
+                    raise OperatorError("Phone is already registered.")
             body = {
                 "username": name,
                 "proxies": {p: {} for p in args["protocols"]},
@@ -418,7 +441,13 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
             return api(
                 "POST",
                 "/admin/customers",
-                {"name": name, "upstream_username": name, "backend_id": backend_id()},
+                {
+                    "name": args["name"],
+                    "telegram": telegram,
+                    "phone": phone,
+                    "upstream_username": name,
+                    "backend_id": backend_id(),
+                },
             )
         user = await call("GET", path)
         if operation == "user-update":

@@ -119,6 +119,74 @@ def test_customer_lifecycle(client: TestClient) -> None:
     assert len(client.get("/admin/customers", headers=HEADERS).json()) == 1
 
 
+def test_nullable_unique_customer_contacts_are_private_and_normalized(
+    client: TestClient,
+) -> None:
+    first = client.post(
+        "/admin/customers",
+        headers=HEADERS,
+        json={
+            "name": "Alice Example",
+            "telegram": "@Alice_Handle",
+            "phone": "+98 912-1234567",
+            "upstream_username": "alice",
+        },
+    )
+    assert first.status_code == 201
+    customer = first.json()["customer"]
+    assert customer["name"] == "Alice Example"
+    assert customer["telegram"] == "@alice_handle"
+    assert customer["phone"] == "+989121234567"
+    assert customer["telegram"] not in client.get(f"/s/{first.json()['token']}").text
+
+    assert (
+        client.post(
+            "/admin/customers",
+            headers=HEADERS,
+            json={
+                "name": "Duplicate Telegram",
+                "telegram": "ALICE_HANDLE",
+                "upstream_username": "bobby",
+            },
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/admin/customers",
+            headers=HEADERS,
+            json={
+                "name": "Duplicate Phone",
+                "phone": "+989121234567",
+                "upstream_username": "carol",
+            },
+        ).status_code
+        == 409
+    )
+
+    second = client.post(
+        "/admin/customers",
+        headers=HEADERS,
+        json={"name": "Bob", "upstream_username": "bobby"},
+    )
+    assert second.status_code == 201
+    second_customer = second.json()["customer"]
+    assert second_customer["telegram"] is None and second_customer["phone"] is None
+    updated = client.patch(
+        f"/admin/customers/{second_customer['id']}",
+        headers=HEADERS,
+        json={"telegram": "123456789", "phone": "+12025550123"},
+    )
+    assert updated.status_code == 200
+    cleared = client.patch(
+        f"/admin/customers/{second_customer['id']}",
+        headers=HEADERS,
+        json={"telegram": None, "phone": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["telegram"] is None and cleared.json()["phone"] is None
+
+
 def test_secrets_not_logged_or_echoed(client: TestClient, caplog: object) -> None:
     with caplog.at_level(logging.INFO, logger="keyholder"):  # type: ignore[attr-defined]
         result = create(client)
