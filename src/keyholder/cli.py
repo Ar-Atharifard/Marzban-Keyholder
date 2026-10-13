@@ -202,10 +202,10 @@ def display(result: Any, as_json: bool) -> None:
     for item in result:
         if "mapping" in item:
             print(
-                "\t".join(
-                    safe(item.get(k, "")) for k in ["id", "name", "telegram", "phone", "status"]
-                ),
                 safe(item["mapping"]["upstream_username"]),
+                "\t".join(
+                    safe(item.get(k, "")) for k in ["id", "telegram", "phone", "status", "name"]
+                ),
                 sep="\t",
             )
         else:

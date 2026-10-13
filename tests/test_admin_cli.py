@@ -101,6 +101,32 @@ def test_user_create_accepts_private_identity_fields() -> None:
     assert args.phone == "+989121234567"
 
 
+def test_human_customer_list_starts_with_upstream_username_and_ends_with_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli.display(
+        [
+            {
+                "id": "customer-id",
+                "name": "Full Name",
+                "telegram": "@handle",
+                "phone": "+989121234567",
+                "status": "active",
+                "mapping": {"upstream_username": "panel_user"},
+            }
+        ],
+        as_json=False,
+    )
+    assert capsys.readouterr().out.rstrip("\n").split("\t") == [
+        "panel_user",
+        "customer-id",
+        "@handle",
+        "+989121234567",
+        "active",
+        "Full Name",
+    ]
+
+
 def test_missing_upstream_profiles_never_creates_customer(
     operator: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
