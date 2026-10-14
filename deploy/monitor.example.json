@@ -1,0 +1,32 @@
+{
+  "state_file": "/var/lib/keyholder-monitor/state.json",
+  "secrets_file": "/etc/keyholder/monitor.env",
+  "marzban_db": "/var/lib/marzban/db.sqlite3",
+  "backup_dir": "/var/backups/keyholder",
+  "containers": [
+    {"name": "keyholder-api-1", "require_health": true},
+    {"name": "braavos-gateway", "require_health": true},
+    {"name": "marzban-marzban-1", "require_health": false}
+  ],
+  "http_checks": [
+    {"name": "keyholder", "url": "http://127.0.0.1:18000/health", "status": 200},
+    {"name": "marzban", "url": "http://127.0.0.1:8000/", "status": 200},
+    {"name": "public-site", "url": "https://javatechpack.ir/", "status": 200}
+  ],
+  "tcp_checks": [
+    {"name": "gateway-tls", "host": "127.0.0.1", "port": 443},
+    {"name": "xray", "host": "127.0.0.1", "port": 8443}
+  ],
+  "required_user_count": 1,
+  "disk_warning_percent": 80,
+  "disk_critical_percent": 90,
+  "memory_available_warning_mib": 120,
+  "swap_warning_percent": 75,
+  "load_warning_per_cpu": 1.5,
+  "backup_max_age_hours": 26,
+  "expiry_warning_days": [7, 3, 1],
+  "quota_warning_percent": [80, 95],
+  "traffic_min_gib": 1,
+  "traffic_rate_gib_per_hour": 20,
+  "traffic_baseline_multiplier": 3
+}

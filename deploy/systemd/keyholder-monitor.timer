@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Keyholder health monitoring every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

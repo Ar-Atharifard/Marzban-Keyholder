@@ -197,6 +197,17 @@ def test_cli_rejects_ssh_option_injection() -> None:
         cli.main(["--host=-oProxyCommand=bad", "status"])
 
 
+def test_private_operator_config_can_select_ssh_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ssh = tmp_path / "config"
+    ssh.write_text("Host test\n  HostName example.invalid\n")
+    operator = tmp_path / "admin.json"
+    operator.write_text(json.dumps({"ssh_config": str(ssh)}))
+    monkeypatch.setenv("KEYHOLDER_ADMIN_CONFIG", str(operator))
+    assert cli.ssh_command() == ["ssh", "-F", str(ssh)]
+
+
 def test_panel_bookmark_is_not_printed_to_noninteractive_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

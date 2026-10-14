@@ -14,7 +14,7 @@ stdlib dispatcher; the container worker uses the application's Python environmen
 A workstation JSON config selected by `KEYHOLDER_ADMIN_CONFIG` supports:
 
 ```json
-{"host":"keyholder-server","remote_path":"/usr/local/lib/keyholder-admin/host.py","panel_target":"127.0.0.1:8000","panel_path":"/dashboard/"}
+{"host":"keyholder-server","ssh_config":"/home/operator/.ssh/config","remote_path":"/usr/local/lib/keyholder-admin/host.py","panel_target":"127.0.0.1:8000","panel_path":"/dashboard/"}
 ```
 
 Default SSH alias: `keyholder-server`; `--host` overrides it. Checkout-local
@@ -51,6 +51,7 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 |---|---|
 | New local private env | `keyholder init-config` |
 | Service / DB checks | `keyholder status`, `health`, `doctor` |
+| Monitoring state / immediate read-only check | `keyholder monitor-status`, `monitor-run` |
 | Configured backends / explicit registration | `keyholder backends`, `backend-register` |
 | Panel inventory | `keyholder users`, `inbounds` |
 | Canonical customers / history | `keyholder list`, `list --history` |

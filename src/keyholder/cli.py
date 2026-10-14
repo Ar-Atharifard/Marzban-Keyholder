@@ -43,6 +43,17 @@ def remote_path() -> str:
     return path
 
 
+def ssh_command() -> list[str]:
+    command = ["ssh"]
+    configured = operator_config().get("ssh_config")
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_absolute() or not path.is_file():
+            raise ValueError("Invalid SSH configuration path")
+        command.extend(["-F", str(path)])
+    return command
+
+
 class CLIError(Exception):
     pass
 
@@ -64,7 +75,16 @@ def parser() -> argparse.ArgumentParser:
     commands = p.add_subparsers(dest="operation", required=True)
     initialize = commands.add_parser("init-config", help="Create a private environment template")
     initialize.add_argument("--output", type=Path, default=Path(".env"))
-    for op in ["status", "health", "doctor", "backup", "backends", "backend-register"]:
+    for op in [
+        "status",
+        "health",
+        "doctor",
+        "backup",
+        "backends",
+        "backend-register",
+        "monitor-status",
+        "monitor-run",
+    ]:
         commands.add_parser(op)
     for op in ["users", "inbounds", "sync"]:
         commands.add_parser(op)
@@ -168,7 +188,7 @@ def request(host: str, payload: dict[str, Any], local: bool = False) -> dict[str
         ["python3", remote_path()]
         if local
         else [
-            "ssh",
+            *ssh_command(),
             "-o",
             "BatchMode=yes",
             "-o",
@@ -216,7 +236,7 @@ def run_panel(args: argparse.Namespace) -> int:
     if not 1024 <= args.port <= 65535:
         raise CLIError("Choose a local port between 1024 and 65535.")
     command = [
-        "ssh",
+        *ssh_command(),
         "-o",
         "BatchMode=yes",
         "-o",
@@ -388,7 +408,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             display(result, args.json)
-        if args.operation == "doctor" and not result["healthy"]:
+        if args.operation in {"doctor", "monitor-run", "monitor-status"} and not result.get(
+            "healthy", False
+        ):
             return 1
         return 0
     except CLIError as error:

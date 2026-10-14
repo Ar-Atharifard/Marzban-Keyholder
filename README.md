@@ -51,6 +51,7 @@ Docker, TLS routing and operator setup. Do not expose the administrator API publ
 | [Architecture](docs/architecture.md) | Code layout, database, ownership and limitations |
 | [Development](docs/development.md) | Features, protocols, checks and migrations |
 | [Operations](docs/operations.md) | Backups, releases, recovery and panel gateway |
+| [Monitoring](docs/monitoring.md) | Lightweight host, service and customer alerts |
 | [Compatibility](docs/compatibility.md) | Stable links and change policy |
 | [Publishing](docs/publishing.md) | Clean source export and private-history precautions |
 

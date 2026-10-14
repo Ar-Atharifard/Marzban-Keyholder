@@ -20,6 +20,8 @@ def configuration() -> dict[str, Any]:
         "env_file": "/etc/keyholder/keyholder.env",
         "extra_backups": {},
         "sqlite_backups": {},
+        "monitor_tool": "/usr/local/lib/keyholder-admin/monitor.py",
+        "monitor_config": "/etc/keyholder/monitor.json",
     }
     file = Path(os.getenv("KEYHOLDER_HOST_CONFIG", str(Path(__file__).with_name("host.json"))))
     if file.exists():
@@ -59,6 +61,23 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "panel-url":
         state = json.loads(Path(config["panel_access_file"]).read_text())
         return {"ok": True, "result": {"panel_url": state["panel_url"], "active": state["active"]}}
+    if operation in {"monitor-status", "monitor-run"}:
+        command = [
+            sys.executable,
+            str(config["monitor_tool"]),
+            "--config",
+            str(config["monitor_config"]),
+        ]
+        if operation == "monitor-status":
+            command.append("--status")
+        else:
+            command.append("--no-notify")
+        result = subprocess.run(command, capture_output=True, timeout=50, check=False)
+        try:
+            report = json.loads(result.stdout)
+        except ValueError:
+            raise ValueError("Monitor returned invalid output") from None
+        return {"ok": True, "result": report}
     if operation == "backup":
         item = inspect(container)
         source = next(
