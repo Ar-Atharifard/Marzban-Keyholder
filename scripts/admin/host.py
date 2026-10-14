@@ -186,7 +186,12 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "result": {
                 "backup": str(recovery),
                 "integrity": "ok",
-                "includes": ["keyholder", "vault-key-env", *config["sqlite_backups"]],
+                "includes": [
+                    "keyholder",
+                    "vault-key-env",
+                    *config["extra_backups"],
+                    *config["sqlite_backups"],
+                ],
             },
         }
     worker = Path(__file__).with_name("worker.py").read_text()
