@@ -1,0 +1,176 @@
+.TH KEYHOLDER 1 "October 2026" "Keyholder 0.2.0" "Operator Commands"
+.SH NAME
+keyholder \- securely administer Keyholder and its configured subscription backend
+.SH SYNOPSIS
+.B keyholder
+.RI [ global-options ]
+.I command
+.RI [ command-options ]
+.br
+.B keyholder help
+.RI [ command ]
+.SH DESCRIPTION
+.B keyholder
+is the supported operator interface for Keyholder. By default it sends a small JSON
+request through an SSH alias to the root-owned host dispatcher. Administrator API
+credentials remain on the server. Secret subscription and panel URLs are printed only
+to an interactive terminal or written to a newly created mode-0600 file.
+.PP
+Marzban is the default upstream backend. Customer identity, stable public subscription
+tokens and optional rendering policy belong to Keyholder; quota, expiry, status,
+traffic counters, credentials and inbound selection belong to the upstream backend.
+.SH GLOBAL OPTIONS
+.TP
+.BR \-\-host " " ALIAS
+SSH alias for administration. The default is keyholder-server or the configured value.
+.TP
+.BR \-\-backend " " ID
+Backend namespace. The default is marzban-default.
+.TP
+.B \-\-local
+Run the dispatcher locally. This is restricted to root on the VPS and cannot open the panel tunnel.
+.TP
+.B \-\-json
+Return machine-readable JSON for nonsecret results.
+.TP
+.B \-\-version
+Print the installed version.
+.TP
+.BR \-h , " " \-\-help
+Show command help.
+.SH COMMANDS
+.TP
+.B help [COMMAND]
+Show the complete command list or detailed help for one command.
+.TP
+.B init-config [--output FILE]
+Create a new private environment template. Existing files are never overwritten.
+.TP
+.BR status ", " health ", " doctor
+Inspect containers and revision; check application health; or audit migrations, vault,
+mappings, stable links and upstream inventory.
+.TP
+.B backup
+Create a root-only recovery set containing Keyholder data, required secret configuration,
+configured ingress files and consistent SQLite snapshots.
+.TP
+.BR backends ", " backend-register
+List backend registrations or register the backend supplied by deployment configuration.
+.TP
+.BR users ", " inbounds
+List upstream users or available inbound tags without returning credentials.
+.TP
+.B sync
+Create missing Keyholder registrations for active upstream users. Existing canonical
+registrations and URLs are preserved.
+.TP
+.B reconcile --confirm
+Repair legacy duplicate registrations. This is a recovery operation and can rotate links.
+.TP
+.B user-create USERNAME --quota-gb GB --days DAYS --protocols PROTOCOL... [identity options] [--save-link FILE]
+Create a Marzban user and its canonical Keyholder registration. A zero quota means
+unlimited; zero days means no expiry. Identity options are --name, --telegram and --phone.
+.TP
+.B create USERNAME [--name NAME] [--telegram ID] [--phone NUMBER] [--profiles KIND...] [--save-link FILE]
+Attach an existing active upstream user. The operation is idempotent and returns the
+same canonical URL when the mapping already exists.
+.TP
+.B user-update USERNAME [--quota-gb GB] [--days DAYS] [--status active|disabled]
+Change upstream plan fields. Expiry is calculated from the time of the update and traffic
+is not reset.
+.TP
+.B user-inbounds USERNAME --protocol PROTOCOL --tags [TAG...]
+Replace only one protocol's upstream inbound selection. An empty tag list disables that
+protocol while preserving credentials and other selections.
+.TP
+.BR "user-usage USERNAME" ", " "user-reset-usage USERNAME --confirm"
+Read plan and traffic state, or explicitly reset used traffic.
+.TP
+.B list [--limit N] [--offset N] [--history]
+List canonical customers without bearer tokens. History includes revoked registrations.
+.TP
+.B customer-update SELECTOR [--name NAME] [--telegram ID|--clear-telegram] [--phone NUMBER|--clear-phone]
+Update private Keyholder identity fields. Phone and Telegram values are nullable and unique.
+.TP
+.BR "show SELECTOR" ", " "check SELECTOR"
+Show a customer mapping, or validate its upstream profiles and rendered subscription.
+.TP
+.B link SELECTOR [--info] [--save-link FILE]
+Retrieve the existing stable subscription URL. The info option selects the human-readable
+usage URL without changing the customer token.
+.TP
+.BR "enable SELECTOR" ", " "disable SELECTOR"
+Resume or pause Keyholder subscription delivery. This does not disable already imported
+upstream credentials.
+.TP
+.B rename SELECTOR NAME
+Change Keyholder's private display name without changing the upstream username.
+.TP
+.B remap SELECTOR USERNAME
+Map the same customer and stable URL to a replacement upstream username.
+.TP
+.B profiles SELECTOR KIND...
+Set a customer rendering override. Omit overrides in normal Marzban-authoritative operation.
+.TP
+.B revoke SELECTOR --confirm
+Permanently revoke the Keyholder registration.
+.TP
+.B rotate-token SELECTOR --confirm [--save-link FILE]
+Replace the bearer token. The previous subscription URL immediately stops working.
+.TP
+.B panel [--port PORT] [--no-browser]
+Open an SSH tunnel from 127.0.0.1:PORT to the loopback-only Marzban panel. Keep the
+terminal open while using the panel.
+.TP
+.B panel-url [--save-link FILE]
+Read the prepared legacy private bookmark. The SSH tunnel is the preferred panel path.
+.TP
+.BR monitor-status ", " monitor-run
+Read the last monitor result or run checks immediately without sending notifications.
+.TP
+.BR alerts-configure ", " alerts-test
+Interactively configure and test the dedicated Telegram alert bot.
+.TP
+.BR heartbeat-configure ", " heartbeat-test
+Interactively configure and test an external Better Stack heartbeat for total-host outages.
+.TP
+.BR management-bot-configure ", " management-bot-status ", " management-bot-test
+Configure the allowlisted Telegram management bot, inspect its unit state, or send a test.
+The management bot never returns subscription links.
+.SH SELECTORS
+Customer operations accept a customer UUID, exact upstream username, Telegram handle or
+numeric ID, or phone number. Use the UUID when a human identifier could be ambiguous.
+.SH FILES
+.TP
+.B $KEYHOLDER_ADMIN_CONFIG
+Optional workstation JSON configuration. A checkout defaults to .private/admin.json.
+.TP
+.B /usr/local/lib/keyholder-admin/host.py
+Default root-owned server dispatcher.
+.TP
+.B /etc/keyholder/monitor.env
+Root-only alert and heartbeat secrets.
+.TP
+.B /etc/keyholder/management-bot.env
+Root-only management bot token and administrator ID.
+.SH EXIT STATUS
+Zero means success. One means an operation or health check failed. Two is used by the
+monitor for execution/configuration failure. Interrupted panel tunnels return 130.
+.SH SECURITY
+Subscription URLs are bearer credentials. Prefer --save-link to a private file and never
+place them in logs, shell history, chat, tickets or monitoring URLs. Bot tokens are entered
+interactively without terminal echo. Destructive and link-breaking commands require --confirm.
+.SH EXAMPLES
+.nf
+keyholder doctor
+keyholder user-create customer_001 --name "Alice Example" \
+  --quota-gb 20 --days 30 --protocols vless trojan
+keyholder link customer_001 --save-link ./customer_001.json
+keyholder customer-update customer_001 --telegram @alice --clear-phone
+keyholder panel
+keyholder help user-inbounds
+.fi
+.SH SEE ALSO
+.BR ssh (1),
+.BR systemctl (1),
+.BR ufw (8)

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Manage Keyholder through SSH without exporting administrator credentials."""
 
+from __future__ import annotations
+
 import argparse
 import base64
 import getpass
+import importlib.metadata
 import json
 import os
 import re
@@ -59,8 +62,75 @@ class CLIError(Exception):
     pass
 
 
-def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=__doc__)
+class KeyholderParser(argparse.ArgumentParser):
+    command_parsers: dict[str, KeyholderParser]
+
+
+COMMAND_HELP = {
+    "init-config": "Create a new mode-0600 environment template without overwriting files.",
+    "status": "Show container state and the deployed API revision.",
+    "health": "Check Keyholder's authenticated application health endpoint.",
+    "doctor": "Audit database revision, token vault, mappings, links and upstream inventory.",
+    "backup": "Create a root-only recovery snapshot of Keyholder, Marzban and configuration.",
+    "backends": "List registered subscription backends without exposing credentials.",
+    "backend-register": "Register the configured backend in Keyholder's backend registry.",
+    "monitor-status": "Read the most recent host-monitor result without running checks.",
+    "monitor-run": "Run host, service and customer checks now without sending notifications.",
+    "alerts-configure": "Configure the Telegram alert bot interactively and privately.",
+    "alerts-test": "Send a test message through the configured Telegram alert bot.",
+    "heartbeat-configure": "Configure an external Better Stack heartbeat interactively.",
+    "heartbeat-test": "Send a test ping to the configured external heartbeat.",
+    "management-bot-configure": "Configure and enable the allowlisted Telegram management bot.",
+    "management-bot-status": "Show whether the management bot is configured and running.",
+    "management-bot-test": "Send a test message through the management bot.",
+    "users": "List upstream Marzban users without credentials.",
+    "inbounds": "List available upstream inbound tags by protocol.",
+    "sync": "Register active upstream users that do not yet have a Keyholder customer.",
+    "reconcile": "Rotate legacy canonical links and revoke duplicate registrations.",
+    "user-create": "Provision a Marzban user and create one stable Keyholder subscription.",
+    "user-update": "Change an upstream user's quota, expiry or enabled state.",
+    "user-inbounds": "Replace one protocol's selected Marzban inbound tags.",
+    "user-usage": "Read an upstream user's current traffic and plan state.",
+    "user-reset-usage": "Reset an upstream user's traffic counter after confirmation.",
+    "panel": "Open the private Marzban panel through a local SSH tunnel.",
+    "panel-url": "Show or privately save the legacy prepared panel bookmark.",
+    "list": "List canonical Keyholder customers without subscription tokens.",
+    "create": "Attach an existing active upstream user to one stable subscription.",
+    "customer-update": "Update private identity metadata stored only by Keyholder.",
+    "link": "Retrieve a customer's existing stable URL without creating a new one.",
+    "show": "Show one canonical customer and its upstream mapping.",
+    "check": "Check one customer's upstream profiles and rendered subscription.",
+    "enable": "Resume Keyholder subscription delivery for a customer.",
+    "disable": "Pause Keyholder subscription delivery for a customer.",
+    "revoke": "Permanently revoke a customer registration after confirmation.",
+    "rotate-token": "Replace a subscription token and invalidate the old URL.",
+    "rename": "Change the private Keyholder display name without changing Marzban.",
+    "remap": "Map a customer to a different upstream username without rotating its URL.",
+    "profiles": "Set the rendered profile kinds for a customer override.",
+}
+
+
+def package_version() -> str:
+    try:
+        return importlib.metadata.version("keyholder")
+    except importlib.metadata.PackageNotFoundError:
+        return "development"
+
+
+def parser() -> KeyholderParser:
+    p = KeyholderParser(
+        description=__doc__,
+        epilog=(
+            "Use 'keyholder help COMMAND' or 'keyholder COMMAND --help' for command details.\n"
+            "Examples:\n"
+            "  keyholder doctor\n"
+            "  keyholder user-create customer_001 --quota-gb 20 --days 30 --protocols vless\n"
+            "  keyholder link customer_001 --save-link ./customer_001.json\n"
+            "  keyholder panel"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
     p.add_argument(
         "--host",
         default=operator_config().get("host", "keyholder-server"),
@@ -72,10 +142,13 @@ def parser() -> argparse.ArgumentParser:
         "--backend",
         dest="backend_id",
         default=os.getenv("KEYHOLDER_OPERATOR_BACKEND_ID", "marzban-default"),
+        help="Backend namespace (default: %(default)s)",
     )
     commands = p.add_subparsers(dest="operation", required=True)
-    initialize = commands.add_parser("init-config", help="Create a private environment template")
-    initialize.add_argument("--output", type=Path, default=Path(".env"))
+    initialize = commands.add_parser(
+        "init-config", help=COMMAND_HELP["init-config"], description=COMMAND_HELP["init-config"]
+    )
+    initialize.add_argument("--output", type=Path, default=Path(".env"), help="New file path")
     for op in [
         "status",
         "health",
@@ -93,17 +166,17 @@ def parser() -> argparse.ArgumentParser:
         "management-bot-status",
         "management-bot-test",
     ]:
-        commands.add_parser(op)
+        commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
     for op in ["users", "inbounds", "sync"]:
-        commands.add_parser(op)
+        commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
     reconcile = commands.add_parser(
-        "reconcile", help="Rotate legacy canonical links and revoke duplicates"
+        "reconcile", help=COMMAND_HELP["reconcile"], description=COMMAND_HELP["reconcile"]
     )
-    reconcile.add_argument("--confirm", action="store_true", dest="confirmed")
+    reconcile.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply changes")
     user_create = commands.add_parser(
-        "user-create", help="Provision Marzban and register a stable link"
+        "user-create", help=COMMAND_HELP["user-create"], description=COMMAND_HELP["user-create"]
     )
-    user_create.add_argument("username")
+    user_create.add_argument("username", help="New Marzban username")
     user_create.add_argument("--name", help="Private customer name; defaults to username")
     user_create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
     user_create.add_argument(
@@ -116,36 +189,58 @@ def parser() -> argparse.ArgumentParser:
     user_create.add_argument(
         "--protocols", nargs="+", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
     )
-    user_create.add_argument("--save-link", type=Path)
-    user_update = commands.add_parser("user-update", help="Modify quota, expiry or panel status")
-    user_update.add_argument("username")
-    user_update.add_argument("--quota-gb", type=float)
-    user_update.add_argument("--days", type=int)
-    user_update.add_argument("--status", choices=["active", "disabled"])
-    inbound = commands.add_parser("user-inbounds", help="Select panel inbounds for one protocol")
-    inbound.add_argument("username")
+    user_create.add_argument("--save-link", type=Path, help="New private JSON file for the URL")
+    user_update = commands.add_parser(
+        "user-update", help=COMMAND_HELP["user-update"], description=COMMAND_HELP["user-update"]
+    )
+    user_update.add_argument("username", help="Marzban username")
+    user_update.add_argument("--quota-gb", type=float, help="New quota; 0 means unlimited")
+    user_update.add_argument("--days", type=int, help="Expiry from now; 0 means no expiry")
+    user_update.add_argument("--status", choices=["active", "disabled"], help="Panel status")
+    inbound = commands.add_parser(
+        "user-inbounds",
+        help=COMMAND_HELP["user-inbounds"],
+        description=COMMAND_HELP["user-inbounds"],
+    )
+    inbound.add_argument("username", help="Marzban username")
     inbound.add_argument(
         "--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
     )
     inbound.add_argument(
         "--tags", nargs="*", required=True, help="Empty selection disables this protocol's inbounds"
     )
-    usage = commands.add_parser("user-usage", help="Read panel traffic usage for a user")
-    usage.add_argument("username")
-    reset = commands.add_parser("user-reset-usage", help="Reset a user's used traffic explicitly")
-    reset.add_argument("username")
-    reset.add_argument("--confirm", action="store_true", dest="confirmed")
-    panel = commands.add_parser("panel", help="Open the private Marzban panel through SSH")
-    panel.add_argument("--port", type=int, default=28080)
-    panel.add_argument("--no-browser", action="store_true")
-    bookmark = commands.add_parser("panel-url", help="Show the panel URL")
-    bookmark.add_argument("--save-link", type=Path)
-    listing = commands.add_parser("list", help="List customers without subscription tokens")
-    listing.add_argument("--limit", type=int, default=100)
-    listing.add_argument("--offset", type=int, default=0)
-    listing.add_argument("--history", action="store_true")
-    create = commands.add_parser("create", help="Attach an existing active Marzban user")
-    create.add_argument("username")
+    usage = commands.add_parser(
+        "user-usage", help=COMMAND_HELP["user-usage"], description=COMMAND_HELP["user-usage"]
+    )
+    usage.add_argument("username", help="Marzban username")
+    reset = commands.add_parser(
+        "user-reset-usage",
+        help=COMMAND_HELP["user-reset-usage"],
+        description=COMMAND_HELP["user-reset-usage"],
+    )
+    reset.add_argument("username", help="Marzban username")
+    reset.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply reset")
+    panel = commands.add_parser(
+        "panel", help=COMMAND_HELP["panel"], description=COMMAND_HELP["panel"]
+    )
+    panel.add_argument("--port", type=int, default=28080, help="Local tunnel port")
+    panel.add_argument(
+        "--no-browser", action="store_true", help="Print URL without opening browser"
+    )
+    bookmark = commands.add_parser(
+        "panel-url", help=COMMAND_HELP["panel-url"], description=COMMAND_HELP["panel-url"]
+    )
+    bookmark.add_argument("--save-link", type=Path, help="New private JSON file")
+    listing = commands.add_parser(
+        "list", help=COMMAND_HELP["list"], description=COMMAND_HELP["list"]
+    )
+    listing.add_argument("--limit", type=int, default=100, help="Rows, 1-100")
+    listing.add_argument("--offset", type=int, default=0, help="Rows to skip")
+    listing.add_argument("--history", action="store_true", help="Include revoked registrations")
+    create = commands.add_parser(
+        "create", help=COMMAND_HELP["create"], description=COMMAND_HELP["create"]
+    )
+    create.add_argument("username", help="Existing Marzban username")
     create.add_argument("--name", help="Display name; defaults to Marzban username")
     create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
     create.add_argument("--phone", help="Unique international phone number, for example +98912...")
@@ -154,7 +249,9 @@ def parser() -> argparse.ArgumentParser:
         "--save-link", type=Path, help="Explicit private local file, never overwritten"
     )
     customer_update = commands.add_parser(
-        "customer-update", help="Update private customer identity metadata"
+        "customer-update",
+        help=COMMAND_HELP["customer-update"],
+        description=COMMAND_HELP["customer-update"],
     )
     customer_update.add_argument("customer", help="Customer ID, username, Telegram or phone")
     customer_update.add_argument("--name")
@@ -174,20 +271,27 @@ def parser() -> argparse.ArgumentParser:
         "remap",
         "profiles",
     ]:
-        command = commands.add_parser(op)
-        command.add_argument("customer", help="Customer ID or unambiguous Marzban username")
+        command = commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
+        command.add_argument(
+            "customer", help="Customer ID, exact username, Telegram handle/ID or phone"
+        )
         if op == "rename":
-            command.add_argument("name")
+            command.add_argument("name", help="New private display name")
         if op == "remap":
-            command.add_argument("username")
+            command.add_argument("username", help="Replacement upstream username")
         if op == "profiles":
-            command.add_argument("profiles", nargs="+", choices=KINDS)
+            command.add_argument("profiles", nargs="+", choices=KINDS, help="Profile kinds")
         if op in {"revoke", "rotate-token"}:
-            command.add_argument("--confirm", action="store_true", dest="confirmed")
+            command.add_argument(
+                "--confirm", action="store_true", dest="confirmed", help="Apply change"
+            )
         if op == "link":
             command.add_argument("--info", action="store_true", help="Show the usage-page URL")
         if op in {"rotate-token", "link"}:
-            command.add_argument("--save-link", type=Path)
+            command.add_argument("--save-link", type=Path, help="New private JSON file")
+    help_command = commands.add_parser("help", help="Show complete help, or help for one command")
+    help_command.add_argument("command", nargs="?", choices=sorted(commands.choices))
+    p.command_parsers = commands.choices
     return p
 
 
@@ -282,6 +386,12 @@ def run_panel(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = parser()
     args = p.parse_args(argv)
+    if args.operation == "help":
+        if args.command:
+            p.command_parsers[args.command].print_help()
+        else:
+            p.print_help()
+        return 0
     if args.operation == "init-config":
         contents = (
             "KEYHOLDER_ADMIN_KEY=" + secrets.token_urlsafe(48) + "\n"

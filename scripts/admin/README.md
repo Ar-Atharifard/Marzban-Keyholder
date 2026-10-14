@@ -53,6 +53,8 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 | Service / DB checks | `keyholder status`, `health`, `doctor` |
 | Monitoring state / immediate read-only check | `keyholder monitor-status`, `monitor-run` |
 | Configure / test Telegram alerts | `keyholder alerts-configure`, `alerts-test` |
+| Configure / test external outage heartbeat | `keyholder heartbeat-configure`, `heartbeat-test` |
+| Configure / inspect / test management bot | `keyholder management-bot-configure`, `management-bot-status`, `management-bot-test` |
 | Configured backends / explicit registration | `keyholder backends`, `backend-register` |
 | Panel inventory | `keyholder users`, `inbounds` |
 | Canonical customers / history | `keyholder list`, `list --history` |
@@ -69,6 +71,7 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 | Terminal revocation / token rotation | `keyholder revoke alice --confirm`, `rotate-token alice --confirm` |
 | Recovery snapshot | `keyholder backup` |
 | Private bookmark / SSH recovery tunnel | `keyholder panel-url`, `panel` |
+| Complete command reference | `keyholder help`, `keyholder help COMMAND`, `man keyholder` |
 
 Global `--backend ID` selects an account namespace. Commands accepting a customer
 selector support customer UUID, exact upstream username, Telegram handle/ID or
@@ -92,3 +95,10 @@ inbounds, preserving credentials. Local disable/revoke does not stop previously
 imported proxies; use the provider to enforce access. `reconcile --confirm` is a
 legacy recovery tool, not daily maintenance. Infrastructure deployment, user
 bulk deletion and automatic restore are intentionally outside this CLI.
+
+Install the manual locally with:
+
+```console
+sudo install -Dm0644 docs/keyholder.1 /usr/local/share/man/man1/keyholder.1
+sudo mandb
+```

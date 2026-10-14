@@ -217,6 +217,26 @@ def test_alert_configuration_requires_interactive_input(
         cli.main(["alerts-configure"])
 
 
+def test_help_command_is_local_complete_and_supports_subcommands(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "request", lambda *args, **kwargs: pytest.fail("request called"))
+    assert cli.main(["help"]) == 0
+    overview = capsys.readouterr().out
+    for command in [
+        "user-create",
+        "customer-update",
+        "monitor-status",
+        "heartbeat-configure",
+        "management-bot-configure",
+        "panel",
+    ]:
+        assert command in overview
+    assert cli.main(["help", "user-inbounds"]) == 0
+    detail = capsys.readouterr().out
+    assert "--protocol" in detail and "--tags" in detail
+
+
 def test_panel_bookmark_is_not_printed_to_noninteractive_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
