@@ -3,8 +3,10 @@
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,38 @@ def inspect(name: str) -> dict[str, Any]:
         ["docker", "inspect", name], capture_output=True, timeout=10, check=True
     )
     return json.loads(result.stdout)[0]  # type: ignore[no-any-return]
+
+
+def configure_alerts(config: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    token = str(args.get("bot_token", ""))
+    chat_id = str(args.get("chat_id", ""))
+    if not re.fullmatch(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}", token):
+        raise ValueError("Invalid Telegram bot token")
+    if not re.fullmatch(r"-?[0-9]{5,20}", chat_id):
+        raise ValueError("Invalid Telegram chat ID")
+    monitor_config = Path(config["monitor_config"])
+    settings = json.loads(monitor_config.read_text())
+    destination = Path(settings["secrets_file"])
+    heartbeat = ""
+    if destination.exists():
+        for line in destination.read_text().splitlines():
+            if line.startswith("KEYHOLDER_HEARTBEAT_URL="):
+                heartbeat = line.split("=", 1)[1]
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".monitor-env-", dir=destination.parent)
+    try:
+        with os.fdopen(descriptor, "w") as file:
+            file.write(f"KEYHOLDER_ALERT_BOT_TOKEN={token}\n")
+            file.write(f"KEYHOLDER_ALERT_CHAT_ID={chat_id}\n")
+            file.write(f"KEYHOLDER_HEARTBEAT_URL={heartbeat}\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return {"configured": True, "chat_id": chat_id}
 
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +112,24 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             raise ValueError("Monitor returned invalid output") from None
         return {"ok": True, "result": report}
+    if operation == "alerts-configure":
+        return {"ok": True, "result": configure_alerts(config, payload.get("args", {}))}
+    if operation == "alerts-test":
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(config["monitor_tool"]),
+                "--config",
+                str(config["monitor_config"]),
+                "--test-alert",
+            ],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError("Telegram test delivery failed")
+        return {"ok": True, "result": {"delivered": True}}
     if operation == "backup":
         item = inspect(container)
         source = next(

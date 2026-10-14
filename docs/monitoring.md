@@ -39,6 +39,11 @@ needs only its token and the administrator chat ID. A future management bot shou
 call the same application services as the CLI and must allow only configured
 numeric Telegram user IDs.
 
+Run `keyholder alerts-configure` from an interactive workstation terminal. The
+token is read without echo, transferred over SSH input and written only to the
+root-owned monitor environment. Then run `keyholder alerts-test`. Do not pass bot
+tokens on command lines, paste them into issue trackers or commit them.
+
 ## Operator commands
 
 `keyholder monitor-status` reads the most recent state. `keyholder monitor-run`

@@ -383,9 +383,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=Path("/etc/keyholder/monitor.json"))
     parser.add_argument("--status", action="store_true", help="Read the last result only")
     parser.add_argument("--no-notify", action="store_true", help="Run checks without notifications")
+    parser.add_argument("--test-alert", action="store_true", help="Send one Telegram test alert")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
+        if args.test_alert:
+            env_path = Path(config["secrets_file"])
+            private_file(env_path)
+            if not telegram(parse_env(env_path), "TEST ALERT from Braavos monitoring"):
+                raise ValueError("Telegram alerting is not configured")
+            print(json.dumps({"healthy": True, "telegram": "delivered"}))
+            return 0
         state = (
             load_state(Path(config["state_file"]))
             if args.status

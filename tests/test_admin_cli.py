@@ -208,6 +208,15 @@ def test_private_operator_config_can_select_ssh_config(
     assert cli.ssh_command() == ["ssh", "-F", str(ssh)]
 
 
+def test_alert_configuration_requires_interactive_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cli, "request", lambda *args, **kwargs: pytest.fail("request called"))
+    with pytest.raises(SystemExit):
+        cli.main(["alerts-configure"])
+
+
 def test_panel_bookmark_is_not_printed_to_noninteractive_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

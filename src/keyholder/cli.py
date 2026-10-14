@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import getpass
 import json
 import os
 import re
@@ -84,6 +85,8 @@ def parser() -> argparse.ArgumentParser:
         "backend-register",
         "monitor-status",
         "monitor-run",
+        "alerts-configure",
+        "alerts-test",
     ]:
         commands.add_parser(op)
     for op in ["users", "inbounds", "sync"]:
@@ -372,6 +375,11 @@ def main(argv: list[str] | None = None) -> int:
                 if k not in {"operation", "host", "json", "save_link", "local", "info"}
             },
         }
+        if args.operation == "alerts-configure":
+            if not sys.stdin.isatty():
+                p.error("Telegram configuration requires an interactive terminal.")
+            payload["args"]["bot_token"] = getpass.getpass("Alert bot token: ")
+            payload["args"]["chat_id"] = input("Administrator numeric chat ID: ").strip()
         result = (
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
         )["result"]
