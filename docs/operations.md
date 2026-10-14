@@ -31,6 +31,13 @@ Git pulls over production-only changes, or migrate on every application startup.
 Shared ingress changes require syntax checks and graceful reload with recovery
 copies. Core changes can interrupt active proxy sessions even if URLs stay stable.
 
+Never run `ufw reset`, `ufw disable`, `ufw enable`, an INPUT-chain flush, or a
+full firewall restore through the server's only management path. Prepare and test
+the ruleset offline, preserve the currently authorized SSH port, and activate it
+only with an independent provider-console session already open. Prefer an external
+provider firewall for coarse port filtering. A timer inside the affected VPS is
+not an independent rollback path.
+
 ## Private panel entry
 
 The optional `scripts/render_panel_gate.py` generator creates a private Nginx
