@@ -108,6 +108,11 @@ def test_telegram_without_credentials_is_not_delivered() -> None:
     assert monitor.telegram({}, "test") is False
 
 
+def test_customer_warning_does_not_suppress_infrastructure_heartbeat() -> None:
+    assert monitor.infrastructure_healthy({"user:1:quota": "quota warning"}) is True
+    assert monitor.infrastructure_healthy({"http:public": "unreachable"}) is False
+
+
 def test_alert_configuration_writes_private_file_without_returning_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -123,3 +128,27 @@ def test_alert_configuration_writes_private_file_without_returning_token(
     assert destination.stat().st_mode & 0o777 == 0o600
     assert "a" * 40 in destination.read_text()
     assert "a" * 40 not in json.dumps(result)
+
+
+def test_management_bot_configuration_is_private_and_starts_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "management.env"
+    calls: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> object:
+        calls.append(command)
+        return object()
+
+    monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
+    monkeypatch.setattr(host.subprocess, "run", run)
+    result = host.configure_management_bot(
+        {
+            "management_bot_env": str(destination),
+            "management_bot_service": "keyholder-management-bot.service",
+        },
+        {"bot_token": "123456789:" + "b" * 40, "chat_id": ""},
+    )
+    assert result == {"configured": True, "administrator_id": "123456789"}
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert calls == [["systemctl", "enable", "--now", "keyholder-management-bot.service"]]

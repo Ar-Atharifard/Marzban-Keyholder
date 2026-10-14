@@ -314,6 +314,10 @@ def summarize(prefix: str, alerts: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def infrastructure_healthy(alerts: dict[str, str]) -> bool:
+    return not any(not key.startswith("user:") for key in alerts)
+
+
 def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     now = utc_now()
     state_path = Path(config["state_file"])
@@ -347,7 +351,10 @@ def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
             if recovered:
                 if telegram(env, summarize("RECOVERED", recovered)):
                     delivered_alerts = alerts
-            if not alerts:
+            # Business warnings (quota, expiry, account status and traffic) must not
+            # suppress the infrastructure heartbeat. Otherwise Better Stack reports
+            # the whole VPS down when one customer merely approaches a quota.
+            if infrastructure_healthy(alerts):
                 heartbeat(env)
         except Exception as error:
             delivery_error = type(error).__name__

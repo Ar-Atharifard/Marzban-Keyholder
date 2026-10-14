@@ -1,0 +1,27 @@
+[Unit]
+Description=Keyholder Telegram management bot
+After=network-online.target docker.service keyholder-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/keyholder/management-bot.env
+Environment=KEYHOLDER_MANAGEMENT_DISPATCHER=/usr/local/lib/keyholder-admin/host.py
+Environment=KEYHOLDER_MANAGEMENT_STATE=/var/lib/keyholder-management-bot/state.json
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-admin/management_bot.py
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StateDirectory=keyholder-management-bot
+StateDirectoryMode=0700
+ReadWritePaths=/var/backups/keyholder
+MemoryMax=48M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

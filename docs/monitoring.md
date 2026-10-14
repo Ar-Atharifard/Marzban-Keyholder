@@ -35,9 +35,9 @@ late by at least five minutes. Do not put a real subscription URL in an external
 HTTP monitor.
 
 Use separate Telegram bot identities for monitoring and management. The alert bot
-needs only its token and the administrator chat ID. A future management bot should
-call the same application services as the CLI and must allow only configured
-numeric Telegram user IDs.
+needs only its token and the administrator chat ID. The management bot accepts
+commands only from one configured numeric ID in a private chat and calls the same
+server-side dispatcher as the SSH CLI. It never returns subscription links in chat.
 
 Run `keyholder alerts-configure` from an interactive workstation terminal. The
 token is read without echo. Send `/start` to the new bot when prompted; Keyholder
@@ -45,6 +45,17 @@ discovers the single private chat through Telegram's official API. The token is
 transferred over SSH input and written only to the root-owned monitor environment.
 Then run `keyholder alerts-test`. Do not pass bot tokens on command lines, paste
 them into issue trackers or commit them.
+
+Configure the second bot with `keyholder management-bot-configure`, then verify it
+with `keyholder management-bot-test` and `keyholder management-bot-status`. Use
+`/help` in its private chat for the compact command reference. Link retrieval stays
+in the SSH CLI so Telegram chat history never becomes a subscription credential store.
+
+For external outage detection, create a Better Stack heartbeat with a five-minute
+grace period, then run `keyholder heartbeat-configure` and
+`keyholder heartbeat-test`. The URL is read without terminal echo and stored only
+in the root-owned monitor environment. Customer quota and expiry warnings do not
+suppress the host heartbeat.
 
 ## Operator commands
 

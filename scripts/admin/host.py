@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,8 @@ def configuration() -> dict[str, Any]:
         "sqlite_backups": {},
         "monitor_tool": "/usr/local/lib/keyholder-admin/monitor.py",
         "monitor_config": "/etc/keyholder/monitor.json",
+        "management_bot_env": "/etc/keyholder/management-bot.env",
+        "management_bot_service": "keyholder-management-bot.service",
     }
     file = Path(os.getenv("KEYHOLDER_HOST_CONFIG", str(Path(__file__).with_name("host.json"))))
     if file.exists():
@@ -99,6 +102,92 @@ def configure_alerts(config: dict[str, Any], args: dict[str, Any]) -> dict[str, 
     return {"configured": True, "chat_id": chat_id}
 
 
+def write_monitor_env(config: dict[str, Any], changes: dict[str, str]) -> None:
+    monitor_config = Path(config["monitor_config"])
+    settings = json.loads(monitor_config.read_text())
+    destination = Path(settings["secrets_file"])
+    current: dict[str, str] = {}
+    if destination.exists():
+        for line in destination.read_text().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                current[key] = value
+    current.update(changes)
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".monitor-env-", dir=destination.parent)
+    try:
+        with os.fdopen(descriptor, "w") as file:
+            for key in (
+                "KEYHOLDER_ALERT_BOT_TOKEN",
+                "KEYHOLDER_ALERT_CHAT_ID",
+                "KEYHOLDER_HEARTBEAT_URL",
+            ):
+                file.write(f"{key}={current.get(key, '')}\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def heartbeat_url(config: dict[str, Any]) -> str:
+    settings = json.loads(Path(config["monitor_config"]).read_text())
+    destination = Path(settings["secrets_file"])
+    if destination.exists():
+        for line in destination.read_text().splitlines():
+            if line.startswith("KEYHOLDER_HEARTBEAT_URL="):
+                return line.split("=", 1)[1]
+    return ""
+
+
+def validate_heartbeat_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or len(value) > 2048
+    ):
+        raise ValueError("Invalid HTTPS heartbeat URL")
+    return value
+
+
+def configure_management_bot(config: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    token = str(args.get("bot_token", ""))
+    chat_id = str(args.get("chat_id", ""))
+    if not re.fullmatch(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}", token):
+        raise ValueError("Invalid Telegram bot token")
+    if not chat_id:
+        chat_id = discover_chat_id(token)
+    if not re.fullmatch(r"[0-9]{5,20}", chat_id):
+        raise ValueError("Management bot requires one private Telegram account")
+    destination = Path(config["management_bot_env"])
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".management-bot-env-", dir=destination.parent)
+    try:
+        with os.fdopen(descriptor, "w") as file:
+            file.write(f"KEYHOLDER_MANAGEMENT_BOT_TOKEN={token}\n")
+            file.write(f"KEYHOLDER_MANAGEMENT_ADMIN_ID={chat_id}\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    subprocess.run(
+        ["systemctl", "enable", "--now", config["management_bot_service"]],
+        capture_output=True,
+        timeout=20,
+        check=True,
+    )
+    return {"configured": True, "administrator_id": chat_id}
+
+
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     config = configuration()
     container = str(config["api_container"])
@@ -153,6 +242,62 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         )
         if result.returncode:
             raise ValueError("Telegram test delivery failed")
+        return {"ok": True, "result": {"delivered": True}}
+    if operation == "heartbeat-configure":
+        url = validate_heartbeat_url(str(payload.get("args", {}).get("heartbeat_url", "")))
+        write_monitor_env(config, {"KEYHOLDER_HEARTBEAT_URL": url})
+        return {"ok": True, "result": {"configured": True}}
+    if operation == "heartbeat-test":
+        url = heartbeat_url(config)
+        if not url:
+            raise ValueError("Heartbeat is not configured")
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            urllib.request.Request(url, headers={"User-Agent": "keyholder-monitor/1"}), timeout=15
+        ):
+            pass
+        return {"ok": True, "result": {"delivered": True}}
+    if operation == "management-bot-configure":
+        return {
+            "ok": True,
+            "result": configure_management_bot(config, payload.get("args", {})),
+        }
+    if operation == "management-bot-status":
+        result = subprocess.run(
+            ["systemctl", "is-active", config["management_bot_service"]],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        return {
+            "ok": True,
+            "result": {
+                "configured": Path(config["management_bot_env"]).exists(),
+                "active": result.stdout.decode().strip() == "active",
+            },
+        }
+    if operation == "management-bot-test":
+        env: dict[str, str] = {}
+        for line in Path(config["management_bot_env"]).read_text().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                env[key] = value
+        body = urllib.parse.urlencode(
+            {
+                "chat_id": env["KEYHOLDER_MANAGEMENT_ADMIN_ID"],
+                "text": "Keyholder management bot is ready.",
+            }
+        ).encode()
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            urllib.request.Request(
+                "https://api.telegram.org/bot"
+                + env["KEYHOLDER_MANAGEMENT_BOT_TOKEN"]
+                + "/sendMessage",
+                data=body,
+                method="POST",
+            ),
+            timeout=15,
+        ):
+            pass
         return {"ok": True, "result": {"delivered": True}}
     if operation == "backup":
         item = inspect(container)

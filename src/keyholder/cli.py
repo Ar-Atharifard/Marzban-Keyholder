@@ -87,6 +87,11 @@ def parser() -> argparse.ArgumentParser:
         "monitor-run",
         "alerts-configure",
         "alerts-test",
+        "heartbeat-configure",
+        "heartbeat-test",
+        "management-bot-configure",
+        "management-bot-status",
+        "management-bot-test",
     ]:
         commands.add_parser(op)
     for op in ["users", "inbounds", "sync"]:
@@ -380,6 +385,16 @@ def main(argv: list[str] | None = None) -> int:
                 p.error("Telegram configuration requires an interactive terminal.")
             payload["args"]["bot_token"] = getpass.getpass("Alert bot token: ")
             input("Send /start to the alert bot in a private chat, then press Enter here: ")
+            payload["args"]["chat_id"] = ""
+        if args.operation == "heartbeat-configure":
+            if not sys.stdin.isatty():
+                p.error("Heartbeat configuration requires an interactive terminal.")
+            payload["args"]["heartbeat_url"] = getpass.getpass("Better Stack heartbeat URL: ")
+        if args.operation == "management-bot-configure":
+            if not sys.stdin.isatty():
+                p.error("Management bot configuration requires an interactive terminal.")
+            payload["args"]["bot_token"] = getpass.getpass("Management bot token: ")
+            input("Send /start to the management bot in a private chat, then press Enter here: ")
             payload["args"]["chat_id"] = ""
         result = (
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
