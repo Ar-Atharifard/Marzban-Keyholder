@@ -40,9 +40,11 @@ call the same application services as the CLI and must allow only configured
 numeric Telegram user IDs.
 
 Run `keyholder alerts-configure` from an interactive workstation terminal. The
-token is read without echo, transferred over SSH input and written only to the
-root-owned monitor environment. Then run `keyholder alerts-test`. Do not pass bot
-tokens on command lines, paste them into issue trackers or commit them.
+token is read without echo. Send `/start` to the new bot when prompted; Keyholder
+discovers the single private chat through Telegram's official API. The token is
+transferred over SSH input and written only to the root-owned monitor environment.
+Then run `keyholder alerts-test`. Do not pass bot tokens on command lines, paste
+them into issue trackers or commit them.
 
 ## Operator commands
 

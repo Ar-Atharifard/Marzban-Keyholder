@@ -379,7 +379,8 @@ def main(argv: list[str] | None = None) -> int:
             if not sys.stdin.isatty():
                 p.error("Telegram configuration requires an interactive terminal.")
             payload["args"]["bot_token"] = getpass.getpass("Alert bot token: ")
-            payload["args"]["chat_id"] = input("Administrator numeric chat ID: ").strip()
+            input("Send /start to the alert bot in a private chat, then press Enter here: ")
+            payload["args"]["chat_id"] = ""
         result = (
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
         )["result"]

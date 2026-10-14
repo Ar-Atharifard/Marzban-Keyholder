@@ -3,6 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from scripts import monitor
 from scripts.admin import host
 
@@ -106,13 +108,16 @@ def test_telegram_without_credentials_is_not_delivered() -> None:
     assert monitor.telegram({}, "test") is False
 
 
-def test_alert_configuration_writes_private_file_without_returning_token(tmp_path: Path) -> None:
+def test_alert_configuration_writes_private_file_without_returning_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     destination = tmp_path / "monitor.env"
     monitor_config = tmp_path / "monitor.json"
     monitor_config.write_text(json.dumps({"secrets_file": str(destination)}))
+    monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
     result = host.configure_alerts(
         {"monitor_config": str(monitor_config)},
-        {"bot_token": "123456789:" + "a" * 40, "chat_id": "123456789"},
+        {"bot_token": "123456789:" + "a" * 40, "chat_id": ""},
     )
     assert result == {"configured": True, "chat_id": "123456789"}
     assert destination.stat().st_mode & 0o777 == 0o600

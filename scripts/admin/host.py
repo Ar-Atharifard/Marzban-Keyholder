@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -43,11 +44,34 @@ def inspect(name: str) -> dict[str, Any]:
     return json.loads(result.stdout)[0]  # type: ignore[no-any-return]
 
 
+def discover_chat_id(token: str) -> str:
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/getUpdates",
+        headers={"User-Agent": "keyholder-alert-setup/1"},
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(request, timeout=15) as response:
+        payload = json.load(response)
+    if not payload.get("ok"):
+        raise ValueError("Telegram rejected the bot token")
+    chats: dict[str, None] = {}
+    for update in payload.get("result", []):
+        message = update.get("message") or update.get("edited_message") or {}
+        chat = message.get("chat") or {}
+        if chat.get("type") == "private" and isinstance(chat.get("id"), int):
+            chats[str(chat["id"])] = None
+    if len(chats) != 1:
+        raise ValueError("Send /start to the new bot from exactly one private account")
+    return next(iter(chats))
+
+
 def configure_alerts(config: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
     token = str(args.get("bot_token", ""))
     chat_id = str(args.get("chat_id", ""))
     if not re.fullmatch(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}", token):
         raise ValueError("Invalid Telegram bot token")
+    if not chat_id:
+        chat_id = discover_chat_id(token)
     if not re.fullmatch(r"-?[0-9]{5,20}", chat_id):
         raise ValueError("Invalid Telegram chat ID")
     monitor_config = Path(config["monitor_config"])
