@@ -423,8 +423,14 @@ def main() -> None:
                 text = str(message.get("text", ""))[:2048]
                 # Cheap local help and liveness remain responsive during long audits.
                 name = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
-                if name in {"/ping", "/help", "/start"}:
-                    send_reply(token, admin_id, "Online." if name == "/ping" else help_text())
+                if name in {"/ping", "/help", "/start", "/metrics", "/monitor", "/alerts"}:
+                    started = time.monotonic()
+                    try:
+                        reply = command(text, {})
+                    except Exception:
+                        reply = "Quick check failed. Use /status or the SSH CLI to investigate."
+                    send_reply(token, admin_id, reply)
+                    logging.info("Quick command completed in %.2fs", time.monotonic() - started)
                     continue
                 if time.time() - float(message.get("date", time.time())) > 300:
                     send_reply(

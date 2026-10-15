@@ -385,6 +385,8 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
                 timeout=40,
                 check=True,
             )
+        # The complete recovery directory already contains this verified snapshot.
+        destination.unlink()
         return {
             "ok": True,
             "result": {
