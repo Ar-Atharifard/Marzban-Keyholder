@@ -5,7 +5,7 @@ branch, synthetic credentials and a disposable SQLite database.
 
 ```bash
 uv sync --frozen --extra dev --python 3.12
-uv run keyholder init-config
+uv run keyholder config init
 mkdir -p data
 uv run alembic upgrade head
 uv run pytest -q

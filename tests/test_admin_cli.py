@@ -80,7 +80,8 @@ def test_customer_identity_cli_update_and_contact_lookup(operator: None) -> None
 def test_user_create_accepts_private_identity_fields() -> None:
     args = cli.parser().parse_args(
         [
-            "user-create",
+            "user",
+            "create",
             "opaque_01",
             "--name",
             "Full Name",
@@ -223,18 +224,26 @@ def test_help_command_is_local_complete_and_supports_subcommands(
     monkeypatch.setattr(cli, "request", lambda *args, **kwargs: pytest.fail("request called"))
     assert cli.main(["help"]) == 0
     overview = capsys.readouterr().out
-    for command in [
-        "user-create",
-        "customer-update",
-        "monitor-status",
-        "heartbeat-configure",
-        "management-bot-configure",
-        "panel",
-    ]:
-        assert command in overview
-    assert cli.main(["help", "user-inbounds"]) == 0
+    for resource in ["user", "customer", "monitor", "heartbeat", "management-bot", "panel"]:
+        assert resource in overview
+    assert cli.main(["help", "user", "inbounds"]) == 0
     detail = capsys.readouterr().out
     assert "--protocol" in detail and "--tags" in detail
+
+
+def test_legacy_flat_commands_translate_to_canonical_contract() -> None:
+    assert cli.normalize_argv(["management-bot-configure"]) == [
+        "management-bot",
+        "configure",
+    ]
+    assert cli.normalize_argv(["--host", "braavos", "link", "alice"]) == [
+        "--host",
+        "braavos",
+        "customer",
+        "link",
+        "alice",
+    ]
+    assert cli.normalize_argv(["help", "user-create"]) == ["help", "user", "create"]
 
 
 def test_panel_bookmark_is_not_printed_to_noninteractive_output(

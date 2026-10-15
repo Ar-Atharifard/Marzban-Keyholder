@@ -63,7 +63,7 @@ class CLIError(Exception):
 
 
 class KeyholderParser(argparse.ArgumentParser):
-    command_parsers: dict[str, KeyholderParser]
+    command_parsers: dict[tuple[str, ...], KeyholderParser]
 
 
 COMMAND_HELP = {
@@ -109,6 +109,91 @@ COMMAND_HELP = {
     "profiles": "Set the rendered profile kinds for a customer override.",
 }
 
+GROUP_HELP = {
+    "config": "Initialize local configuration files.",
+    "system": "Inspect and protect the Keyholder deployment.",
+    "backend": "Manage subscription backend registrations.",
+    "monitor": "Inspect or run local monitoring checks.",
+    "alert-bot": "Configure Telegram operational alerts.",
+    "heartbeat": "Configure external whole-host outage detection.",
+    "management-bot": "Configure the private Telegram management interface.",
+    "upstream": "Inspect and synchronize upstream panel resources.",
+    "user": "Provision and manage upstream user accounts.",
+    "customer": "Manage stable Keyholder customer registrations.",
+    "panel": "Access the private upstream administration panel.",
+}
+
+LEGACY_COMMANDS = {
+    "init-config": ("config", "init"),
+    "status": ("system", "status"),
+    "health": ("system", "health"),
+    "doctor": ("system", "doctor"),
+    "backup": ("system", "backup"),
+    "backends": ("backend", "list"),
+    "backend-register": ("backend", "register"),
+    "monitor-status": ("monitor", "status"),
+    "monitor-run": ("monitor", "run"),
+    "alerts-configure": ("alert-bot", "configure"),
+    "alerts-test": ("alert-bot", "test"),
+    "heartbeat-configure": ("heartbeat", "configure"),
+    "heartbeat-test": ("heartbeat", "test"),
+    "management-bot-configure": ("management-bot", "configure"),
+    "management-bot-status": ("management-bot", "status"),
+    "management-bot-test": ("management-bot", "test"),
+    "users": ("upstream", "users"),
+    "inbounds": ("upstream", "inbounds"),
+    "sync": ("upstream", "sync"),
+    "reconcile": ("upstream", "reconcile"),
+    "user-create": ("user", "create"),
+    "create": ("user", "attach"),
+    "user-update": ("user", "update"),
+    "user-inbounds": ("user", "inbounds"),
+    "user-usage": ("user", "usage"),
+    "user-reset-usage": ("user", "reset-usage"),
+    "list": ("customer", "list"),
+    "customer-update": ("customer", "update"),
+    "link": ("customer", "link"),
+    "show": ("customer", "show"),
+    "check": ("customer", "check"),
+    "enable": ("customer", "enable"),
+    "disable": ("customer", "disable"),
+    "revoke": ("customer", "revoke"),
+    "rotate-token": ("customer", "rotate-token"),
+    "rename": ("customer", "rename"),
+    "remap": ("customer", "remap"),
+    "profiles": ("customer", "profiles"),
+    "panel": ("panel", "open"),
+    "panel-url": ("panel", "url"),
+}
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Translate the previous flat CLI into the stable resource/action grammar."""
+    normalized = list(argv)
+    index = 0
+    while index < len(normalized):
+        value = normalized[index]
+        if value in {"--host", "--backend"}:
+            index += 2
+            continue
+        if value in {"--local", "--json", "--version", "-h", "--help"} or value.startswith(
+            ("--host=", "--backend=")
+        ):
+            index += 1
+            continue
+        break
+    if index >= len(normalized):
+        return normalized
+    if normalized[index] == "help" and index + 1 < len(normalized):
+        replacement = LEGACY_COMMANDS.get(normalized[index + 1])
+        if replacement:
+            normalized[index + 1 : index + 2] = replacement
+        return normalized
+    replacement = LEGACY_COMMANDS.get(normalized[index])
+    if replacement:
+        normalized[index : index + 1] = replacement
+    return normalized
+
 
 def package_version() -> str:
     try:
@@ -121,12 +206,13 @@ def parser() -> KeyholderParser:
     p = KeyholderParser(
         description=__doc__,
         epilog=(
-            "Use 'keyholder help COMMAND' or 'keyholder COMMAND --help' for command details.\n"
+            "Use 'keyholder help RESOURCE ACTION' or "
+            "'keyholder RESOURCE ACTION --help' for details.\n"
             "Examples:\n"
-            "  keyholder doctor\n"
-            "  keyholder user-create customer_001 --quota-gb 20 --days 30 --protocols vless\n"
-            "  keyholder link customer_001 --save-link ./customer_001.json\n"
-            "  keyholder panel"
+            "  keyholder system doctor\n"
+            "  keyholder user create customer_001 --quota-gb 20 --days 30 --protocols vless\n"
+            "  keyholder customer link customer_001 --save-link ./customer_001.json\n"
+            "  keyholder panel open"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -144,38 +230,65 @@ def parser() -> KeyholderParser:
         default=os.getenv("KEYHOLDER_OPERATOR_BACKEND_ID", "marzban-default"),
         help="Backend namespace (default: %(default)s)",
     )
-    commands = p.add_subparsers(dest="operation", required=True)
-    initialize = commands.add_parser(
-        "init-config", help=COMMAND_HELP["init-config"], description=COMMAND_HELP["init-config"]
-    )
+    resources = p.add_subparsers(dest="resource", required=True, metavar="RESOURCE")
+    command_parsers: dict[tuple[str, ...], KeyholderParser] = {}
+
+    def group(name: str) -> tuple[KeyholderParser, argparse._SubParsersAction[KeyholderParser]]:
+        item = resources.add_parser(name, help=GROUP_HELP[name], description=GROUP_HELP[name])
+        command_parsers[(name,)] = item
+        actions = item.add_subparsers(dest="action", required=True, metavar="ACTION")
+        return item, actions
+
+    def leaf(
+        resource: str,
+        actions: argparse._SubParsersAction[KeyholderParser],
+        action: str,
+        operation: str,
+    ) -> KeyholderParser:
+        item = actions.add_parser(
+            action, help=COMMAND_HELP[operation], description=COMMAND_HELP[operation]
+        )
+        item.set_defaults(operation=operation)
+        command_parsers[(resource, action)] = item
+        return item
+
+    _, config = group("config")
+    initialize = leaf("config", config, "init", "init-config")
     initialize.add_argument("--output", type=Path, default=Path(".env"), help="New file path")
-    for op in [
-        "status",
-        "health",
-        "doctor",
-        "backup",
-        "backends",
-        "backend-register",
-        "monitor-status",
-        "monitor-run",
-        "alerts-configure",
-        "alerts-test",
-        "heartbeat-configure",
-        "heartbeat-test",
-        "management-bot-configure",
-        "management-bot-status",
-        "management-bot-test",
-    ]:
-        commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
-    for op in ["users", "inbounds", "sync"]:
-        commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
-    reconcile = commands.add_parser(
-        "reconcile", help=COMMAND_HELP["reconcile"], description=COMMAND_HELP["reconcile"]
-    )
+
+    _, system = group("system")
+    for action in ["status", "health", "doctor", "backup"]:
+        leaf("system", system, action, action)
+
+    _, backend = group("backend")
+    leaf("backend", backend, "list", "backends")
+    leaf("backend", backend, "register", "backend-register")
+
+    _, monitor = group("monitor")
+    leaf("monitor", monitor, "status", "monitor-status")
+    leaf("monitor", monitor, "run", "monitor-run")
+
+    _, alert_bot = group("alert-bot")
+    leaf("alert-bot", alert_bot, "configure", "alerts-configure")
+    leaf("alert-bot", alert_bot, "test", "alerts-test")
+
+    _, heartbeat = group("heartbeat")
+    leaf("heartbeat", heartbeat, "configure", "heartbeat-configure")
+    leaf("heartbeat", heartbeat, "test", "heartbeat-test")
+
+    _, management_bot = group("management-bot")
+    leaf("management-bot", management_bot, "configure", "management-bot-configure")
+    leaf("management-bot", management_bot, "status", "management-bot-status")
+    leaf("management-bot", management_bot, "test", "management-bot-test")
+
+    _, upstream = group("upstream")
+    for action in ["users", "inbounds", "sync"]:
+        leaf("upstream", upstream, action, action)
+    reconcile = leaf("upstream", upstream, "reconcile", "reconcile")
     reconcile.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply changes")
-    user_create = commands.add_parser(
-        "user-create", help=COMMAND_HELP["user-create"], description=COMMAND_HELP["user-create"]
-    )
+
+    _, user = group("user")
+    user_create = leaf("user", user, "create", "user-create")
     user_create.add_argument("username", help="New Marzban username")
     user_create.add_argument("--name", help="Private customer name; defaults to username")
     user_create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
@@ -190,18 +303,23 @@ def parser() -> KeyholderParser:
         "--protocols", nargs="+", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
     )
     user_create.add_argument("--save-link", type=Path, help="New private JSON file for the URL")
-    user_update = commands.add_parser(
-        "user-update", help=COMMAND_HELP["user-update"], description=COMMAND_HELP["user-update"]
+
+    attach = leaf("user", user, "attach", "create")
+    attach.add_argument("username", help="Existing Marzban username")
+    attach.add_argument("--name", help="Display name; defaults to Marzban username")
+    attach.add_argument("--telegram", help="Unique Telegram username or numeric ID")
+    attach.add_argument("--phone", help="Unique international phone number, for example +98912...")
+    attach.add_argument("--profiles", nargs="+", choices=KINDS)
+    attach.add_argument(
+        "--save-link", type=Path, help="Explicit private local file, never overwritten"
     )
+
+    user_update = leaf("user", user, "update", "user-update")
     user_update.add_argument("username", help="Marzban username")
     user_update.add_argument("--quota-gb", type=float, help="New quota; 0 means unlimited")
     user_update.add_argument("--days", type=int, help="Expiry from now; 0 means no expiry")
     user_update.add_argument("--status", choices=["active", "disabled"], help="Panel status")
-    inbound = commands.add_parser(
-        "user-inbounds",
-        help=COMMAND_HELP["user-inbounds"],
-        description=COMMAND_HELP["user-inbounds"],
-    )
+    inbound = leaf("user", user, "inbounds", "user-inbounds")
     inbound.add_argument("username", help="Marzban username")
     inbound.add_argument(
         "--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
@@ -209,50 +327,27 @@ def parser() -> KeyholderParser:
     inbound.add_argument(
         "--tags", nargs="*", required=True, help="Empty selection disables this protocol's inbounds"
     )
-    usage = commands.add_parser(
-        "user-usage", help=COMMAND_HELP["user-usage"], description=COMMAND_HELP["user-usage"]
-    )
+    usage = leaf("user", user, "usage", "user-usage")
     usage.add_argument("username", help="Marzban username")
-    reset = commands.add_parser(
-        "user-reset-usage",
-        help=COMMAND_HELP["user-reset-usage"],
-        description=COMMAND_HELP["user-reset-usage"],
-    )
+    reset = leaf("user", user, "reset-usage", "user-reset-usage")
     reset.add_argument("username", help="Marzban username")
     reset.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply reset")
-    panel = commands.add_parser(
-        "panel", help=COMMAND_HELP["panel"], description=COMMAND_HELP["panel"]
-    )
+
+    _, panel_commands = group("panel")
+    panel = leaf("panel", panel_commands, "open", "panel")
     panel.add_argument("--port", type=int, default=28080, help="Local tunnel port")
     panel.add_argument(
         "--no-browser", action="store_true", help="Print URL without opening browser"
     )
-    bookmark = commands.add_parser(
-        "panel-url", help=COMMAND_HELP["panel-url"], description=COMMAND_HELP["panel-url"]
-    )
+    bookmark = leaf("panel", panel_commands, "url", "panel-url")
     bookmark.add_argument("--save-link", type=Path, help="New private JSON file")
-    listing = commands.add_parser(
-        "list", help=COMMAND_HELP["list"], description=COMMAND_HELP["list"]
-    )
+
+    _, customer = group("customer")
+    listing = leaf("customer", customer, "list", "list")
     listing.add_argument("--limit", type=int, default=100, help="Rows, 1-100")
     listing.add_argument("--offset", type=int, default=0, help="Rows to skip")
     listing.add_argument("--history", action="store_true", help="Include revoked registrations")
-    create = commands.add_parser(
-        "create", help=COMMAND_HELP["create"], description=COMMAND_HELP["create"]
-    )
-    create.add_argument("username", help="Existing Marzban username")
-    create.add_argument("--name", help="Display name; defaults to Marzban username")
-    create.add_argument("--telegram", help="Unique Telegram username or numeric ID")
-    create.add_argument("--phone", help="Unique international phone number, for example +98912...")
-    create.add_argument("--profiles", nargs="+", choices=KINDS)
-    create.add_argument(
-        "--save-link", type=Path, help="Explicit private local file, never overwritten"
-    )
-    customer_update = commands.add_parser(
-        "customer-update",
-        help=COMMAND_HELP["customer-update"],
-        description=COMMAND_HELP["customer-update"],
-    )
+    customer_update = leaf("customer", customer, "update", "customer-update")
     customer_update.add_argument("customer", help="Customer ID, username, Telegram or phone")
     customer_update.add_argument("--name")
     customer_update.add_argument("--telegram")
@@ -271,7 +366,7 @@ def parser() -> KeyholderParser:
         "remap",
         "profiles",
     ]:
-        command = commands.add_parser(op, help=COMMAND_HELP[op], description=COMMAND_HELP[op])
+        command = leaf("customer", customer, op, op)
         command.add_argument(
             "customer", help="Customer ID, exact username, Telegram handle/ID or phone"
         )
@@ -289,9 +384,13 @@ def parser() -> KeyholderParser:
             command.add_argument("--info", action="store_true", help="Show the usage-page URL")
         if op in {"rotate-token", "link"}:
             command.add_argument("--save-link", type=Path, help="New private JSON file")
-    help_command = commands.add_parser("help", help="Show complete help, or help for one command")
-    help_command.add_argument("command", nargs="?", choices=sorted(commands.choices))
-    p.command_parsers = commands.choices
+    help_command = resources.add_parser(
+        "help", help="Show complete help, or help for one resource/action path"
+    )
+    help_command.add_argument("command", nargs="*", metavar="COMMAND")
+    help_command.set_defaults(operation="help")
+    command_parsers[("help",)] = help_command
+    p.command_parsers = command_parsers
     return p
 
 
@@ -385,10 +484,15 @@ def run_panel(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = parser()
-    args = p.parse_args(argv)
+    supplied = list(sys.argv[1:] if argv is None else argv)
+    args = p.parse_args(normalize_argv(supplied))
     if args.operation == "help":
         if args.command:
-            p.command_parsers[args.command].print_help()
+            path = tuple(args.command)
+            command_parser = p.command_parsers.get(path)
+            if command_parser is None:
+                p.error("Unknown command path; use 'keyholder help' to list resources.")
+            command_parser.print_help()
         else:
             p.print_help()
         return 0
@@ -487,7 +591,18 @@ def main(argv: list[str] | None = None) -> int:
             "args": {
                 k: v
                 for k, v in vars(args).items()
-                if k not in {"operation", "host", "json", "save_link", "local", "info"}
+                if k
+                not in {
+                    "operation",
+                    "resource",
+                    "action",
+                    "command",
+                    "host",
+                    "json",
+                    "save_link",
+                    "local",
+                    "info",
+                }
             },
         }
         if args.operation == "alerts-configure":

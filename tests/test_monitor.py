@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -141,7 +142,7 @@ def test_management_bot_configuration_is_private_and_starts_service(
         return object()
 
     monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
-    monkeypatch.setattr(host.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     result = host.configure_management_bot(
         {
             "management_bot_env": str(destination),

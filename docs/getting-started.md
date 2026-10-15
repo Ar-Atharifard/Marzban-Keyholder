@@ -8,7 +8,7 @@ proxy core, DNS provider or certificates.
 
 ```bash
 uv sync --frozen --extra dev --python 3.12
-uv run keyholder init-config
+uv run keyholder config init
 ```
 
 This creates a mode-0600 `.env` with new admin/vault keys, refusing overwrites.
@@ -68,11 +68,11 @@ container/env/backup paths explicitly in a root-owned mode-0600 host configurati
 The workstation command accepts `--host YOUR_SSH_ALIAS`.
 
 ```bash
-keyholder --host YOUR_SSH_ALIAS doctor
-keyholder --host YOUR_SSH_ALIAS backends
-keyholder --host YOUR_SSH_ALIAS backend-register
-keyholder --host YOUR_SSH_ALIAS create alice
-keyholder --host YOUR_SSH_ALIAS link alice
+keyholder --host YOUR_SSH_ALIAS system doctor
+keyholder --host YOUR_SSH_ALIAS backend list
+keyholder --host YOUR_SSH_ALIAS backend register
+keyholder --host YOUR_SSH_ALIAS user attach alice
+keyholder --host YOUR_SSH_ALIAS customer link alice
 ```
 
 For Marzban, create `alice` in the panel first or use the CLI provisioning command

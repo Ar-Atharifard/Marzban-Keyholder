@@ -252,7 +252,7 @@ inventing a quota. No configurations, credentials, scripts or external assets ar
 included. The page uses no-store, no-referrer and a restrictive content security
 policy. It adds no dummy profile and never changes the subscription URL.
 
-Administrators can retrieve the usage-page URL with `keyholder link USER --info`
+Administrators can retrieve the usage-page URL with `keyholder customer link USER --info`
 (or append `?format=info` to the existing subscription URL). This retrieves the
 existing canonical identity; it does not create a new subscription. As with link
 retrieval, use an interactive terminal or explicit private `--save-link` file.

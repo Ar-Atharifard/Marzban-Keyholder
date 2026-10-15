@@ -30,7 +30,7 @@ Use Python 3.12+ and `uv`:
 
 ```bash
 uv sync --frozen --extra dev --python 3.12
-uv run keyholder init-config
+uv run keyholder config init
 ```
 
 Edit the private `.env`: set your permanent public URL and upstream credentials.

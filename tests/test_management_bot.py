@@ -34,10 +34,15 @@ def test_destructive_command_requires_matching_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
+
+    def dispatch(operation: str, args: dict[str, Any]) -> dict[str, str]:
+        calls.append((operation, args))
+        return {"status": "revoked"}
+
     monkeypatch.setattr(
         management_bot,
         "dispatch",
-        lambda operation, args: calls.append((operation, args)) or {"status": "revoked"},
+        dispatch,
     )
     state: dict[str, Any] = {}
     prompt = management_bot.command("/revoke alice", state)

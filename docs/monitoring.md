@@ -39,26 +39,26 @@ needs only its token and the administrator chat ID. The management bot accepts
 commands only from one configured numeric ID in a private chat and calls the same
 server-side dispatcher as the SSH CLI. It never returns subscription links in chat.
 
-Run `keyholder alerts-configure` from an interactive workstation terminal. The
+Run `keyholder alert-bot configure` from an interactive workstation terminal. The
 token is read without echo. Send `/start` to the new bot when prompted; Keyholder
 discovers the single private chat through Telegram's official API. The token is
 transferred over SSH input and written only to the root-owned monitor environment.
-Then run `keyholder alerts-test`. Do not pass bot tokens on command lines, paste
+Then run `keyholder alert-bot test`. Do not pass bot tokens on command lines, paste
 them into issue trackers or commit them.
 
-Configure the second bot with `keyholder management-bot-configure`, then verify it
-with `keyholder management-bot-test` and `keyholder management-bot-status`. Use
+Configure the second bot with `keyholder management-bot configure`, then verify it
+with `keyholder management-bot test` and `keyholder management-bot status`. Use
 `/help` in its private chat for the compact command reference. Link retrieval stays
 in the SSH CLI so Telegram chat history never becomes a subscription credential store.
 
 For external outage detection, create a Better Stack heartbeat with a five-minute
-grace period, then run `keyholder heartbeat-configure` and
-`keyholder heartbeat-test`. The URL is read without terminal echo and stored only
+grace period, then run `keyholder heartbeat configure` and
+`keyholder heartbeat test`. The URL is read without terminal echo and stored only
 in the root-owned monitor environment. Customer quota and expiry warnings do not
 suppress the host heartbeat.
 
 ## Operator commands
 
-`keyholder monitor-status` reads the most recent state. `keyholder monitor-run`
+`keyholder monitor status` reads the most recent state. `keyholder monitor run`
 runs checks immediately without sending notifications. The systemd timer owns
 normal alert delivery.

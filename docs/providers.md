@@ -16,12 +16,13 @@ Mapping references retain the v1 contract: 3–32 ASCII letters/digits/underscor
 Use provider-specific adapters when a panel needs different identifier translation.
 
 After applying configuration and restarting only Keyholder, explicitly register
-its metadata with `keyholder backend-register` or `POST /admin/backends/register`.
+its metadata with `keyholder backend register` or `POST /admin/backends/register`.
 Startup does not mutate the database. Existing provider/config-reference identities
 cannot silently be changed under an existing backend ID; use a new ID and explicit
 customer remapping. Removing a configured adapter makes its mappings unavailable.
 
-Use `keyholder --backend west create alice` and `keyholder --backend west link alice`.
+Use `keyholder --backend west user attach alice` and
+`keyholder --backend west customer link alice`.
 The same username on two backends represents two different accounts. Customer IDs
 and subscription tokens remain independent of provider URLs.
 

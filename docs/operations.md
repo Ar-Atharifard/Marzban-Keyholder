@@ -2,11 +2,13 @@
 
 ## Daily checks and backup
 
-Use `keyholder status`, `health`, `doctor`, `users`, `inbounds` and `check USER`.
-`doctor` checks SQLite integrity, vault retrieval and selected-provider inventory
+Use `keyholder system status`, `keyholder system health`, `keyholder system doctor`,
+`keyholder upstream users`, `keyholder upstream inbounds` and
+`keyholder customer check USER`. `system doctor` checks SQLite integrity, vault
+retrieval and selected-provider inventory
 when supported. `/health` does not establish panel or proxy connectivity.
 
-`keyholder backup` makes a private same-server recovery set: an online SQLite
+`keyholder system backup` makes a private same-server recovery set: an online SQLite
 snapshot and its vault-key environment, plus explicitly configured files/SQLite
 sources. Include private panel access metadata when using a secret panel entry.
 Root-owned mode-0600 configuration selects paths; backup directories are root-only.
@@ -52,7 +54,7 @@ python3 scripts/render_panel_gate.py --hostname panel.example.com \
 
 Include the snippet in your gateway's `http` block with the referenced certificate
 files. Configure `panel_access_file` in the dispatcher, then retrieve the bookmark
-with `keyholder panel-url` in a terminal. Validate HTML, module assets, login/API
+with `keyholder panel url` in a terminal. Validate HTML, module assets, login/API
 and WebSocket traffic against your installed panel version before activation.
 Opening the private bookmark sets a Secure, HttpOnly, SameSite=Strict gate cookie
 for 30 days and redirects to the native `/dashboard/` path. Dashboard, API, locale,

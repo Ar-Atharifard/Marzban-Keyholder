@@ -49,50 +49,50 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 
 | Task | Command |
 |---|---|
-| New local private env | `keyholder init-config` |
-| Service / DB checks | `keyholder status`, `health`, `doctor` |
-| Monitoring state / immediate read-only check | `keyholder monitor-status`, `monitor-run` |
-| Configure / test Telegram alerts | `keyholder alerts-configure`, `alerts-test` |
-| Configure / test external outage heartbeat | `keyholder heartbeat-configure`, `heartbeat-test` |
-| Configure / inspect / test management bot | `keyholder management-bot-configure`, `management-bot-status`, `management-bot-test` |
-| Configured backends / explicit registration | `keyholder backends`, `backend-register` |
-| Panel inventory | `keyholder users`, `inbounds` |
-| Canonical customers / history | `keyholder list`, `list --history` |
-| Attach an existing account / retrieve same URL | `keyholder create alice`, `link alice` |
-| Customer / live compatible profiles | `keyholder show alice`, `check alice` |
-| Register missing panel accounts | `keyholder sync` |
-| Provision Marzban account with private identity | `keyholder user-create customer_001 --name 'Alice Example' --telegram @alice --phone +989121234567 --quota-gb 20 --days 30 --protocols vless trojan` |
-| Update plan / traffic | `keyholder user-update alice --quota-gb 30 --days 30`, `user-usage alice` |
-| Explicit usage reset | `keyholder user-reset-usage alice --confirm` |
-| Select one protocol's inbounds | `keyholder user-inbounds alice --protocol trojan --tags 'TROJAN TLS'` |
-| Update private identity / clear contact | `keyholder customer-update customer_001 --name 'Alice Example' --telegram @alice`, `customer-update customer_001 --clear-phone` |
-| Rename / remap without URL rotation | `keyholder rename customer_001 'Alice'`, `remap customer_001 replacement` |
-| Pause local delivery / resume | `keyholder disable alice`, `enable alice` |
-| Terminal revocation / token rotation | `keyholder revoke alice --confirm`, `rotate-token alice --confirm` |
-| Recovery snapshot | `keyholder backup` |
-| Private bookmark / SSH recovery tunnel | `keyholder panel-url`, `panel` |
-| Complete command reference | `keyholder help`, `keyholder help COMMAND`, `man keyholder` |
+| New local private env | `keyholder config init` |
+| Service / DB checks | `keyholder system status`, `keyholder system health`, `keyholder system doctor` |
+| Monitoring state / immediate check | `keyholder monitor status`, `keyholder monitor run` |
+| Configure / test Telegram alerts | `keyholder alert-bot configure`, `keyholder alert-bot test` |
+| Configure / test outage heartbeat | `keyholder heartbeat configure`, `keyholder heartbeat test` |
+| Configure / inspect / test management bot | `keyholder management-bot configure`, `keyholder management-bot status`, `keyholder management-bot test` |
+| Configured backends / registration | `keyholder backend list`, `keyholder backend register` |
+| Panel inventory | `keyholder upstream users`, `keyholder upstream inbounds` |
+| Canonical customers / history | `keyholder customer list`, `keyholder customer list --history` |
+| Attach account / retrieve same URL | `keyholder user attach alice`, `keyholder customer link alice` |
+| Customer / compatible profiles | `keyholder customer show alice`, `keyholder customer check alice` |
+| Register missing panel accounts | `keyholder upstream sync` |
+| Provision user with private identity | `keyholder user create customer_001 --name 'Alice Example' --telegram @alice --phone +989121234567 --quota-gb 20 --days 30 --protocols vless trojan` |
+| Update plan / traffic | `keyholder user update alice --quota-gb 30 --days 30`, `keyholder user usage alice` |
+| Explicit usage reset | `keyholder user reset-usage alice --confirm` |
+| Select protocol inbounds | `keyholder user inbounds alice --protocol trojan --tags 'TROJAN TLS'` |
+| Update private identity / clear contact | `keyholder customer update customer_001 --name 'Alice Example' --telegram @alice`, `keyholder customer update customer_001 --clear-phone` |
+| Rename / remap without URL rotation | `keyholder customer rename customer_001 'Alice'`, `keyholder customer remap customer_001 replacement` |
+| Pause local delivery / resume | `keyholder customer disable alice`, `keyholder customer enable alice` |
+| Revocation / token rotation | `keyholder customer revoke alice --confirm`, `keyholder customer rotate-token alice --confirm` |
+| Recovery snapshot | `keyholder system backup` |
+| Private bookmark / SSH tunnel | `keyholder panel url`, `keyholder panel open` |
+| Complete command reference | `keyholder help`, `keyholder help RESOURCE ACTION`, `man keyholder` |
 
 Global `--backend ID` selects an account namespace. Commands accepting a customer
 selector support customer UUID, exact upstream username, Telegram handle/ID or
 phone. Customer UUIDs remain unambiguous. HTTP-source providers support local
 customer/link operations but not Marzban-specific provisioning/inventory commands.
 
-`user-create` defaults the private customer name to the Marzban username when
-`--name` is omitted. `create USER --name ...` does the same when attaching an
+`user create` defaults the private customer name to the Marzban username when
+`--name` is omitted. `user attach USER --name ...` does the same when attaching an
 existing panel user. Telegram and phone are nullable but unique when present;
 use international `+digits` phone format. These fields stay in Keyholder and are
 never copied to Marzban or customer subscription output.
 
-`create` is idempotent. Links require an interactive terminal or explicit
+`user attach` is idempotent. Links require an interactive terminal or explicit
 `--save-link /new/private/file.json`; overwrite/symlinks are refused. `--json`
 returns nonsecret inventory only. After an uncertain mutation response, check
 state rather than repeating a rotation or creating another upstream account.
 
-Zero quota/days explicitly means unlimited. `user-update --days` sets expiry from
-now and does not reset traffic. `user-inbounds` replaces only the selected protocol's
+Zero quota/days explicitly means unlimited. `user update --days` sets expiry from
+now and does not reset traffic. `user inbounds` replaces only the selected protocol's
 inbounds, preserving credentials. Local disable/revoke does not stop previously
-imported proxies; use the provider to enforce access. `reconcile --confirm` is a
+imported proxies; use the provider to enforce access. `upstream reconcile --confirm` is a
 legacy recovery tool, not daily maintenance. Infrastructure deployment, user
 bulk deletion and automatic restore are intentionally outside this CLI.
 

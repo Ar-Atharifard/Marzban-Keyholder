@@ -11,7 +11,8 @@ from keyholder.cli import main, parser
 def test_management_commands_cover_provisioning_and_panel_selection() -> None:
     args = parser().parse_args(
         [
-            "user-create",
+            "user",
+            "create",
             "alice",
             "--quota-gb",
             "20",
@@ -24,13 +25,21 @@ def test_management_commands_cover_provisioning_and_panel_selection() -> None:
     )
     assert args.quota_gb == 20 and args.days == 30
     args = parser().parse_args(
-        ["user-inbounds", "alice", "--protocol", "trojan", "--tags", "TROJAN GRPC CDN TITAN"]
+        [
+            "user",
+            "inbounds",
+            "alice",
+            "--protocol",
+            "trojan",
+            "--tags",
+            "TROJAN GRPC CDN TITAN",
+        ]
     )
     assert args.tags == ["TROJAN GRPC CDN TITAN"]
-    assert parser().parse_args(["user-usage", "alice"]).username == "alice"
-    assert parser().parse_args(["user-reset-usage", "alice", "--confirm"]).confirmed
+    assert parser().parse_args(["user", "usage", "alice"]).username == "alice"
+    assert parser().parse_args(["user", "reset-usage", "alice", "--confirm"]).confirmed
     for op in ["users", "inbounds", "sync"]:
-        assert parser().parse_args([op]).operation == op
+        assert parser().parse_args(["upstream", op]).operation == op
 
 
 @pytest.mark.parametrize(

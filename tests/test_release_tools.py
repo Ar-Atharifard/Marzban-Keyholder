@@ -53,7 +53,7 @@ def test_client_configuration_is_generic_and_backend_selection_is_explicit(
         json.dumps({"host": "another-server", "remote_path": "/opt/operator/host.py"})
     )
     monkeypatch.setenv("KEYHOLDER_ADMIN_CONFIG", str(config))
-    args = cli.parser().parse_args(["--backend", "west", "list"])
+    args = cli.parser().parse_args(["--backend", "west", "customer", "list"])
     assert args.host == "another-server" and args.backend_id == "west"
     assert cli.remote_path() == "/opt/operator/host.py"
 
