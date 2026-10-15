@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -77,6 +78,8 @@ def load_config(path: Path) -> dict[str, Any]:
         "backup_max_age_hours": 26,
         "expiry_warning_days": [7, 3, 1],
         "quota_warning_percent": [80, 95],
+        "terminal_reminder_hours": 24,
+        "terminal_silence_hours": 72,
         "traffic_min_gib": 1,
         "traffic_rate_gib_per_hour": 20,
         "traffic_baseline_multiplier": 3,
@@ -126,6 +129,41 @@ def systemd_alerts(units: list[str]) -> dict[str, str]:
         if result.returncode or state != "active":
             alerts[f"systemd:{unit}"] = f"Systemd unit {unit} is {state}"
     return alerts
+
+
+def system_metrics() -> dict[str, Any]:
+    memory = read_meminfo()
+    disk = shutil.disk_usage("/")
+    fs = os.statvfs("/")
+    cpu = [int(x) for x in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
+    network = {"received_bytes": 0, "sent_bytes": 0}
+    for line in Path("/proc/net/dev").read_text().splitlines()[2:]:
+        interface, values = line.split(":", 1)
+        if interface.strip() == "lo" or interface.strip().startswith(("veth", "docker", "br-")):
+            continue
+        fields = values.split()
+        network["received_bytes"] += int(fields[0])
+        network["sent_bytes"] += int(fields[8])
+    return {
+        "memory_total_mib": round(memory.get("MemTotal", 0) / 1024**2, 1),
+        "memory_available_mib": round(memory.get("MemAvailable", 0) / 1024**2, 1),
+        "swap_used_mib": round(
+            (memory.get("SwapTotal", 0) - memory.get("SwapFree", 0)) / 1024**2, 1
+        ),
+        "swap_total_mib": round(memory.get("SwapTotal", 0) / 1024**2, 1),
+        "disk_used_gib": round(disk.used / GIB, 2),
+        "disk_total_gib": round(disk.total / GIB, 2),
+        "disk_free_gib": round(disk.free / GIB, 2),
+        "inode_used_percent": round(100 * (fs.f_files - fs.f_ffree) / fs.f_files, 1)
+        if fs.f_files
+        else None,
+        "cpus": os.cpu_count() or 1,
+        "load_1_5_15": list(os.getloadavg()),
+        "uptime_seconds": int(float(Path("/proc/uptime").read_text().split()[0])),
+        "cpu_total_ticks": sum(cpu),
+        "cpu_idle_ticks": cpu[3] + cpu[4],
+        **network,
+    }
 
 
 def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
@@ -243,6 +281,18 @@ def user_alerts(
         username = str(row["username"])
         used = int(row["used_traffic"] or 0)
         counters[user_id] = used
+        limit = int(row["data_limit"] or 0)
+        expire = int(row["expire"] or 0)
+        reasons = []
+        if limit and used >= limit:
+            reasons.append("quota exhausted")
+        if expire and expire <= now.timestamp():
+            reasons.append("expired")
+        if str(row["status"]) in {"limited", "expired"} and not reasons:
+            reasons.append(str(row["status"]))
+        if reasons:
+            alerts[f"user:{user_id}:account"] = f"User {username}: {', '.join(reasons)}"
+            continue
         if str(row["status"]) not in {"active", "on_hold"}:
             alerts[f"user:{user_id}:status"] = f"User {username} status is {row['status']}"
         limit = int(row["data_limit"] or 0)
@@ -312,14 +362,22 @@ def telegram(env: dict[str, str], text: str) -> bool:
     chat = env.get("KEYHOLDER_ALERT_CHAT_ID")
     if not token or not chat:
         return False
-    body = urllib.parse.urlencode(
-        {"chat_id": chat, "text": text, "disable_web_page_preview": "true"}
-    ).encode()
-    request = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/sendMessage", data=body, method="POST"
-    )
-    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=10):
-        pass
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for offset in range(0, len(text), 3500):
+        body = urllib.parse.urlencode(
+            {
+                "chat_id": chat,
+                "text": text[offset : offset + 3500],
+                "disable_web_page_preview": "true",
+            }
+        ).encode()
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=body, method="POST"
+        )
+        with opener.open(request, timeout=10) as response:
+            if not json.load(response).get("ok"):
+                raise ValueError("Telegram rejected alert delivery")
+
     return True
 
 
@@ -355,7 +413,37 @@ def notification_signature(key: str, message: str) -> str:
     return key
 
 
+def terminal_notifications(
+    alerts: dict[str, str], previous: dict[str, Any], now: float, config: dict[str, Any]
+) -> tuple[dict[str, Any], set[str], set[str]]:
+    tracking = {}
+    reminders: set[str] = set()
+    silenced: set[str] = set()
+    for key in alerts:
+        if not key.endswith(":account"):
+            continue
+        old = previous.get("terminal_accounts", {}).get(key, {})
+        entry = {"since": float(old.get("since", now)), "last_sent": float(old.get("last_sent", 0))}
+        tracking[key] = entry
+        if now - entry["since"] >= float(config["terminal_silence_hours"]) * 3600:
+            silenced.add(key)
+        elif (
+            entry["last_sent"]
+            and now - entry["last_sent"] >= float(config["terminal_reminder_hours"]) * 3600
+        ):
+            reminders.add(key)
+    return tracking, reminders, silenced
+
+
 def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
+    state_path = Path(config["state_file"])
+    state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with state_path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return run_locked(config, notify)
+
+
+def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     now = utc_now()
     state_path = Path(config["state_file"])
     previous = load_state(state_path)
@@ -372,13 +460,20 @@ def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         alerts["marzban:usage"] = "Marzban usage database could not be inspected"
         counters = previous.get("user_counters", {})
 
+    terminal, reminders, silenced = terminal_notifications(
+        alerts, previous, now.timestamp(), config
+    )
     notified_alerts = previous.get("notified_alerts", {})
     new = {
         key: value
         for key, value in alerts.items()
-        if key not in notified_alerts
-        or notification_signature(key, value)
-        != notification_signature(key, str(notified_alerts[key]))
+        if key not in silenced
+        and (
+            key in reminders
+            or key not in notified_alerts
+            or notification_signature(key, value)
+            != notification_signature(key, str(notified_alerts[key]))
+        )
     }
     recovered = {key: value for key, value in notified_alerts.items() if key not in alerts}
     env_path = Path(config["secrets_file"])
@@ -386,15 +481,20 @@ def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     if env_path.exists():
         private_file(env_path)
     delivery_error = None
-    delivered_alerts = notified_alerts
+    delivered_alerts = dict(notified_alerts)
     if notify:
         try:
+            sections = []
             if new:
-                if telegram(env, summarize("ALERT", new)):
-                    delivered_alerts = alerts
+                sections.append(summarize("ALERT", new))
             if recovered:
-                if telegram(env, summarize("RECOVERED", recovered)):
-                    delivered_alerts = alerts
+                sections.append(summarize("RECOVERED", recovered))
+            if sections and telegram(env, "\n\n".join(sections)):
+                delivered_alerts.update(new)
+                for key in recovered:
+                    delivered_alerts.pop(key, None)
+                for key in new.keys() & terminal.keys():
+                    terminal[key]["last_sent"] = now.timestamp()
             # Business warnings (quota, expiry, account status and traffic) must not
             # suppress the infrastructure heartbeat. Otherwise Better Stack reports
             # the whole VPS down when one customer merely approaches a quota.
@@ -403,7 +503,23 @@ def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         except Exception as error:
             delivery_error = type(error).__name__
 
+    metrics = system_metrics()
+    old_metrics = previous.get("metrics", {})
+    total_delta = metrics["cpu_total_ticks"] - old_metrics.get(
+        "cpu_total_ticks", metrics["cpu_total_ticks"]
+    )
+    idle_delta = metrics["cpu_idle_ticks"] - old_metrics.get(
+        "cpu_idle_ticks", metrics["cpu_idle_ticks"]
+    )
+    metrics["cpu_busy_percent"] = (
+        round(max(0, min(100, 100 * (1 - idle_delta / total_delta))), 1)
+        if total_delta > 0
+        else None
+    )
     result = {
+        "metrics": metrics,
+        "terminal_accounts": terminal,
+        "silenced_alerts": sorted(silenced),
         "healthy": not alerts,
         "checked_at": now.isoformat(),
         "alert_count": len(alerts),
@@ -426,18 +542,30 @@ def public_result(state: dict[str, Any]) -> dict[str, Any]:
         "alert_count": int(state.get("alert_count", 0)),
         "alerts": state.get("alerts", {}),
         "notification_error": state.get("notification_error"),
+        "metrics": state.get("metrics", {}),
+        "silenced_alerts": state.get("silenced_alerts", []),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("/etc/keyholder/monitor.json"))
+    parser.add_argument(
+        "--metrics", action="store_true", help="Read live system metrics without a check"
+    )
     parser.add_argument("--status", action="store_true", help="Read the last result only")
     parser.add_argument("--no-notify", action="store_true", help="Run checks without notifications")
     parser.add_argument("--test-alert", action="store_true", help="Send one Telegram test alert")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
+        if args.metrics:
+            metrics = system_metrics()
+            previous = load_state(Path(config["state_file"]))
+            metrics["cpu_busy_percent"] = previous.get("metrics", {}).get("cpu_busy_percent")
+            metrics["cpu_sampled_at"] = previous.get("checked_at")
+            print(json.dumps(metrics))
+            return 0
         if args.test_alert:
             env_path = Path(config["secrets_file"])
             private_file(env_path)

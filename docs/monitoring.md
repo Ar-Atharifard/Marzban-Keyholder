@@ -84,3 +84,24 @@ failure. If a reply is lost, inspect state before retrying a mutation.
 This lightweight monitor observes VPS resource pressure, not physical hardware
 health, per-request tracing, or end-to-end ISP connectivity. Whole-host outage
 alerting requires a separately configured external heartbeat.
+
+## Responsiveness and exhausted accounts
+
+The management bot polls independently of one serialized command worker, with a
+bounded queue. `/ping` and `/help` remain responsive during audits. Commands older
+than five minutes are rejected; mutations are never automatically replayed after
+reply failure. Replies are split within Telegram limits; use `/customers PAGE` or
+`/history PAGE` for large inventories. Command duration and error classes are logged
+without message text, credentials or customer contact data.
+
+Use `/metrics` or `keyholder system metrics` for live RAM, swap, disk, inodes, load,
+uptime and network byte counters. CPU busy percentage is the latest monitor sample;
+load averages are live. The monitor and manual checks serialize access to their state.
+
+Quota exhaustion and expiry are combined into one account alert. It is sent on first
+detection and reminded at most daily for the first 72 hours, then silenced. Such
+accounts remain visible in `/monitor`; silence never hides infrastructure failures.
+Recovery clears the silence period so a later exhaustion starts a new lifecycle.
+The configurable settings are `terminal_reminder_hours` (24) and
+`terminal_silence_hours` (72). This timer begins when monitoring first observes the
+condition, since the panel does not supply a reliable exhaustion timestamp.

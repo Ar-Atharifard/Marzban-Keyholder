@@ -226,3 +226,38 @@ def test_alert_status_is_useful_and_never_returns_credentials(
         "heartbeat_configured": False,
     }
     assert "synthetic-secret" not in json.dumps(result)
+
+
+def test_terminal_accounts_remind_daily_then_silence_and_rearm() -> None:
+    config = {"terminal_reminder_hours": 24, "terminal_silence_hours": 72}
+    alerts = {"user:1:account": "quota exhausted"}
+    start = 1000000.0
+    tracking, reminders, silenced = monitor.terminal_notifications(alerts, {}, start, config)
+    assert not reminders and not silenced
+    tracking["user:1:account"]["last_sent"] = start
+    previous = {"terminal_accounts": tracking}
+    assert not monitor.terminal_notifications(alerts, previous, start + 3600, config)[1]
+    assert monitor.terminal_notifications(alerts, previous, start + 86400, config)[1] == {
+        "user:1:account"
+    }
+    assert monitor.terminal_notifications(alerts, previous, start + 3 * 86400, config)[2] == {
+        "user:1:account"
+    }
+    recovered, _, _ = monitor.terminal_notifications({}, previous, start + 4 * 86400, config)
+    assert recovered == {}
+    renewed, _, silenced = monitor.terminal_notifications(
+        alerts, {"terminal_accounts": recovered}, start + 5 * 86400, config
+    )
+    assert renewed["user:1:account"]["since"] == start + 5 * 86400
+    assert not silenced
+
+
+def test_exhausted_account_has_one_combined_warning(tmp_path: Path) -> None:
+    path = tmp_path / "db.sqlite3"
+    database(path)
+    db = sqlite3.connect(path)
+    db.execute("INSERT INTO users VALUES (1, 'alice', 'limited', 100, 100, 1)")
+    db.commit()
+    db.close()
+    alerts, _ = monitor.user_alerts(config(path), {}, dt.datetime.now(dt.UTC))
+    assert alerts == {"user:1:account": "User alice: quota exhausted, expired"}

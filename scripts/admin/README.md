@@ -51,6 +51,7 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 |---|---|
 | New local private env | `keyholder config init` |
 | Service / DB checks | `keyholder system status`, `keyholder system health`, `keyholder system doctor` |
+| Live system metrics | `keyholder system metrics` |
 | Monitoring state / immediate check | `keyholder monitor status`, `keyholder monitor run` |
 | Configure / inspect / test Telegram alerts | `keyholder alert-bot configure`, `keyholder alert-bot status`, `keyholder alert-bot test` |
 | Configure / test outage heartbeat | `keyholder heartbeat configure`, `keyholder heartbeat test` |

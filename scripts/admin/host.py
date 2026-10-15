@@ -208,14 +208,16 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "panel-url":
         state = json.loads(Path(config["panel_access_file"]).read_text())
         return {"ok": True, "result": {"panel_url": state["panel_url"], "active": state["active"]}}
-    if operation in {"monitor-status", "monitor-run"}:
+    if operation in {"monitor-status", "monitor-run", "system-metrics"}:
         command = [
             sys.executable,
             str(config["monitor_tool"]),
             "--config",
             str(config["monitor_config"]),
         ]
-        if operation == "monitor-status":
+        if operation == "system-metrics":
+            command.append("--metrics")
+        elif operation == "monitor-status":
             command.append("--status")
         else:
             command.append("--no-notify")

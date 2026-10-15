@@ -77,7 +77,7 @@ def test_management_daily_inspection_and_identity_commands(
     assert calls == [
         ("alerts-status", {}),
         ("monitor-run", {}),
-        ("list", {"limit": 100, "offset": 0, "history": True}),
+        ("list", {"limit": 10, "offset": 0, "history": True}),
         ("check", {"customer": "alice"}),
         ("rename", {"customer": "alice", "name": "Alice Example"}),
     ]
@@ -96,3 +96,29 @@ def test_remap_requires_confirmation_and_can_be_cancelled(
     assert state["pending"]["operation"] == "remap"
     assert management_bot.command("/cancel", state) == "Pending operation cancelled."
     assert "pending" not in state
+
+
+def test_large_replies_are_split_without_losing_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[str] = []
+
+    def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
+        sent.append(values["text"])
+        return {"ok": True}
+
+    monkeypatch.setattr(management_bot, "telegram", telegram)
+    text = "a" * 6000
+    management_bot.send_reply("synthetic", 123456789, text)
+    assert "".join(sent) == text
+    assert all(len(page) <= management_bot.MAX_MESSAGE for page in sent)
+
+
+def test_customer_inventory_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def dispatch(operation: str, args: dict[str, Any]) -> list[Any]:
+        calls.append(args)
+        return []
+
+    monkeypatch.setattr(management_bot, "dispatch", dispatch)
+    management_bot.command("/customers 2", {})
+    assert calls == [{"limit": 10, "offset": 10, "history": False}]

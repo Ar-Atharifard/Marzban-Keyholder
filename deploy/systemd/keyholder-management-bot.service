@@ -19,8 +19,9 @@ ProtectHome=true
 ProtectSystem=strict
 StateDirectory=keyholder-management-bot
 StateDirectoryMode=0700
-ReadWritePaths=/var/backups/keyholder
-MemoryMax=48M
+ReadWritePaths=/var/backups/keyholder /var/lib/keyholder-monitor
+MemoryHigh=64M
+MemoryMax=96M
 TasksMax=32
 
 [Install]

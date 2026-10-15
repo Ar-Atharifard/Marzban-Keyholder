@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
+import queue
 import re
 import secrets
 import shlex
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -22,6 +25,7 @@ CONFIRM_SECONDS = 300
 TOKEN_PATTERN = re.compile(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}")
 BOT_COMMANDS = [
     {"command": "help", "description": "Show the management command reference"},
+    {"command": "metrics", "description": "Show RAM, CPU, swap, storage and uptime"},
     {"command": "status", "description": "Show production container status"},
     {"command": "doctor", "description": "Run the complete Keyholder audit"},
     {"command": "monitor", "description": "Show the latest monitoring result"},
@@ -65,7 +69,7 @@ def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
         f"https://api.telegram.org/bot{token}/{method}", data=data, method="POST"
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=40) as response:
+    with opener.open(request, timeout=35 if method == "getUpdates" else 10) as response:
         payload = json.load(response)
     if not payload.get("ok"):
         raise RuntimeError("Telegram request failed")
@@ -131,8 +135,8 @@ def number(value: str, name: str) -> float:
 
 def help_text() -> str:
     return """Keyholder management
-/status /health /doctor /monitor /runmonitor /alerts
-/users /customers /history /show SELECTOR /check SELECTOR
+/ping /metrics /status /health /doctor /monitor /runmonitor /alerts
+/users /customers [PAGE] /history [PAGE] /backends /show SELECTOR /check SELECTOR
 /usage USER /inbounds
 /create USER quota=GB days=N protocols=vless,trojan name="Full Name"
 /attach USER name="Full Name"
@@ -159,9 +163,13 @@ def command(text: str, state: dict[str, Any]) -> str:
     if not words or not words[0].startswith("/"):
         return help_text()
     name = words.pop(0).split("@", 1)[0].removeprefix("/").lower()
+    if name == "ping":
+        return "Online."
     if name in {"start", "help"}:
         return help_text()
     simple = {
+        "metrics": "system-metrics",
+        "backends": "backends",
         "status": "status",
         "health": "health",
         "doctor": "doctor",
@@ -177,14 +185,13 @@ def command(text: str, state: dict[str, Any]) -> str:
         if words:
             raise ValueError("This command takes no arguments")
         result = dispatch(simple[name], {})
-    elif name == "customers":
-        if words:
-            raise ValueError("This command takes no arguments")
-        result = dispatch("list", {"limit": 100, "offset": 0, "history": False})
-    elif name == "history":
-        if words:
-            raise ValueError("This command takes no arguments")
-        result = dispatch("list", {"limit": 100, "offset": 0, "history": True})
+    elif name in {"customers", "history"}:
+        if len(words) > 1 or (words and (not words[0].isdigit() or int(words[0]) < 1)):
+            raise ValueError(f"Usage: /{name} [PAGE]")
+        page = int(words[0]) if words else 1
+        result = dispatch(
+            "list", {"limit": 10, "offset": (page - 1) * 10, "history": name == "history"}
+        )
     elif name in {"show", "check", "enable", "disable"}:
         if len(words) != 1:
             raise ValueError(f"Usage: /{name} SELECTOR")
@@ -316,10 +323,31 @@ def command(text: str, state: dict[str, Any]) -> str:
     else:
         raise ValueError("Unknown command; use /help")
     output = json.dumps(redact(result), ensure_ascii=False, indent=2)
-    return output[:MAX_MESSAGE]
+    return output
+
+
+def send_reply(token: str, admin_id: int, text: str) -> None:
+    # Telegram limits text length; never silently discard the end of a result.
+    pages = [text[i : i + MAX_MESSAGE] for i in range(0, len(text), MAX_MESSAGE)] or ["Done."]
+    if len(pages) > 8:
+        pages = pages[:7] + [
+            "Result too large. Use /customers PAGE, /history PAGE "
+            "or the SSH CLI for the full inventory."
+        ]
+    for page in pages:
+        telegram(
+            token,
+            "sendMessage",
+            {
+                "chat_id": str(admin_id),
+                "text": page,
+                "disable_web_page_preview": "true",
+            },
+        )
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     token = os.environ.get("KEYHOLDER_MANAGEMENT_BOT_TOKEN", "")
     administrator = os.environ.get("KEYHOLDER_MANAGEMENT_ADMIN_ID", "")
     if not TOKEN_PATTERN.fullmatch(token) or not re.fullmatch(r"[0-9]{5,20}", administrator):
@@ -329,10 +357,43 @@ def main() -> None:
         os.getenv("KEYHOLDER_MANAGEMENT_STATE", "/var/lib/keyholder-management-bot/state.json")
     )
     state = private_state(path)
+    state_lock = threading.Lock()
+    work: queue.Queue[str] = queue.Queue(maxsize=4)
+
+    def process() -> None:
+        while True:
+            text = work.get()
+            started = time.monotonic()
+            with state_lock:
+                local = {"pending": state["pending"]} if "pending" in state else {}
+            try:
+                reply = command(text, local)
+            except ValueError as error:
+                reply = f"Error: {error}"
+            except Exception as error:
+                logging.warning("Command execution failed: %s", type(error).__name__)
+                reply = "Operation failed or timed out. Check state before retrying a change."
+            with state_lock:
+                state.pop("pending", None)
+                if "pending" in local:
+                    state["pending"] = local["pending"]
+                save_state(path, state)
+            logging.info("Command completed in %.2fs", time.monotonic() - started)
+            try:
+                send_reply(token, admin_id, reply)
+            except Exception as error:
+                logging.warning(
+                    "Reply delivery failed: %s; command will not be replayed", type(error).__name__
+                )
+            finally:
+                work.task_done()
+
+    threading.Thread(target=process, name="bot-commands", daemon=True).start()
     try:
         telegram(token, "setMyCommands", {"commands": json.dumps(BOT_COMMANDS)})
-    except Exception:
-        pass
+    except Exception as error:
+        logging.warning("Menu registration failed: %s", type(error).__name__)
+    failures = 0
     while True:
         try:
             payload = telegram(
@@ -340,15 +401,16 @@ def main() -> None:
                 "getUpdates",
                 {
                     "offset": str(int(state.get("offset", 0))),
-                    "timeout": "30",
+                    "timeout": "25",
                     "allowed_updates": json.dumps(["message"]),
+                    "limit": "10",
                 },
             )
+            failures = 0
             for update in payload.get("result", []):
-                state["offset"] = int(update["update_id"]) + 1
-                # Consume each Telegram update before dispatching it. This provides
-                # at-most-once mutation semantics if reply delivery later fails.
-                save_state(path, state)
+                with state_lock:
+                    state["offset"] = int(update["update_id"]) + 1
+                    save_state(path, state)
                 message = update.get("message") or {}
                 chat = message.get("chat") or {}
                 sender = message.get("from") or {}
@@ -358,24 +420,32 @@ def main() -> None:
                     or sender.get("id") != admin_id
                 ):
                     continue
+                text = str(message.get("text", ""))[:2048]
+                # Cheap local help and liveness remain responsive during long audits.
+                name = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
+                if name in {"/ping", "/help", "/start"}:
+                    send_reply(token, admin_id, "Online." if name == "/ping" else help_text())
+                    continue
+                if time.time() - float(message.get("date", time.time())) > 300:
+                    send_reply(
+                        token,
+                        admin_id,
+                        "This queued command is over five minutes old. Please send it again.",
+                    )
+                    continue
                 try:
-                    reply = command(str(message.get("text", ""))[:2048], state)
-                except Exception as error:
-                    reply = f"Error: {error}"
-                save_state(path, state)
-                telegram(
-                    token,
-                    "sendMessage",
-                    {
-                        "chat_id": str(admin_id),
-                        "text": reply[:MAX_MESSAGE],
-                        "disable_web_page_preview": "true",
-                    },
-                )
-                save_state(path, state)
-            save_state(path, state)
-        except Exception:
-            time.sleep(5)
+                    work.put_nowait(text)
+                except queue.Full:
+                    send_reply(
+                        token,
+                        admin_id,
+                        "Four commands are already queued. Wait for their results before retrying.",
+                    )
+        except Exception as error:
+            failures += 1
+            if failures == 1 or failures % 10 == 0:
+                logging.warning("Telegram polling failed (%d): %s", failures, type(error).__name__)
+            time.sleep(min(30, 2 ** min(failures, 5)))
 
 
 if __name__ == "__main__":

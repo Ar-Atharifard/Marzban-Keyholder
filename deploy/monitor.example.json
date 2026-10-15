@@ -36,6 +36,8 @@
   "backup_max_age_hours": 26,
   "expiry_warning_days": [7, 3, 1],
   "quota_warning_percent": [80, 95],
+  "terminal_reminder_hours": 24,
+  "terminal_silence_hours": 72,
   "traffic_min_gib": 1,
   "traffic_rate_gib_per_hour": 20,
   "traffic_baseline_multiplier": 3

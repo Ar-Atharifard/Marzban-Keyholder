@@ -75,6 +75,7 @@ COMMAND_HELP = {
     "backends": "List registered subscription backends without exposing credentials.",
     "backend-register": "Register the configured backend in Keyholder's backend registry.",
     "monitor-status": "Read the most recent host-monitor result without running checks.",
+    "system-metrics": "Read live memory, CPU, disk, uptime and network metrics.",
     "monitor-run": "Run host, service and customer checks now without sending notifications.",
     "alerts-configure": "Configure the Telegram alert bot interactively and privately.",
     "alerts-status": "Show alert delivery, timer and heartbeat configuration status.",
@@ -261,6 +262,8 @@ def parser() -> KeyholderParser:
     _, system = group("system")
     for action in ["status", "health", "doctor", "backup"]:
         leaf("system", system, action, action)
+
+    leaf("system", system, "metrics", "system-metrics")
 
     _, backend = group("backend")
     leaf("backend", backend, "list", "backends")
