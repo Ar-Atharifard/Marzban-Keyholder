@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -22,6 +23,8 @@ from typing import Any
 
 MAX_MESSAGE = 3500
 CONFIRM_SECONDS = 300
+SEND_LOCK = threading.Lock()
+LAST_SEND = 0.0
 TOKEN_PATTERN = re.compile(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}")
 BOT_COMMANDS = [
     {"command": "help", "description": "Show the management command reference"},
@@ -69,8 +72,19 @@ def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
         f"https://api.telegram.org/bot{token}/{method}", data=data, method="POST"
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=35 if method == "getUpdates" else 10) as response:
-        payload = json.load(response)
+    try:
+        with opener.open(request, timeout=35 if method == "getUpdates" else 10) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code != 429 or method != "sendMessage":
+            raise
+        payload = json.load(error)
+        delay = float(payload.get("parameters", {}).get("retry_after", 1))
+        if delay < 0 or delay > 30:
+            raise ValueError("Telegram rate limit requires a later retry") from None
+        time.sleep(delay + 0.1)
+        with opener.open(request, timeout=10) as response:
+            payload = json.load(response)
     if not payload.get("ok"):
         raise RuntimeError("Telegram request failed")
     return payload  # type: ignore[no-any-return]
@@ -334,16 +348,24 @@ def send_reply(token: str, admin_id: int, text: str) -> None:
             "Result too large. Use /customers PAGE, /history PAGE "
             "or the SSH CLI for the full inventory."
         ]
+    global LAST_SEND
     for page in pages:
-        telegram(
-            token,
-            "sendMessage",
-            {
-                "chat_id": str(admin_id),
-                "text": page,
-                "disable_web_page_preview": "true",
-            },
-        )
+        with SEND_LOCK:
+            delay = 1.05 - (time.monotonic() - LAST_SEND)
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                telegram(
+                    token,
+                    "sendMessage",
+                    {
+                        "chat_id": str(admin_id),
+                        "text": page,
+                        "disable_web_page_preview": "true",
+                    },
+                )
+            finally:
+                LAST_SEND = time.monotonic()
 
 
 def main() -> None:
