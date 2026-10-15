@@ -69,3 +69,8 @@ cannot hide the hostname or guarantee resistance to ISP filtering. Disable path
 logs/caching, set no-referrer and keep the panel bookmark private. Gateway files
 must be written in place if Docker uses a single-file bind mount; inode replacement
 can leave the container reading the old configuration.
+
+Recovery snapshots retain the latest two complete sets by default. The root-owned
+host setting `backup_retention_count` can raise this limit (minimum two). Pruning
+runs only after a new full backup succeeds; operator-code rollback directories are
+separate. Backup-age monitoring counts database recovery sets, not code-only backups.

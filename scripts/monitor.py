@@ -233,7 +233,17 @@ def network_alerts(config: dict[str, Any]) -> dict[str, str]:
 def backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
     folder = Path(config["backup_dir"])
     try:
-        newest = max((path.stat().st_mtime for path in folder.iterdir()), default=0)
+        snapshots = [
+            path
+            for path in folder.iterdir()
+            if path.is_dir()
+            and not path.is_symlink()
+            and (path / "keyholder.sqlite3").is_file()
+            and (path / "keyholder.env").is_file()
+        ]
+        newest = max(
+            ((path / "keyholder.sqlite3").stat().st_mtime for path in snapshots), default=0
+        )
     except OSError:
         newest = 0
     age_hours = (now - newest) / 3600 if newest else float("inf")

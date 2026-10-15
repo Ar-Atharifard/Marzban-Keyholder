@@ -21,6 +21,7 @@ def configuration() -> dict[str, Any]:
         "api_url": "http://127.0.0.1:18000",
         "panel_access_file": "/etc/keyholder/panel-access.json",
         "backup_dir": "/var/backups/keyholder",
+        "backup_retention_count": 2,
         "env_file": "/etc/keyholder/keyholder.env",
         "extra_backups": {},
         "sqlite_backups": {},
@@ -387,6 +388,21 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             )
         # The complete recovery directory already contains this verified snapshot.
         destination.unlink()
+        retain = max(2, int(config["backup_retention_count"]))
+        complete = sorted(
+            [
+                entry
+                for entry in folder.iterdir()
+                if entry.is_dir()
+                and not entry.is_symlink()
+                and re.fullmatch(r"[0-9]{8}T[0-9]{6}\.[0-9]+Z", entry.name)
+                and (entry / "keyholder.sqlite3").is_file()
+                and (entry / "keyholder.env").is_file()
+            ],
+            reverse=True,
+        )
+        for entry in complete[retain:]:
+            shutil.rmtree(entry)
         return {
             "ok": True,
             "result": {

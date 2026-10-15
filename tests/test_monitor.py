@@ -261,3 +261,12 @@ def test_exhausted_account_has_one_combined_warning(tmp_path: Path) -> None:
     db.close()
     alerts, _ = monitor.user_alerts(config(path), {}, dt.datetime.now(dt.UTC))
     assert alerts == {"user:1:account": "User alice: quota exhausted, expired"}
+
+
+def test_operator_backup_does_not_mask_stale_database_recovery(tmp_path: Path) -> None:
+    operator = tmp_path / "operator-new"
+    operator.mkdir()
+    (operator / "host.py").write_text("operator-only")
+    assert "backup:age" in monitor.backup_alerts(
+        {"backup_dir": str(tmp_path), "backup_max_age_hours": 26}, 1000000
+    )

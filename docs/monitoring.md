@@ -105,3 +105,8 @@ Recovery clears the silence period so a later exhaustion starts a new lifecycle.
 The configurable settings are `terminal_reminder_hours` (24) and
 `terminal_silence_hours` (72). This timer begins when monitoring first observes the
 condition, since the panel does not supply a reliable exhaustion timestamp.
+
+Replies are paced to avoid Telegram chat rate limits and honor one bounded
+`retry_after` response. Fast `/metrics`, `/monitor` and `/alerts` reads bypass the
+long-operation queue. Long operations still execute one at a time, protecting the
+small VPS and preserving the order of account changes.
