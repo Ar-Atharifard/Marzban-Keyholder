@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import secrets
@@ -19,6 +20,16 @@ from typing import Any
 MAX_MESSAGE = 3500
 CONFIRM_SECONDS = 300
 TOKEN_PATTERN = re.compile(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}")
+BOT_COMMANDS = [
+    {"command": "help", "description": "Show the management command reference"},
+    {"command": "status", "description": "Show production container status"},
+    {"command": "doctor", "description": "Run the complete Keyholder audit"},
+    {"command": "monitor", "description": "Show the latest monitoring result"},
+    {"command": "alerts", "description": "Show alert bot and timer status"},
+    {"command": "customers", "description": "List active customers"},
+    {"command": "users", "description": "List Marzban users"},
+    {"command": "cancel", "description": "Cancel a pending destructive operation"},
+]
 
 
 def private_state(path: Path) -> dict[str, Any]:
@@ -113,22 +124,25 @@ def number(value: str, name: str) -> float:
         result = float(value)
     except ValueError:
         raise ValueError(f"{name} must be numeric") from None
-    if result < 0:
-        raise ValueError(f"{name} cannot be negative")
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
     return result
 
 
 def help_text() -> str:
     return """Keyholder management
-/status /health /doctor /monitor
-/users /customers /show SELECTOR /usage USER /inbounds
+/status /health /doctor /monitor /runmonitor /alerts
+/users /customers /history /show SELECTOR /check SELECTOR
+/usage USER /inbounds
 /create USER quota=GB days=N protocols=vless,trojan name="Full Name"
 /attach USER name="Full Name"
 /update USER quota=GB days=N status=active|disabled
 /identity SELECTOR name="Full Name" telegram=@id phone=+number
 /setinbounds USER protocol=vless tags=TAG1,TAG2
+/rename SELECTOR name="Full Name"
 /enable SELECTOR /disable SELECTOR /sync /backup
-/resetusage USER /revoke SELECTOR /rotate SELECTOR then /confirm CODE
+/resetusage USER /remap SELECTOR username=NEW /revoke SELECTOR /rotate SELECTOR
+/confirm CODE /cancel
 
 Subscription links are intentionally available only through the SSH CLI."""
 
@@ -152,6 +166,8 @@ def command(text: str, state: dict[str, Any]) -> str:
         "health": "health",
         "doctor": "doctor",
         "monitor": "monitor-status",
+        "runmonitor": "monitor-run",
+        "alerts": "alerts-status",
         "users": "users",
         "inbounds": "inbounds",
         "sync": "sync",
@@ -165,7 +181,11 @@ def command(text: str, state: dict[str, Any]) -> str:
         if words:
             raise ValueError("This command takes no arguments")
         result = dispatch("list", {"limit": 100, "offset": 0, "history": False})
-    elif name in {"show", "enable", "disable"}:
+    elif name == "history":
+        if words:
+            raise ValueError("This command takes no arguments")
+        result = dispatch("list", {"limit": 100, "offset": 0, "history": True})
+    elif name in {"show", "check", "enable", "disable"}:
         if len(words) != 1:
             raise ValueError(f"Usage: /{name} SELECTOR")
         result = dispatch(name, {"customer": words[0]})
@@ -173,7 +193,7 @@ def command(text: str, state: dict[str, Any]) -> str:
         if len(words) != 1:
             raise ValueError("Usage: /usage USER")
         result = dispatch("user-usage", {"username": words[0]})
-    elif name in {"create", "attach", "update", "identity", "setinbounds"}:
+    elif name in {"create", "attach", "update", "identity", "setinbounds", "rename"}:
         positional, options = parse_options(words)
         if len(positional) != 1:
             raise ValueError(f"Usage: /{name} USER key=value ...")
@@ -239,7 +259,7 @@ def command(text: str, state: dict[str, Any]) -> str:
                     "clear_phone": options.get("phone") == "",
                 },
             )
-        else:
+        elif name == "setinbounds":
             if set(options) != {"protocol", "tags"}:
                 raise ValueError("Setinbounds requires protocol and tags")
             result = dispatch(
@@ -250,22 +270,39 @@ def command(text: str, state: dict[str, Any]) -> str:
                     "tags": [item for item in options["tags"].split(",") if item],
                 },
             )
-    elif name in {"resetusage", "revoke", "rotate"}:
-        if len(words) != 1:
+        else:
+            if set(options) != {"name"} or not options["name"]:
+                raise ValueError("Rename requires name")
+            result = dispatch("rename", {"customer": username, "name": options["name"]})
+    elif name in {"resetusage", "remap", "revoke", "rotate"}:
+        positional, options = parse_options(words)
+        if len(positional) != 1:
+            raise ValueError(f"Usage: /{name} USER")
+        if name == "remap":
+            if set(options) != {"username"} or not options["username"]:
+                raise ValueError("Remap requires username=NEW")
+        elif options:
             raise ValueError(f"Usage: /{name} USER")
         operation = {
             "resetusage": "user-reset-usage",
+            "remap": "remap",
             "revoke": "revoke",
             "rotate": "rotate-token",
         }[name]
-        args = (
-            {"username": words[0], "confirmed": True}
-            if name == "resetusage"
-            else {"customer": words[0], "confirmed": True}
-        )
+        if name == "resetusage":
+            args = {"username": positional[0], "confirmed": True}
+        elif name == "remap":
+            args = {"customer": positional[0], "username": options["username"]}
+        else:
+            args = {"customer": positional[0], "confirmed": True}
         code = secrets.token_hex(3)
         state["pending"] = {"code": code, **planned(operation, args)}
         return f"Confirm within five minutes with /confirm {code}"
+    elif name == "cancel":
+        if words:
+            raise ValueError("This command takes no arguments")
+        existed = state.pop("pending", None) is not None
+        return "Pending operation cancelled." if existed else "No operation is pending."
     elif name == "confirm":
         pending = state.pop("pending", None)
         if (
@@ -292,6 +329,10 @@ def main() -> None:
         os.getenv("KEYHOLDER_MANAGEMENT_STATE", "/var/lib/keyholder-management-bot/state.json")
     )
     state = private_state(path)
+    try:
+        telegram(token, "setMyCommands", {"commands": json.dumps(BOT_COMMANDS)})
+    except Exception:
+        pass
     while True:
         try:
             payload = telegram(
@@ -305,6 +346,9 @@ def main() -> None:
             )
             for update in payload.get("result", []):
                 state["offset"] = int(update["update_id"]) + 1
+                # Consume each Telegram update before dispatching it. This provides
+                # at-most-once mutation semantics if reply delivery later fails.
+                save_state(path, state)
                 message = update.get("message") or {}
                 chat = message.get("chat") or {}
                 sender = message.get("from") or {}
@@ -318,6 +362,7 @@ def main() -> None:
                     reply = command(str(message.get("text", ""))[:2048], state)
                 except Exception as error:
                     reply = f"Error: {error}"
+                save_state(path, state)
                 telegram(
                     token,
                     "sendMessage",

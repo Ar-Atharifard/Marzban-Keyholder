@@ -8,6 +8,14 @@
     {"name": "braavos-gateway", "require_health": true},
     {"name": "marzban-marzban-1", "require_health": false}
   ],
+  "systemd_units": [
+    "docker.service",
+    "ssh.service",
+    "fail2ban.service",
+    "ufw.service",
+    "keyholder-management-bot.service",
+    "keyholder-monitor.timer"
+  ],
   "http_checks": [
     {"name": "keyholder", "url": "http://127.0.0.1:18000/health", "status": 200},
     {"name": "marzban", "url": "http://127.0.0.1:8000/", "status": 200},
@@ -20,6 +28,8 @@
   "required_user_count": 1,
   "disk_warning_percent": 80,
   "disk_critical_percent": 90,
+  "inode_warning_percent": 85,
+  "inode_critical_percent": 95,
   "memory_available_warning_mib": 120,
   "swap_warning_percent": 75,
   "load_warning_per_cpu": 1.5,

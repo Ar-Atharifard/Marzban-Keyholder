@@ -114,6 +114,36 @@ def test_customer_warning_does_not_suppress_infrastructure_heartbeat() -> None:
     assert monitor.infrastructure_healthy({"http:public": "unreachable"}) is False
 
 
+def test_notification_signatures_suppress_measurement_noise_but_keep_escalations() -> None:
+    first = "User alice has used 80.1% of quota (threshold 80%)"
+    changed = "User alice has used 84.9% of quota (threshold 80%)"
+    escalated = "User alice has used 95.1% of quota (threshold 95%)"
+    assert monitor.notification_signature("user:1:quota", first) == monitor.notification_signature(
+        "user:1:quota", changed
+    )
+    assert monitor.notification_signature(
+        "user:1:quota", changed
+    ) != monitor.notification_signature("user:1:quota", escalated)
+    assert monitor.notification_signature(
+        "user:1:traffic", "Traffic is 20 GiB/hour"
+    ) == monitor.notification_signature("user:1:traffic", "Traffic is 30 GiB/hour")
+
+
+def test_systemd_alerts_only_inactive_units(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Result:
+        def __init__(self, state: str, returncode: int) -> None:
+            self.stdout = state.encode()
+            self.returncode = returncode
+
+    def run(command: list[str], **kwargs: object) -> Result:
+        return Result("active", 0) if command[-1] == "good.service" else Result("failed", 3)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert monitor.systemd_alerts(["good.service", "bad.service"]) == {
+        "systemd:bad.service": "Systemd unit bad.service is failed"
+    }
+
+
 def test_alert_configuration_writes_private_file_without_returning_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,3 +183,46 @@ def test_management_bot_configuration_is_private_and_starts_service(
     assert result == {"configured": True, "administrator_id": "123456789"}
     assert destination.stat().st_mode & 0o777 == 0o600
     assert calls == [["systemctl", "enable", "--now", "keyholder-management-bot.service"]]
+
+
+def test_alert_status_is_useful_and_never_returns_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secrets = tmp_path / "monitor.env"
+    secrets.write_text(
+        "KEYHOLDER_ALERT_BOT_TOKEN=synthetic-secret\n"
+        "KEYHOLDER_ALERT_CHAT_ID=123456789\n"
+        "KEYHOLDER_HEARTBEAT_URL=\n"
+    )
+    state = tmp_path / "state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "checked_at": "2026-01-01T00:00:00+00:00",
+                "alerts": {"disk:warning": "warning"},
+                "notification_error": None,
+            }
+        )
+    )
+    monitor_config = tmp_path / "monitor.json"
+    monitor_config.write_text(json.dumps({"secrets_file": str(secrets), "state_file": str(state)}))
+    monkeypatch.setattr(
+        host,
+        "configuration",
+        lambda: {"monitor_config": str(monitor_config), "api_container": "test"},
+    )
+
+    class Result:
+        stdout = b"active\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    result = host.execute({"operation": "alerts-status", "args": {}})["result"]
+    assert result == {
+        "configured": True,
+        "timer_active": True,
+        "last_check": "2026-01-01T00:00:00+00:00",
+        "active_alerts": 1,
+        "notification_error": None,
+        "heartbeat_configured": False,
+    }
+    assert "synthetic-secret" not in json.dumps(result)

@@ -12,6 +12,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -62,11 +63,14 @@ def load_config(path: Path) -> dict[str, Any]:
         "marzban_db": "/var/lib/marzban/db.sqlite3",
         "backup_dir": "/var/backups/keyholder",
         "containers": [],
+        "systemd_units": [],
         "required_user_count": 1,
         "http_checks": [],
         "tcp_checks": [],
         "disk_warning_percent": 80,
         "disk_critical_percent": 90,
+        "inode_warning_percent": 85,
+        "inode_critical_percent": 95,
         "memory_available_warning_mib": 120,
         "swap_warning_percent": 75,
         "load_warning_per_cpu": 1.5,
@@ -112,6 +116,18 @@ def container_alerts(items: list[dict[str, Any]]) -> dict[str, str]:
     return alerts
 
 
+def systemd_alerts(units: list[str]) -> dict[str, str]:
+    alerts: dict[str, str] = {}
+    for unit in units:
+        result = subprocess.run(
+            ["systemctl", "is-active", unit], capture_output=True, timeout=5, check=False
+        )
+        state = result.stdout.decode(errors="replace").strip() or "unknown"
+        if result.returncode or state != "active":
+            alerts[f"systemd:{unit}"] = f"Systemd unit {unit} is {state}"
+    return alerts
+
+
 def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
     alerts: dict[str, str] = {}
     disk = shutil.disk_usage("/")
@@ -120,6 +136,14 @@ def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
         alerts["disk:critical"] = f"Root disk is {disk_percent:.1f}% full"
     elif disk_percent >= float(config["disk_warning_percent"]):
         alerts["disk:warning"] = f"Root disk is {disk_percent:.1f}% full"
+
+    filesystem = os.statvfs("/")
+    if filesystem.f_files:
+        inode_percent = 100 * (filesystem.f_files - filesystem.f_ffree) / filesystem.f_files
+        if inode_percent >= float(config["inode_critical_percent"]):
+            alerts["inode:critical"] = f"Root filesystem inodes are {inode_percent:.1f}% used"
+        elif inode_percent >= float(config["inode_warning_percent"]):
+            alerts["inode:warning"] = f"Root filesystem inodes are {inode_percent:.1f}% used"
 
     memory = read_meminfo()
     available_mib = memory.get("MemAvailable", 0) / 1024**2
@@ -318,12 +342,26 @@ def infrastructure_healthy(alerts: dict[str, str]) -> bool:
     return not any(not key.startswith("user:") for key in alerts)
 
 
+def notification_signature(key: str, message: str) -> str:
+    """Suppress changing measurements while retaining meaningful severity changes."""
+    if key.endswith(":quota"):
+        match = re.search(r"threshold ([0-9]+)%", message)
+        return f"{key}:{match.group(1)}" if match else key
+    if key.endswith(":expiry"):
+        match = re.search(r"threshold ([0-9]+) days", message)
+        return f"{key}:{match.group(1)}" if match else key
+    if key.endswith(":status") or key.startswith(("container:", "systemd:")):
+        return f"{key}:{message}"
+    return key
+
+
 def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     now = utc_now()
     state_path = Path(config["state_file"])
     previous = load_state(state_path)
     alerts: dict[str, str] = {}
     alerts.update(container_alerts(config["containers"]))
+    alerts.update(systemd_alerts(config["systemd_units"]))
     alerts.update(resource_alerts(config))
     alerts.update(network_alerts(config))
     alerts.update(backup_alerts(config, now.timestamp()))
@@ -335,7 +373,13 @@ def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         counters = previous.get("user_counters", {})
 
     notified_alerts = previous.get("notified_alerts", {})
-    new = {key: value for key, value in alerts.items() if notified_alerts.get(key) != value}
+    new = {
+        key: value
+        for key, value in alerts.items()
+        if key not in notified_alerts
+        or notification_signature(key, value)
+        != notification_signature(key, str(notified_alerts[key]))
+    }
     recovered = {key: value for key, value in notified_alerts.items() if key not in alerts}
     env_path = Path(config["secrets_file"])
     env = parse_env(env_path)

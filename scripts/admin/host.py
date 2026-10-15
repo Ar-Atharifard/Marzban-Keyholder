@@ -227,6 +227,39 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "result": report}
     if operation == "alerts-configure":
         return {"ok": True, "result": configure_alerts(config, payload.get("args", {}))}
+    if operation == "alerts-status":
+        settings = json.loads(Path(config["monitor_config"]).read_text())
+        secrets_file = Path(settings["secrets_file"])
+        alert_env = {}
+        if secrets_file.exists():
+            for line in secrets_file.read_text().splitlines():
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    alert_env[key] = value
+        state = {}
+        state_file = Path(settings["state_file"])
+        if state_file.exists():
+            state = json.loads(state_file.read_text())
+        timer = subprocess.run(
+            ["systemctl", "is-active", "keyholder-monitor.timer"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        return {
+            "ok": True,
+            "result": {
+                "configured": bool(
+                    alert_env.get("KEYHOLDER_ALERT_BOT_TOKEN")
+                    and alert_env.get("KEYHOLDER_ALERT_CHAT_ID")
+                ),
+                "timer_active": timer.stdout.decode().strip() == "active",
+                "last_check": state.get("checked_at"),
+                "active_alerts": len(state.get("alerts", {})),
+                "notification_error": state.get("notification_error"),
+                "heartbeat_configured": bool(alert_env.get("KEYHOLDER_HEARTBEAT_URL")),
+            },
+        }
     if operation == "alerts-test":
         result = subprocess.run(
             [

@@ -21,7 +21,9 @@ def information_profile(info: SubscriptionInfo, status: str, now: int | None = N
     """Return a local-only URI record for clients that ignore subscription metadata."""
     used = info.upload + info.download
     traffic = (
-        f"{byte_count(max(0, info.total - used)).upper()} LEFT" if info.total else "UNLIMITED DATA"
+        f"{byte_count(max(0, info.total - used)).upper()} / {byte_count(info.total).upper()} LEFT"
+        if info.total
+        else "UNLIMITED DATA"
     )
     current = int(time.time()) if now is None else now
     if info.expire:

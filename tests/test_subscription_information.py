@@ -11,7 +11,7 @@ from pydantic import SecretStr
 from keyholder.backends.base import SubscriptionData, SubscriptionInfo, UpstreamUnavailable
 from keyholder.backends.marzban import MarzbanBackend
 from keyholder.config import Settings
-from keyholder.rendering.information import render_information
+from keyholder.rendering.information import information_profile, render_information
 from tests.conftest import ADMIN_KEY, LINK, UUID
 from tests.test_api import create
 
@@ -100,6 +100,14 @@ def test_information_unlimited_escaped_and_bounded() -> None:
         "upload=0; download=-1; total=0; expire=0",
     ]:
         assert SubscriptionInfo.from_header(invalid) is None
+
+
+def test_information_profile_shows_remaining_and_total_traffic() -> None:
+    limited = information_profile(SubscriptionInfo(0, 1 * 1024**3, 5 * 1024**3, 0), "active")
+    assert limited.name == "ACCOUNT INFO | 4.00 GIB / 5.00 GIB LEFT | NO EXPIRY | DO NOT USE"
+
+    unlimited = information_profile(SubscriptionInfo(0, 1, 0, 0), "active")
+    assert "UNLIMITED DATA" in unlimited.name
 
 
 def test_marzban_metadata_is_request_local_and_preserves_inactive_contract() -> None:

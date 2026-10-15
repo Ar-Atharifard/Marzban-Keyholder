@@ -77,6 +77,7 @@ COMMAND_HELP = {
     "monitor-status": "Read the most recent host-monitor result without running checks.",
     "monitor-run": "Run host, service and customer checks now without sending notifications.",
     "alerts-configure": "Configure the Telegram alert bot interactively and privately.",
+    "alerts-status": "Show alert delivery, timer and heartbeat configuration status.",
     "alerts-test": "Send a test message through the configured Telegram alert bot.",
     "heartbeat-configure": "Configure an external Better Stack heartbeat interactively.",
     "heartbeat-test": "Send a test ping to the configured external heartbeat.",
@@ -134,6 +135,7 @@ LEGACY_COMMANDS = {
     "monitor-status": ("monitor", "status"),
     "monitor-run": ("monitor", "run"),
     "alerts-configure": ("alert-bot", "configure"),
+    "alerts-status": ("alert-bot", "status"),
     "alerts-test": ("alert-bot", "test"),
     "heartbeat-configure": ("heartbeat", "configure"),
     "heartbeat-test": ("heartbeat", "test"),
@@ -270,6 +272,7 @@ def parser() -> KeyholderParser:
 
     _, alert_bot = group("alert-bot")
     leaf("alert-bot", alert_bot, "configure", "alerts-configure")
+    leaf("alert-bot", alert_bot, "status", "alerts-status")
     leaf("alert-bot", alert_bot, "test", "alerts-test")
 
     _, heartbeat = group("heartbeat")

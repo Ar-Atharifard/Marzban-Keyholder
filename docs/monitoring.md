@@ -6,14 +6,14 @@ of truth for user status, quota, expiry and traffic.
 
 ## Coverage
 
-`scripts/monitor.py` checks Docker health, local and public HTTP endpoints,
-required TCP listeners, disk, memory, swap, load, recovery-snapshot age and
+`scripts/monitor.py` checks Docker and critical systemd services, local and public HTTP
+endpoints, required TCP listeners, disk space and inodes, memory, swap, load, recovery-snapshot age and
 Marzban's user counters. It reports quota, expiry, account-status and traffic-rate
 alerts. State is stored in `/var/lib/keyholder-monitor/state.json`; it contains
 usernames and counters and must remain root-only.
 
-The systemd timer runs every two minutes. It sends only alert transitions and
-recoveries, preventing repeated notifications for an unchanged condition. A
+The systemd timer runs every two minutes. It sends only alert transitions, severity
+changes and recoveries, preventing repeated notifications as measurements fluctuate. A
 successful composite check pings an optional hosted heartbeat URL. The missing
 heartbeat detects total host or network failure, which local Telegram delivery
 cannot report.
@@ -43,7 +43,9 @@ Run `keyholder alert-bot configure` from an interactive workstation terminal. Th
 token is read without echo. Send `/start` to the new bot when prompted; Keyholder
 discovers the single private chat through Telegram's official API. The token is
 transferred over SSH input and written only to the root-owned monitor environment.
-Then run `keyholder alert-bot test`. Do not pass bot tokens on command lines, paste
+Then run `keyholder alert-bot test`. `keyholder alert-bot status` reports whether
+delivery is configured, the timer is active and the most recent run succeeded without
+revealing credentials. Do not pass bot tokens on command lines, paste
 them into issue trackers or commit them.
 
 Configure the second bot with `keyholder management-bot configure`, then verify it
@@ -62,3 +64,23 @@ suppress the host heartbeat.
 `keyholder monitor status` reads the most recent state. `keyholder monitor run`
 runs checks immediately without sending notifications. The systemd timer owns
 normal alert delivery.
+
+## Alert policy and management
+
+Quota warnings fire at 80% and 95%, expiry warnings at 7, 3 and 1 days. A changing
+percentage within the same threshold does not resend the alert. New problems are
+batched per check; recoveries are reported separately. Traffic warnings require
+at least 1 GiB growth since the last sample, a rate of 20 GiB/hour, and three times
+the seven-day hourly baseline (when available). These are investigation signals,
+not proof of abuse, and never automatically disable a customer.
+
+The management bot supports inspection (`/status`, `/doctor`, `/monitor`, `/alerts`,
+`/users`, `/customers`, `/history`, `/check USER`, `/usage USER`), provisioning and
+identity/plan updates. `/help` shows syntax. `/resetusage`, `/remap`, `/revoke` and
+`/rotate` require a five-minute confirmation; `/cancel` discards it. Updates are
+persistently consumed before dispatch, preventing automatic replay after a reply
+failure. If a reply is lost, inspect state before retrying a mutation.
+
+This lightweight monitor observes VPS resource pressure, not physical hardware
+health, per-request tracing, or end-to-end ISP connectivity. Whole-host outage
+alerting requires a separately configured external heartbeat.

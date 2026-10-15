@@ -82,7 +82,7 @@ uses the stored selection. The configured CDN allowlist applies in either mode.
 
 When validated usage metadata exists, URI output begins with one deliberately
 unusable informational record because common clients ignore the standard header.
-Its name shows remaining traffic and time, and it points only to `127.0.0.1:1`.
+Its name shows remaining/total traffic and time, and it points only to `127.0.0.1:1`.
 It must not be selected. Its failed delay result is expected. Xray JSON output
 does not include this record, and every real profile remains unchanged.
 
