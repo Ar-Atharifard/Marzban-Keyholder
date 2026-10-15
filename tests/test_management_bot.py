@@ -122,3 +122,297 @@ def test_customer_inventory_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(management_bot, "dispatch", dispatch)
     management_bot.command("/customers 2", {})
     assert calls == [{"limit": 10, "offset": 10, "history": False}]
+
+
+@pytest.mark.parametrize(
+    "text,operation,expected",
+    [
+        ("/status", "status", {}),
+        ("/health", "health", {}),
+        ("/doctor", "doctor", {}),
+        ("/metrics", "system-metrics", {}),
+        ("/backends", "backends", {}),
+        ("/monitor", "monitor-status", {}),
+        ("/runmonitor", "monitor-run", {}),
+        ("/alerts", "alerts-status", {}),
+        ("/users", "users", {}),
+        ("/inbounds", "inbounds", {}),
+        ("/sync", "sync", {}),
+        ("/backup", "backup", {}),
+        ("/customers", "list", {"limit": 10, "offset": 0, "history": False}),
+        ("/history 2", "list", {"limit": 10, "offset": 10, "history": True}),
+        ("/show alice", "show", {"customer": "alice"}),
+        ("/check alice", "check", {"customer": "alice"}),
+        ("/enable alice", "enable", {"customer": "alice"}),
+        ("/disable alice", "disable", {"customer": "alice"}),
+        ("/usage alice", "user-usage", {"username": "alice"}),
+        (
+            "/attach alice",
+            "create",
+            {
+                "username": "alice",
+                "name": "alice",
+                "telegram": None,
+                "phone": None,
+                "profiles": None,
+            },
+        ),
+        (
+            "/update alice quota=5 days=30 status=active",
+            "user-update",
+            {"username": "alice", "quota_gb": 5, "days": 30, "status": "active"},
+        ),
+        (
+            "/identity alice telegram= phone=",
+            "customer-update",
+            {
+                "customer": "alice",
+                "name": None,
+                "telegram": "",
+                "phone": "",
+                "clear_telegram": True,
+                "clear_phone": True,
+            },
+        ),
+        (
+            "/setinbounds alice protocol=vless tags=A,B",
+            "user-inbounds",
+            {"username": "alice", "protocol": "vless", "tags": ["A", "B"]},
+        ),
+        ('/rename alice name="Full Name"', "rename", {"customer": "alice", "name": "Full Name"}),
+        (
+            "/ack user:1:quota",
+            "monitor-control",
+            {"control_action": "ack", "target": "user:1:quota"},
+        ),
+        (
+            "/unack user:1:quota",
+            "monitor-control",
+            {"control_action": "unack", "target": "user:1:quota"},
+        ),
+        (
+            "/silence user:1:quota hours=2",
+            "monitor-control",
+            {"control_action": "silence", "target": "user:1:quota", "hours": 2},
+        ),
+        (
+            "/unsilence user:1:quota",
+            "monitor-control",
+            {"control_action": "unsilence", "target": "user:1:quota"},
+        ),
+        (
+            "/rule_enable user.quota",
+            "monitor-control",
+            {"control_action": "rule-enable", "target": "user.quota"},
+        ),
+        ("/alertcontrols", "monitor-control", {"control_action": "list", "target": ""}),
+    ],
+)
+def test_all_regular_command_contracts(
+    text: str, operation: str, expected: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def dispatch(op: str, args: dict[str, Any]) -> dict[str, bool]:
+        calls.append((op, args))
+        return {"ok": True}
+
+    monkeypatch.setattr(management_bot, "dispatch", dispatch)
+    management_bot.command(text, {})
+    assert calls == [(operation, expected)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/show",
+        "/usage",
+        "/enable a b",
+        "/customers 0",
+        "/customers -1",
+        "/customers abc",
+        "/history 1 2",
+        "/create alice",
+        "/create alice quota=nan days=1 protocols=vless",
+        "/create alice quota=5 days=1.5 protocols=vless",
+        "/create alice quota=5 days=1 protocols=invalid",
+        "/create alice quota=5 quota=6 days=1 protocols=vless",
+        "/create alice quota=5 days=1 protocols=vless unknown=x",
+        "/attach alice unknown=x",
+        "/update alice",
+        "/update alice days=2.5",
+        "/update alice status=broken",
+        "/identity alice",
+        "/identity alice extra=x",
+        "/setinbounds alice protocol=vless",
+        "/rename alice name=",
+        "/silence user:1:quota hours=nan",
+        "/silence user:1:quota hours=0",
+        "/silence user:1:quota hours=169",
+        "/ack",
+        "/ack a b",
+        "/ack a hours=1",
+        "/alertcontrols extra",
+        "/cancel extra",
+        "/unknown",
+        '/rename alice name="broken',
+    ],
+)
+def test_invalid_commands_do_not_dispatch(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        management_bot, "dispatch", lambda *_: pytest.fail("invalid input dispatched")
+    )
+    with pytest.raises(ValueError):
+        management_bot.command(text, {})
+
+
+@pytest.mark.parametrize(
+    "text,operation",
+    [
+        ("/revoke alice", "revoke"),
+        ("/rotate alice", "rotate-token"),
+        ("/resetusage alice", "user-reset-usage"),
+        ("/remap alice username=new_user", "remap"),
+        ("/rule_disable user.quota", "monitor-control"),
+    ],
+)
+def test_every_confirmation_is_single_use(
+    text: str, operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def dispatch(op: str, args: dict[str, Any]) -> dict[str, bool]:
+        calls.append(op)
+        return {"ok": True}
+
+    monkeypatch.setattr(management_bot, "dispatch", dispatch)
+    state: dict[str, Any] = {}
+    management_bot.command(text, state)
+    assert not calls
+    code = state["pending"]["code"]
+    management_bot.command("/confirm " + code, state)
+    assert calls == [operation]
+    with pytest.raises(ValueError, match="invalid or expired"):
+        management_bot.command("/confirm " + code, state)
+
+
+def test_expired_confirmation_never_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        management_bot, "dispatch", lambda *_: pytest.fail("expired confirmation dispatched")
+    )
+    state: dict[str, Any] = {
+        "pending": {"code": "abcdef", "expires": 0, "operation": "revoke", "args": {}}
+    }
+    with pytest.raises(ValueError, match="expired"):
+        management_bot.command("/confirm abcdef", state)
+
+
+@pytest.mark.parametrize(
+    "chat_type,chat_id,sender_id,expected",
+    [
+        ("private", 123, 123, True),
+        ("group", 123, 123, False),
+        ("private", 124, 123, False),
+        ("private", 123, 124, False),
+    ],
+)
+def test_authorization_requires_private_owner(
+    chat_type: str, chat_id: int, sender_id: int, expected: bool
+) -> None:
+    assert (
+        management_bot.authorized(
+            {"chat": {"type": chat_type, "id": chat_id}, "from": {"id": sender_id}}, 123
+        )
+        is expected
+    )
+
+
+def test_missing_authorization_fields_fail_closed() -> None:
+    assert not management_bot.authorized({}, 123)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/create alice quota=5 days=1 protocols=vless name=",
+        "/create a quota=5 days=1 protocols=vless",
+        "/attach bad-name",
+        "/identity alice name=",
+        "/setinbounds alice protocol=bad tags=",
+        "/help " + "x" * 2050,
+    ],
+)
+def test_invalid_identity_and_protocol_never_mutate(
+    text: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        management_bot, "dispatch", lambda *_: pytest.fail("invalid request dispatched")
+    )
+    with pytest.raises(ValueError):
+        management_bot.command(text, {})
+
+
+@pytest.mark.parametrize("stdout", ["not-json", '{"ok":false,"error":"safe failure"}'])
+def test_dispatch_failure_is_not_success(stdout: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    result = subprocess.CompletedProcess(
+        ["dispatcher"], 1, stdout=stdout.encode(), stderr=b"private-secret"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: result)
+    with pytest.raises(ValueError) as error:
+        management_bot.dispatch("status", {})
+    assert "private-secret" not in str(error.value)
+
+
+def test_nested_secrets_are_redacted() -> None:
+    assert management_bot.redact(
+        {
+            "users": [
+                {
+                    "name": "Alice",
+                    "password": "secret",
+                    "token": "secret",
+                    "subscription_url": "secret",
+                    "panel_url": "secret",
+                }
+            ]
+        }
+    ) == {"users": [{"name": "Alice"}]}
+
+
+def test_telegram_rate_limit_retries_delivery_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    import email.message
+    import io
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    delays: list[float] = []
+    calls: list[object] = []
+
+    class Response:
+        def __enter__(self) -> object:
+            return io.BytesIO(b'{"ok":true,"result":{}}')
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+    class Opener:
+        def open(self, request: object, **kwargs: object) -> Response:
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(
+                    "https://example.invalid",
+                    429,
+                    "rate limited",
+                    email.message.Message(),
+                    io.BytesIO(json.dumps({"parameters": {"retry_after": 2}}).encode()),
+                )
+            return Response()
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(time, "sleep", delays.append)
+    assert management_bot.telegram("synthetic", "sendMessage", {"text": "hello"})["ok"]
+    assert len(calls) == 2 and delays == [2.1]

@@ -131,6 +131,18 @@ Read the prepared legacy private bookmark. The SSH tunnel is the preferred panel
 .BR "monitor status" ", " "monitor run"
 Read the last monitor result or run checks immediately without sending notifications.
 .TP
+.B monitor controls
+List notification rules, active incidents, acknowledgements and silences.
+.TP
+.B monitor ack KEY | monitor unack KEY
+Acknowledge or unacknowledge the current alert occurrence and threshold.
+.TP
+.B monitor silence KEY [--hours HOURS] | monitor unsilence KEY
+Temporarily mute one exact alert key, for at most 168 hours (default 24).
+.TP
+.B monitor rule-disable RULE --confirm | monitor rule-enable RULE
+Disable or enable notifications for one rule. Checks and health remain active.
+.TP
 .BR "alert-bot configure" ", " "alert-bot status" ", " "alert-bot test"
 Interactively configure, inspect and test the dedicated Telegram alert bot.
 .TP

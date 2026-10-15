@@ -80,7 +80,7 @@ def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
             raise
         payload = json.load(error)
         delay = float(payload.get("parameters", {}).get("retry_after", 1))
-        if delay < 0 or delay > 30:
+        if not math.isfinite(delay) or delay < 0 or delay > 30:
             raise ValueError("Telegram rate limit requires a later retry") from None
         time.sleep(delay + 0.1)
         with opener.open(request, timeout=10) as response:
@@ -147,6 +147,21 @@ def number(value: str, name: str) -> float:
     return result
 
 
+def days(value: str) -> int:
+    result = number(value, "days")
+    if not result.is_integer():
+        raise ValueError("days must be a whole number")
+    return int(result)
+
+
+def authorized(message: dict[str, Any], admin_id: int) -> bool:
+    return (
+        (message.get("chat") or {}).get("type") == "private"
+        and (message.get("chat") or {}).get("id") == admin_id
+        and (message.get("from") or {}).get("id") == admin_id
+    )
+
+
 def help_text() -> str:
     return """Keyholder management
 /ping /metrics /status /health /doctor /monitor /runmonitor /alerts
@@ -161,6 +176,8 @@ def help_text() -> str:
 /enable SELECTOR /disable SELECTOR /sync /backup
 /resetusage USER /remap SELECTOR username=NEW /revoke SELECTOR /rotate SELECTOR
 /confirm CODE /cancel
+/alertcontrols /ack KEY /unack KEY /silence KEY hours=24 /unsilence KEY
+/rule_disable RULE /rule_enable RULE
 
 Subscription links are intentionally available only through the SSH CLI."""
 
@@ -170,6 +187,8 @@ def planned(command: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def command(text: str, state: dict[str, Any]) -> str:
+    if len(text) > 2048:
+        raise ValueError("Command exceeds 2048 characters")
     try:
         words = shlex.split(text, posix=True)
     except ValueError:
@@ -199,6 +218,41 @@ def command(text: str, state: dict[str, Any]) -> str:
         if words:
             raise ValueError("This command takes no arguments")
         result = dispatch(simple[name], {})
+    elif name in {
+        "alertcontrols",
+        "ack",
+        "unack",
+        "silence",
+        "unsilence",
+        "rule_enable",
+        "rule_disable",
+    }:
+        positional, options = parse_options(words)
+        action = {
+            "alertcontrols": "list",
+            "rule_enable": "rule-enable",
+            "rule_disable": "rule-disable",
+        }.get(name, name)
+        if name == "alertcontrols":
+            if words:
+                raise ValueError("Usage: /alertcontrols")
+        elif len(positional) != 1 or options.keys() - ({"hours"} if name == "silence" else set()):
+            raise ValueError(f"Usage: /{name} TARGET" + (" hours=24" if name == "silence" else ""))
+        args: dict[str, Any] = {
+            "control_action": action,
+            "target": positional[0] if positional else "",
+        }
+        if name == "silence":
+            duration = number(options.get("hours", "24"), "hours")
+            if not 0 < duration <= 168:
+                raise ValueError("hours must be greater than 0 and at most 168")
+            args["hours"] = duration
+        if name == "rule_disable":
+            args["confirmed"] = True
+            code = secrets.token_hex(3)
+            state["pending"] = {"code": code, **planned("monitor-control", args)}
+            return f"Confirm within five minutes with /confirm {code}"
+        result = dispatch("monitor-control", args)
     elif name in {"customers", "history"}:
         if len(words) > 1 or (words and (not words[0].isdigit() or int(words[0]) < 1)):
             raise ValueError(f"Usage: /{name} [PAGE]")
@@ -219,6 +273,18 @@ def command(text: str, state: dict[str, Any]) -> str:
         if len(positional) != 1:
             raise ValueError(f"Usage: /{name} USER key=value ...")
         username = positional[0]
+        if name in {"create", "attach", "update", "setinbounds"} and not re.fullmatch(
+            r"[A-Za-z0-9_]{3,32}", username
+        ):
+            raise ValueError("Username must be 3–32 ASCII letters, digits or underscores")
+        if name in {"create", "attach"} and not 1 <= len(options.get("name", username)) <= 200:
+            raise ValueError("Name must contain 1–200 characters")
+        if (
+            name in {"identity", "rename"}
+            and "name" in options
+            and not 1 <= len(options["name"]) <= 200
+        ):
+            raise ValueError("Name must contain 1–200 characters")
         if name == "create":
             required = {"quota", "days", "protocols"}
             if not required <= options.keys():
@@ -227,8 +293,8 @@ def command(text: str, state: dict[str, Any]) -> str:
             if options.keys() - allowed:
                 raise ValueError("Unknown create option")
             protocols = [item for item in options["protocols"].split(",") if item]
-            if not protocols:
-                raise ValueError("At least one protocol is required")
+            if not protocols or not set(protocols) <= {"vless", "vmess", "trojan", "shadowsocks"}:
+                raise ValueError("Choose supported protocols: vless, vmess, trojan, shadowsocks")
             result = dispatch(
                 "user-create",
                 {
@@ -237,7 +303,7 @@ def command(text: str, state: dict[str, Any]) -> str:
                     "telegram": options.get("telegram"),
                     "phone": options.get("phone"),
                     "quota_gb": number(options["quota"], "quota"),
-                    "days": int(number(options["days"], "days")),
+                    "days": days(options["days"]),
                     "protocols": protocols,
                 },
             )
@@ -257,12 +323,14 @@ def command(text: str, state: dict[str, Any]) -> str:
         elif name == "update":
             if not options or options.keys() - {"quota", "days", "status"}:
                 raise ValueError("Update accepts quota, days and status")
+            if "status" in options and options["status"] not in {"active", "disabled"}:
+                raise ValueError("status must be active or disabled")
             result = dispatch(
                 "user-update",
                 {
                     "username": username,
                     "quota_gb": number(options["quota"], "quota") if "quota" in options else None,
-                    "days": int(number(options["days"], "days")) if "days" in options else None,
+                    "days": days(options["days"]) if "days" in options else None,
                     "status": options.get("status"),
                 },
             )
@@ -283,6 +351,8 @@ def command(text: str, state: dict[str, Any]) -> str:
         elif name == "setinbounds":
             if set(options) != {"protocol", "tags"}:
                 raise ValueError("Setinbounds requires protocol and tags")
+            if options["protocol"] not in {"vless", "vmess", "trojan", "shadowsocks"}:
+                raise ValueError("Unsupported protocol")
             result = dispatch(
                 "user-inbounds",
                 {
@@ -380,15 +450,17 @@ def main() -> None:
     )
     state = private_state(path)
     state_lock = threading.Lock()
-    work: queue.Queue[str] = queue.Queue(maxsize=4)
+    work: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
 
     def process() -> None:
         while True:
-            text = work.get()
+            text, created_at = work.get()
             started = time.monotonic()
             with state_lock:
                 local = {"pending": state["pending"]} if "pending" in state else {}
             try:
+                if time.time() - created_at > 300:
+                    raise ValueError("Queued command expired; send it again")
                 reply = command(text, local)
             except ValueError as error:
                 reply = f"Error: {error}"
@@ -410,13 +482,16 @@ def main() -> None:
             finally:
                 work.task_done()
 
-    threading.Thread(target=process, name="bot-commands", daemon=True).start()
+    worker = threading.Thread(target=process, name="bot-commands", daemon=True)
+    worker.start()
     try:
         telegram(token, "setMyCommands", {"commands": json.dumps(BOT_COMMANDS)})
     except Exception as error:
         logging.warning("Menu registration failed: %s", type(error).__name__)
     failures = 0
     while True:
+        if not worker.is_alive():
+            raise SystemExit("Command worker stopped; service restart required")
         try:
             payload = telegram(
                 token,
@@ -434,15 +509,9 @@ def main() -> None:
                     state["offset"] = int(update["update_id"]) + 1
                     save_state(path, state)
                 message = update.get("message") or {}
-                chat = message.get("chat") or {}
-                sender = message.get("from") or {}
-                if (
-                    chat.get("type") != "private"
-                    or chat.get("id") != admin_id
-                    or sender.get("id") != admin_id
-                ):
+                if not authorized(message, admin_id):
                     continue
-                text = str(message.get("text", ""))[:2048]
+                text = str(message.get("text", ""))
                 # Cheap local help and liveness remain responsive during long audits.
                 name = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
                 if name in {"/ping", "/help", "/start", "/metrics", "/monitor", "/alerts"}:
@@ -462,7 +531,7 @@ def main() -> None:
                     )
                     continue
                 try:
-                    work.put_nowait(text)
+                    work.put_nowait((text, float(message.get("date", time.time()))))
                 except queue.Full:
                     send_reply(
                         token,

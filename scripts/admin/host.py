@@ -228,6 +228,27 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             raise ValueError("Monitor returned invalid output") from None
         return {"ok": True, "result": report}
+    if operation == "monitor-control":
+        args = payload.get("args", {})
+        command = [
+            sys.executable,
+            str(config["monitor_tool"]),
+            "--config",
+            str(config["monitor_config"]),
+            "--control",
+            str(args.get("control_action", "list")),
+            "--target",
+            str(args.get("target", "")),
+            "--hours",
+            str(args.get("hours", 24)),
+        ]
+        if args.get("confirmed"):
+            command.append("--confirmed")
+        result = subprocess.run(command, capture_output=True, timeout=50, check=False)
+        report = json.loads(result.stdout)
+        if result.returncode:
+            return {"ok": False, "error": report.get("error", "Alert control failed")}
+        return {"ok": True, "result": report}
     if operation == "alerts-configure":
         return {"ok": True, "result": configure_alerts(config, payload.get("args", {}))}
     if operation == "alerts-status":

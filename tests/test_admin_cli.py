@@ -293,3 +293,37 @@ def test_usage_link_reuses_existing_identity_and_stays_private(
     assert data["customer_id"] == "existing"
     assert "synthetic" not in capsys.readouterr().out
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize(
+    "words,expected",
+    [
+        (["monitor", "controls"], {"control_action": "list"}),
+        (["monitor", "ack", "user:1:quota"], {"control_action": "ack", "target": "user:1:quota"}),
+        (
+            ["monitor", "silence", "user:1:quota", "--hours", "2"],
+            {"control_action": "silence", "target": "user:1:quota", "hours": 2},
+        ),
+        (
+            ["monitor", "rule-disable", "user.quota", "--confirm"],
+            {"control_action": "rule-disable", "target": "user.quota", "confirmed": True},
+        ),
+    ],
+)
+def test_monitor_control_cli_payload(
+    words: list[str], expected: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[dict[str, object]] = []
+
+    def request(host: str, payload: dict[str, object]) -> dict[str, object]:
+        seen.append(payload)
+        return {"ok": True, "result": {"done": True}}
+
+    monkeypatch.setattr(cli, "request", request)
+    assert cli.main(words) == 0
+    assert seen[0]["operation"] == "monitor-control"
+    args = seen[0]["args"]
+    assert isinstance(args, dict)
+    for key, value in expected.items():
+        assert args[key] == value
+    assert "action" not in args and "resource" not in args

@@ -1,5 +1,8 @@
 # Monitoring
 
+See the [alert contract and operator controls](alerts.md) for acknowledgement,
+silences, notification rules and repair procedures.
+
 Keyholder uses a short-lived host monitor instead of running Prometheus or a
 second metrics database on small production servers. Marzban remains the source
 of truth for user status, quota, expiry and traffic.
@@ -68,8 +71,8 @@ normal alert delivery.
 ## Alert policy and management
 
 Quota warnings fire at 80% and 95%, expiry warnings at 7, 3 and 1 days. A changing
-percentage within the same threshold does not resend the alert. New problems are
-batched per check; recoveries are reported separately. Traffic warnings require
+percentage within the same threshold does not resend the alert. New problems and recoveries are
+batched per check. Traffic warnings require
 at least 1 GiB growth since the last sample, a rate of 20 GiB/hour, and three times
 the seven-day hourly baseline (when available). These are investigation signals,
 not proof of abuse, and never automatically disable a customer.

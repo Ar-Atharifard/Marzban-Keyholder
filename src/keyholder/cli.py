@@ -76,6 +76,7 @@ COMMAND_HELP = {
     "backend-register": "Register the configured backend in Keyholder's backend registry.",
     "monitor-status": "Read the most recent host-monitor result without running checks.",
     "system-metrics": "Read live memory, CPU, disk, uptime and network metrics.",
+    "monitor-control": "Manage notification acknowledgement, silences and disabled rules.",
     "monitor-run": "Run host, service and customer checks now without sending notifications.",
     "alerts-configure": "Configure the Telegram alert bot interactively and privately.",
     "alerts-status": "Show alert delivery, timer and heartbeat configuration status.",
@@ -247,10 +248,10 @@ def parser() -> KeyholderParser:
         actions: argparse._SubParsersAction[KeyholderParser],
         action: str,
         operation: str,
+        description: str | None = None,
     ) -> KeyholderParser:
-        item = actions.add_parser(
-            action, help=COMMAND_HELP[operation], description=COMMAND_HELP[operation]
-        )
+        text = description or COMMAND_HELP[operation]
+        item = actions.add_parser(action, help=text, description=text)
         item.set_defaults(operation=operation)
         command_parsers[(resource, action)] = item
         return item
@@ -272,6 +273,28 @@ def parser() -> KeyholderParser:
     _, monitor = group("monitor")
     leaf("monitor", monitor, "status", "monitor-status")
     leaf("monitor", monitor, "run", "monitor-run")
+    for action, description in {
+        "controls": "List alert rules, incidents and notification controls.",
+        "ack": "Acknowledge the current occurrence and stop its reminders.",
+        "unack": "Remove acknowledgement of one alert key.",
+        "silence": "Temporarily mute one alert key for at most 168 hours.",
+        "unsilence": "Remove temporary silence from one alert key.",
+        "rule-disable": "Disable a notification rule with explicit confirmation.",
+        "rule-enable": "Enable notifications for one rule again.",
+    }.items():
+        item = leaf("monitor", monitor, action, "monitor-control", description)
+        item.set_defaults(control_action="list" if action == "controls" else action)
+        if action != "controls":
+            item.add_argument("target", help="Exact alert key, or rule ID for rule actions")
+        if action == "silence":
+            item.add_argument(
+                "--hours",
+                type=float,
+                default=24,
+                help="Duration, greater than 0 and at most 168 hours",
+            )
+        if action == "rule-disable":
+            item.add_argument("--confirm", action="store_true", dest="confirmed")
 
     _, alert_bot = group("alert-bot")
     leaf("alert-bot", alert_bot, "configure", "alerts-configure")

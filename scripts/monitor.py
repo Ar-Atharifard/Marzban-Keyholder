@@ -19,8 +19,10 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -402,7 +404,10 @@ def heartbeat(env: dict[str, str]) -> None:
 
 def summarize(prefix: str, alerts: dict[str, str]) -> str:
     lines = [f"{prefix} on Braavos"]
-    lines.extend(f"• {message}" for _, message in sorted(alerts.items()))
+    lines.extend(
+        f"• [{severity_for_key(key).upper()}] {key}: {message}"
+        for key, message in sorted(alerts.items())
+    )
     return "\n".join(lines)
 
 
@@ -445,6 +450,136 @@ def terminal_notifications(
     return tracking, reminders, silenced
 
 
+RULES = {
+    "user.quota": "Quota thresholds: 80% and 95%; increase allowance or review usage.",
+    "user.expiry": "Expiry thresholds: 7, 3 and 1 days; renew the upstream account.",
+    "user.account": "Exhausted quota/expired account; renew quota/time in Marzban.",
+    "user.status": "Inactive upstream account; inspect the panel status.",
+    "user.traffic": "High traffic versus baseline; investigate usage before taking action.",
+    "host.disk": "Disk space pressure; remove verified stale artifacts or expand storage.",
+    "host.inode": "Inode pressure; inspect excessive small files.",
+    "host.memory": "Low available RAM; inspect resident processes and memory limits.",
+    "host.swap": "High swap use; inspect memory pressure and paging.",
+    "host.cpu": "High CPU load; inspect processes and host contention.",
+    "service.container": "Container stopped/unhealthy; inspect its health and logs.",
+    "service.systemd": "Required unit inactive; inspect its status and journal.",
+    "service.http": "HTTP probe failed; inspect origin, TLS, gateway and upstream.",
+    "service.tcp": "TCP listener unavailable; inspect the owning service.",
+    "backup.age": "Recovery snapshot overdue; run system backup and verify integrity.",
+    "marzban.usage": "Usage DB unavailable; inspect permissions and database health.",
+    "marzban.users": "Inventory below expected minimum; inspect the panel inventory.",
+}
+
+
+def rule_for_key(key: str) -> str:
+    parts = key.split(":")
+    if parts[0] == "user" and len(parts) == 3:
+        return "user." + parts[2]
+    if parts[0] in {"disk", "inode", "memory", "swap", "cpu"}:
+        return "host." + parts[0]
+    if parts[0] in {"container", "systemd", "http", "tcp"}:
+        return "service." + parts[0]
+    return ".".join(parts[:2])
+
+
+def severity_for_key(key: str) -> str:
+    if key.endswith(":critical") or key.startswith(
+        ("container:", "systemd:", "http:", "tcp:", "marzban:")
+    ):
+        return "critical"
+    return "warning"
+
+
+def load_controls(state_path: Path) -> dict[str, Any]:
+    path = state_path.with_name("controls.json")
+    if not path.exists():
+        return {"acks": {}, "silences": {}, "disabled_rules": []}
+    private_file(path)
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or set(value) != {"acks", "silences", "disabled_rules"}:
+        raise ValueError("Invalid alert controls")
+    return value
+
+
+def control_alerts(
+    config: dict[str, Any], action: str, target: str, hours: float, confirmed: bool
+) -> dict[str, Any]:
+    path = Path(config["state_file"])
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        controls = load_controls(path)
+        state = load_state(path)
+        if action == "list":
+            return {"rules": RULES, "controls": controls, "incidents": state.get("incidents", {})}
+        if action in {"rule-disable", "rule-enable"}:
+            if target not in RULES:
+                raise ValueError("Unknown rule; use monitor controls")
+            if action == "rule-disable" and not confirmed:
+                raise ValueError("Disabling a notification rule requires confirmation")
+            disabled = set(controls["disabled_rules"])
+            if action == "rule-disable":
+                disabled.add(target)
+            else:
+                disabled.discard(target)
+            controls["disabled_rules"] = sorted(disabled)
+        elif action in {"ack", "unack", "silence", "unsilence"}:
+            incident = state.get("incidents", {}).get(target)
+            if not incident and action in {"ack", "silence"}:
+                raise ValueError("Alert is not active; use monitor status for its exact key")
+            if action == "ack":
+                controls["acks"][target] = incident["id"]
+            elif action == "unack":
+                controls["acks"].pop(target, None)
+            elif action == "silence":
+                if not 0 < hours <= 168:
+                    raise ValueError(
+                        "Silence duration must be greater than zero and at most 168 hours"
+                    )
+                controls["silences"][target] = time.time() + hours * 3600
+            else:
+                controls["silences"].pop(target, None)
+        else:
+            raise ValueError("Unknown alert control action")
+        save_state(path.with_name("controls.json"), controls)
+        return {"action": action, "target": target, "controls": controls}
+
+
+def incident_views(
+    alerts: dict[str, str], previous: dict[str, Any], controls: dict[str, Any], now: float
+) -> tuple[dict[str, Any], set[str]]:
+    incidents: dict[str, Any] = {}
+    suppressed: set[str] = set()
+    for key, message in alerts.items():
+        signature = notification_signature(key, message)
+        old = previous.get("incidents", {}).get(key, {})
+        same = old.get("signature") == signature
+        identity = old["id"] if same else uuid.uuid4().hex[:12]
+        rule = rule_for_key(key)
+        status = "active"
+        if rule in controls["disabled_rules"]:
+            status = "rule_disabled"
+        elif float(controls["silences"].get(key, 0)) > now:
+            status = "silenced"
+        elif controls["acks"].get(key) == identity:
+            status = "acknowledged"
+        if status != "active":
+            suppressed.add(key)
+        incidents[key] = {
+            "id": identity,
+            "key": key,
+            "rule": rule,
+            "severity": severity_for_key(key),
+            "message": message,
+            "signature": signature,
+            "notification_state": status,
+            "first_seen": old["first_seen"] if same else now,
+            "last_seen": now,
+            "guidance": RULES.get(rule, "Inspect the affected component."),
+        }
+    return incidents, suppressed
+
+
 def run(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     state_path = Path(config["state_file"])
     state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -473,7 +608,31 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     terminal, reminders, silenced = terminal_notifications(
         alerts, previous, now.timestamp(), config
     )
+    controls = load_controls(state_path)
+    incidents, suppressed = incident_views(alerts, previous, controls, now.timestamp())
+    silenced |= suppressed
+    clean_controls = {
+        "acks": {
+            key: identity
+            for key, identity in controls["acks"].items()
+            if key in incidents and incidents[key]["id"] == identity
+        },
+        "silences": {
+            key: until
+            for key, until in controls["silences"].items()
+            if float(until) > now.timestamp()
+        },
+        "disabled_rules": controls["disabled_rules"],
+    }
+    if clean_controls != controls:
+        save_state(state_path.with_name("controls.json"), clean_controls)
+    for key in silenced:
+        if key in incidents and incidents[key]["notification_state"] == "active":
+            incidents[key]["notification_state"] = "automatic_silence"
     notified_alerts = previous.get("notified_alerts", {})
+    notification_ids = dict(previous.get("notified_incidents", {}))
+    for key in notified_alerts.keys() & incidents.keys():
+        notification_ids.setdefault(key, incidents[key]["id"])
     new = {
         key: value
         for key, value in alerts.items()
@@ -481,17 +640,27 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         and (
             key in reminders
             or key not in notified_alerts
+            or notification_ids.get(key) != incidents[key]["id"]
             or notification_signature(key, value)
             != notification_signature(key, str(notified_alerts[key]))
         )
     }
-    recovered = {key: value for key, value in notified_alerts.items() if key not in alerts}
+    recovered_all = {key: value for key, value in notified_alerts.items() if key not in alerts}
+    muted_recoveries = {
+        key
+        for key in recovered_all
+        if rule_for_key(key) in controls["disabled_rules"]
+        or float(controls["silences"].get(key, 0)) > now.timestamp()
+    }
+    recovered = {key: value for key, value in recovered_all.items() if key not in muted_recoveries}
     env_path = Path(config["secrets_file"])
     env = parse_env(env_path)
     if env_path.exists():
         private_file(env_path)
     delivery_error = None
-    delivered_alerts = dict(notified_alerts)
+    delivered_alerts = {
+        key: value for key, value in notified_alerts.items() if key not in muted_recoveries
+    }
     if notify:
         try:
             sections = []
@@ -501,8 +670,11 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
                 sections.append(summarize("RECOVERED", recovered))
             if sections and telegram(env, "\n\n".join(sections)):
                 delivered_alerts.update(new)
+                for key in new:
+                    notification_ids[key] = incidents[key]["id"]
                 for key in recovered:
                     delivered_alerts.pop(key, None)
+                    notification_ids.pop(key, None)
                 for key in new.keys() & terminal.keys():
                     terminal[key]["last_sent"] = now.timestamp()
             # Business warnings (quota, expiry, account status and traffic) must not
@@ -527,7 +699,9 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         else None
     )
     result = {
+        "alert_contract_version": 1,
         "metrics": metrics,
+        "incidents": incidents,
         "terminal_accounts": terminal,
         "silenced_alerts": sorted(silenced),
         "healthy": not alerts,
@@ -535,6 +709,9 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
         "alert_count": len(alerts),
         "alerts": alerts,
         "notified_alerts": delivered_alerts,
+        "notified_incidents": {
+            key: value for key, value in notification_ids.items() if key in delivered_alerts
+        },
         "new_alerts": sorted(new),
         "recovered_alerts": sorted(recovered),
         "notification_error": delivery_error,
@@ -547,12 +724,14 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
 
 def public_result(state: dict[str, Any]) -> dict[str, Any]:
     return {
+        "alert_contract_version": 1,
         "healthy": bool(state.get("healthy")),
         "checked_at": state.get("checked_at"),
         "alert_count": int(state.get("alert_count", 0)),
         "alerts": state.get("alerts", {}),
         "notification_error": state.get("notification_error"),
         "metrics": state.get("metrics", {}),
+        "incidents": state.get("incidents", {}),
         "silenced_alerts": state.get("silenced_alerts", []),
     }
 
@@ -563,12 +742,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--metrics", action="store_true", help="Read live system metrics without a check"
     )
+    parser.add_argument(
+        "--control",
+        choices=["list", "ack", "unack", "silence", "unsilence", "rule-disable", "rule-enable"],
+    )
+    parser.add_argument("--target", default="")
+    parser.add_argument("--hours", type=float, default=24)
+    parser.add_argument("--confirmed", action="store_true")
     parser.add_argument("--status", action="store_true", help="Read the last result only")
     parser.add_argument("--no-notify", action="store_true", help="Run checks without notifications")
     parser.add_argument("--test-alert", action="store_true", help="Send one Telegram test alert")
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
+        if args.control:
+            print(
+                json.dumps(
+                    control_alerts(config, args.control, args.target, args.hours, args.confirmed)
+                )
+            )
+            return 0
         if args.metrics:
             metrics = system_metrics()
             previous = load_state(Path(config["state_file"]))
@@ -590,6 +783,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(public_result(state), ensure_ascii=False))
         return 0 if state.get("healthy") else 1
+    except ValueError as error:
+        message = str(error) if args.control else "monitor execution failed"
+        print(json.dumps({"healthy": False, "error": message}))
+        return 2
     except Exception:
         print(json.dumps({"healthy": False, "error": "monitor execution failed"}))
         return 2
