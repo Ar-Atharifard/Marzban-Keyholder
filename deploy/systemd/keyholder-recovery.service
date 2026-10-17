@@ -1,0 +1,34 @@
+[Unit]
+Description=Capture and upload encrypted Keyholder disaster recovery bundle
+Wants=network-online.target
+After=network-online.target docker.service
+ConditionPathExists=/etc/keyholder/recovery.env
+StartLimitIntervalSec=2h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+Restart=on-failure
+RestartSec=15min
+User=root
+UMask=0077
+EnvironmentFile=/etc/keyholder/recovery.env
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-recovery/recovery.py upload --config /etc/keyholder/recovery.json --work /var/lib/keyholder-recovery --status /var/lib/keyholder-recovery/status.json
+ExecStartPost=/usr/local/bin/keyholder --local system backup
+StateDirectory=keyholder-recovery
+StateDirectoryMode=0700
+CacheDirectory=keyholder-recovery
+CacheDirectoryMode=0700
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=192M
+MemoryMax=320M
+TasksMax=32
+TimeoutStartSec=45min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/keyholder-recovery /var/cache/keyholder-recovery /var/backups/keyholder
+

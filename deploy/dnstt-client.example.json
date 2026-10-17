@@ -1,0 +1,6 @@
+{
+  "inbound_tag": "VLESS DNSTT",
+  "domain": "t.example.com",
+  "public_key": "REPLACE_WITH_DNSTT_PUBLIC_KEY_64_HEX",
+  "doh_url": "https://8.8.8.8/dns-query"
+}

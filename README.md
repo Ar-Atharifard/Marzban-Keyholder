@@ -1,13 +1,11 @@
 # Keyholder
 
-Keyholder provides stable proxy subscription URLs while the upstream account,
-panel or infrastructure can change. It is a small Python/FastAPI service designed
-for one worker and SQLite, with no background queue or mandatory Redis service.
+Keyholder gives customers a stable `/s/{token}` subscription URL while the upstream
+account or panel changes. It runs on FastAPI and SQLite with one worker.
 
-Customers keep `/s/{token}`. Administrators attach an upstream account once and
-retrieve the same URL later. Tokens have no scheduled expiry; delivery still
-respects account status, quota/expiry enforcement by the provider, local revocation,
-and service availability. Explicit rotation changes a compromised URL.
+Attach an upstream account once, then retrieve the same URL whenever needed.
+Tokens have no scheduled expiry. Delivery still depends on account status, quota,
+expiry and service availability; administrators can explicitly revoke or rotate a URL.
 
 ## Supported integrations
 
@@ -44,17 +42,14 @@ Docker, TLS routing and operator setup. Do not expose the administrator API publ
 
 | Guide | Contents |
 |---|---|
-| [Configuration](docs/configuration.md) | Environment settings and deployment policy |
-| [Providers](docs/providers.md) | Multiple backends, HTTP sources, adding an adapter |
-| [API](docs/api.md) | Authentication, request/response contracts and errors |
-| [Operator commands](scripts/admin/README.md) | Daily customer and panel management |
-| [Architecture](docs/architecture.md) | Code layout, database, ownership and limitations |
-| [Development](docs/development.md) | Features, protocols, checks and migrations |
-| [Operations](docs/operations.md) | Backups, releases, recovery and panel gateway |
-| [Alert policy](docs/alerts.md) | Deduplication, acknowledgement, silence, rules and repairs |
-| [Monitoring](docs/monitoring.md) | Lightweight host, service and customer alerts |
-| [Compatibility](docs/compatibility.md) | Stable links and change policy |
-| [Publishing](docs/publishing.md) | Clean source export and private-history precautions |
+| [Installation](docs/getting-started.md) | Setup, environment and multiple providers |
+| [API](docs/api.md) | Endpoints, authentication, schemas and errors |
+| [CLI reference](scripts/admin/README.md) | Installation and daily commands |
+| [Development](docs/development.md) | Code map, DB, adapters, compatibility and publishing |
+| [Operations](docs/operations.md) | Releases, private panel, monitoring and bots |
+| [Alerts](docs/alerts.md) | Deduplication, thresholds, suppression and repairs |
+| [Recovery](docs/disaster-recovery.md) | Offsite backup, Ansible and VM rehearsal |
+| [Networking](docs/networking.md) | Subscription delivery, Worker and DNSTT |
 
 ## Verify a change
 
@@ -66,13 +61,11 @@ uv run mypy src tests scripts
 git diff --check
 ```
 
-Tests use synthetic credentials, temporary databases and mocked HTTP. GitHub CI
-runs these checks, fresh migrations, source/wheel packaging and secret scanning.
-CI never deploys infrastructure or accesses customer credentials.
+Tests use synthetic credentials, temporary databases and mocked HTTP. CI also
+checks migrations, packaging and secrets; it never deploys.
 
-This release supports a single API worker and SQLite. Multi-worker rate limits,
-PostgreSQL support, automatic failover and additional panel adapters are not
-implemented or promised. `/health` checks database connectivity, not upstream health.
+Multi-worker rate limits, PostgreSQL and automatic failover are unsupported.
+`/health` checks the database, not upstream connectivity.
 
 Licensed under [MIT](LICENSE). See [contribution guidance](CONTRIBUTING.md) and
 [security reporting](SECURITY.md). Personal deployment notes belong in ignored

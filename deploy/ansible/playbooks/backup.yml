@@ -1,0 +1,79 @@
+---
+- name: Install offsite backup after private credentials and inventory are prepared
+  hosts: recovery_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit deployment opt-in
+      ansible.builtin.assert:
+        that: recovery_install_backup | default(false) | bool
+    - name: Install backup tools
+      ansible.builtin.apt:
+        name: [restic, python3]
+        state: present
+    - name: Create private helper directory
+      ansible.builtin.file:
+        path: /usr/local/lib/keyholder-recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Install recovery helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-recovery/{{ item }}'
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [recovery.py, backup_database.py]
+    - name: Install recovery command
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../recovery/keyholder-recovery'
+        dest: /usr/local/sbin/keyholder-recovery
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Check private prerequisite files
+      ansible.builtin.stat:
+        path: '/etc/keyholder/{{ item }}'
+      loop: [recovery.json, recovery.env, recovery-password]
+      register: private_files
+      no_log: true
+    - name: Require private root-owned backup configuration
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.uid == 0
+          - item.stat.mode == '0600'
+      loop: '{{ private_files.results }}'
+      no_log: true
+    - name: Install daily recovery units without enabling them
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../systemd/{{ item }}'
+        dest: '/etc/systemd/system/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop:
+        - keyholder-recovery.service
+        - keyholder-recovery.timer
+        - keyholder-recovery-maintenance.service
+        - keyholder-recovery-maintenance.timer
+      register: backup_units
+    - name: Reload unit definitions
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: backup_units.changed
+    - name: Enable daily timer only after a successful verified initial upload
+      ansible.builtin.systemd_service:
+        name: keyholder-recovery.timer
+        enabled: true
+        state: started
+      when: recovery_initial_upload_verified | default(false) | bool
+    - name: Enable weekly repository maintenance after initial verification
+      ansible.builtin.systemd_service:
+        name: keyholder-recovery-maintenance.timer
+        enabled: true
+        state: started
+      when: recovery_initial_upload_verified | default(false) | bool

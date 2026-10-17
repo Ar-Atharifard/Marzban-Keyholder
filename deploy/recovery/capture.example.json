@@ -1,0 +1,48 @@
+{
+  "service_id": "keyholder-production",
+  "containers": ["keyholder-api-1", "marzban-marzban-1", "braavos-gateway"],
+  "files": {
+    "rootfs/srv/keyholder/.env": "/srv/keyholder/.env",
+    "rootfs/opt/marzban/.env": "/opt/marzban/.env",
+    "rootfs/opt/marzban/docker-compose.yml": "/opt/marzban/docker-compose.yml",
+    "rootfs/opt/braavos-gateway/docker-compose.yml": "/opt/braavos-gateway/docker-compose.yml",
+    "rootfs/opt/braavos-gateway/production.override.json": "/opt/braavos-gateway/production.override.json",
+    "rootfs/opt/braavos-gateway/nginx/nginx.conf": "/opt/braavos-gateway/nginx/nginx.conf",
+    "rootfs/var/lib/marzban/xray_config.json": "/var/lib/marzban/xray_config.json",
+    "rootfs/etc/keyholder/monitor.json": "/etc/keyholder/monitor.json",
+    "rootfs/etc/keyholder/monitor.env": "/etc/keyholder/monitor.env",
+    "rootfs/etc/keyholder/management-bot.env": "/etc/keyholder/management-bot.env",
+    "rootfs/etc/keyholder/recovery-seed.json": "/etc/keyholder/recovery-seed.json",
+    "rootfs/etc/keyholder/recovery.json": "/etc/keyholder/recovery.json",
+    "rootfs/usr/local/lib/keyholder-recovery/recovery.py": "/usr/local/lib/keyholder-recovery/recovery.py",
+    "rootfs/usr/local/lib/keyholder-recovery/backup_database.py": "/usr/local/lib/keyholder-recovery/backup_database.py",
+    "rootfs/usr/local/sbin/keyholder-recovery": "/usr/local/sbin/keyholder-recovery",
+    "rootfs/usr/local/lib/keyholder-admin/host.json": "/usr/local/lib/keyholder-admin/host.json",
+    "rootfs/usr/local/lib/keyholder-admin/host.py": "/usr/local/lib/keyholder-admin/host.py",
+    "rootfs/usr/local/lib/keyholder-admin/worker.py": "/usr/local/lib/keyholder-admin/worker.py",
+    "rootfs/usr/local/lib/keyholder-admin/monitor.py": "/usr/local/lib/keyholder-admin/monitor.py",
+    "rootfs/usr/local/lib/keyholder-admin/management_bot.py": "/usr/local/lib/keyholder-admin/management_bot.py",
+    "rootfs/usr/local/lib/keyholder-admin/backup_database.py": "/usr/local/lib/keyholder-admin/backup_database.py",
+    "rootfs/usr/local/lib/keyholder-admin/cli.py": "/usr/local/lib/keyholder-admin/cli.py",
+    "rootfs/var/lib/keyholder-management-bot/state.json": "/var/lib/keyholder-management-bot/state.json",
+    "rootfs/var/lib/keyholder-monitor/controls.json": "/var/lib/keyholder-monitor/controls.json",
+    "rootfs/var/lib/keyholder-monitor/state.json": "/var/lib/keyholder-monitor/state.json",
+    "rootfs/etc/systemd/system/keyholder-management-bot.service": "/etc/systemd/system/keyholder-management-bot.service",
+    "rootfs/etc/systemd/system/keyholder-monitor.service": "/etc/systemd/system/keyholder-monitor.service",
+    "rootfs/etc/systemd/system/keyholder-monitor.timer": "/etc/systemd/system/keyholder-monitor.timer",
+    "rootfs/etc/systemd/system/keyholder-recovery.service": "/etc/systemd/system/keyholder-recovery.service",
+    "rootfs/etc/systemd/system/keyholder-recovery.timer": "/etc/systemd/system/keyholder-recovery.timer",
+    "rootfs/etc/systemd/system/keyholder-recovery-maintenance.service": "/etc/systemd/system/keyholder-recovery-maintenance.service",
+    "rootfs/etc/systemd/system/keyholder-recovery-maintenance.timer": "/etc/systemd/system/keyholder-recovery-maintenance.timer"
+  },
+  "trees": {
+    "rootfs/usr/local/lib/keyholder-admin/keyholder": "/usr/local/lib/keyholder-admin/keyholder",
+    "rootfs/var/lib/marzban/xray-core": "/var/lib/marzban/xray-core",
+    "rootfs/opt/braavos-gateway/certs": "/opt/braavos-gateway/certs",
+    "rootfs/opt/braavos-gateway/html": "/opt/braavos-gateway/html"
+  },
+  "sqlite": {
+    "volumes/keyholder_keyholder-data/keyholder.db": "/var/lib/docker/volumes/keyholder_keyholder-data/_data/keyholder.db",
+    "rootfs/var/lib/marzban/db.sqlite3": "/var/lib/marzban/db.sqlite3"
+  }
+}

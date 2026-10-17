@@ -1,76 +1,87 @@
-# Operations
+# Operations and monitoring
 
-## Daily checks and backup
+Daily tools: `keyholder system status`, `system health`, `system doctor`,
+`system metrics`, `customer check USER`, `upstream users` and `upstream inbounds`.
+`doctor` checks DB/vault/mappings and supported provider inventory; `/health` alone
+checks DB connectivity. See [CLI reference](../scripts/admin/README.md).
 
-Use `keyholder system status`, `keyholder system health`, `keyholder system doctor`,
-`keyholder upstream users`, `keyholder upstream inbounds` and
-`keyholder customer check USER`. `system doctor` checks SQLite integrity, vault
-retrieval and selected-provider inventory
-when supported. `/health` does not establish panel or proxy connectivity.
+## Release and recovery
 
-`keyholder system backup` makes a private same-server recovery set: an online SQLite
-snapshot and its vault-key environment, plus explicitly configured files/SQLite
-sources. Include private panel access metadata when using a secret panel entry.
-Root-owned mode-0600 configuration selects paths; backup directories are root-only.
-A copy on the same disk is not protection against host loss. Choose encrypted
-external storage, retention and restore objectives separately.
+1. Test locally, including migrations and packaging; build an immutable image.
+2. Back up DB, vault key and affected configuration. Record current image/downtime,
+   exact deployment, rollback and validation steps before changing production.
+3. Recreate only the affected service. Never build on the constrained VPS, restart
+   Docker globally, migrate at startup or pull over production-only Git changes.
+4. Check health, existing subscriptions and real proxy traffic without printing tokens.
 
-Rehearse restoration in an isolated environment. Verify integrity, schema revision,
-customer IDs, hashes, encrypted tokens and mappings. Keep the original public URL
-and vault key. Do not restore old rotated tokens without a deliberate decision.
+`keyholder system backup` creates a root-only local SQLite snapshot/key/config set;
+latest two complete sets are retained by default (`backup_retention_count`, minimum
+2). Pruning occurs only after success. Same-disk copies are rollback material, not
+disaster recovery. [Offsite backup and restore](disaster-recovery.md) is separate.
+Preserve DB, vault key, domain/path and mapping identity. Never restore old rotated
+tokens accidentally. Rehearse DB integrity, schema, token retrieval and proxy access.
 
-## Release
+## Network changes and private panel
 
-1. Run local tests/static checks, fresh migrations and packaging validation.
-2. Build an immutable image locally; record its digest and previous release.
-3. Back up the live DB/key and affected configuration; review migrations.
-4. Prepare exact deployment, downtime, rollback and validation steps.
-5. Recreate only Keyholder with reviewed environment/networking/volume settings.
-6. Check health and existing subscriptions without printing their bearer URLs.
+Inspect existing listeners/rules before changes. Do not flush firewall tables,
+reset/disable/re-enable UFW or blindly restore host networking over the only SSH
+path. Keep an independent provider console open, preserve the authorized SSH port,
+and verify a fresh second key-authenticated session before/after activation.
+An on-host rollback timer is not independent recovery. Shared ingress needs syntax
+validation and a graceful reload; Xray changes can interrupt active connections.
 
-Do not build on a constrained production host, restart Docker globally, run blind
-Git pulls over production-only changes, or migrate on every application startup.
-Shared ingress changes require syntax checks and graceful reload with recovery
-copies. Core changes can interrupt active proxy sessions even if URLs stay stable.
+Prefer `keyholder panel open` for a loopback SSH tunnel. The optional
+`scripts/render_panel_gate.py` generates a secret bookmark/cookie gate, not a
+replacement for authentication or protection against hostname filtering:
 
-Never run `ufw reset`, `ufw disable`, `ufw enable`, an INPUT-chain flush, or a
-full firewall restore through the server's only management path. Prepare and test
-the ruleset offline, preserve the currently authorized SSH port, and activate it
-only with an independent provider-console session already open. Prefer an external
-provider firewall for coarse port filtering. A timer inside the affected VPS is
-not an independent rollback path.
-
-## Private panel entry
-
-The optional `scripts/render_panel_gate.py` generator creates a private Nginx
-snippet and access metadata, refusing overwrite and not printing the entry URL.
-The panel remains on loopback and still requires its own login. The generated
-files contain an access secret: keep them outside Git and mode 0600.
-
-```bash
+```sh
 python3 scripts/render_panel_gate.py --hostname panel.example.com \
   --output /private/path/panel.conf --access-file /private/path/panel-access.json
 ```
 
-Include the snippet in your gateway's `http` block with the referenced certificate
-files. Configure `panel_access_file` in the dispatcher, then retrieve the bookmark
-with `keyholder panel url` in a terminal. Validate HTML, module assets, login/API
-and WebSocket traffic against your installed panel version before activation.
-Opening the private bookmark sets a Secure, HttpOnly, SameSite=Strict gate cookie
-for 30 days and redirects to the native `/dashboard/` path. Dashboard, API, locale,
-asset and WebSocket routes retain their native paths; JavaScript is not rewritten.
-Requests without the gate cookie return 404, except the public decoy root. The
-native dashboard URL will appear in an admitted browser; it remains inaccessible
-to visitors without the gate cookie. Reopen the bookmark after cookie expiry or
-when switching browsers. Existing subscriptions on other hostnames remain separate.
+It refuses overwrite; protect generated files as 0600 and configure
+`panel_access_file` in the dispatcher. `keyholder panel url` retrieves the bookmark.
+The bookmark grants a Secure/HttpOnly/SameSite gate cookie for 30 days and redirects
+to native `/dashboard/`. Native paths remain visible to admitted browsers; visitors
+without the cookie receive 404 except the decoy root. Validate login, locale, assets,
+API and WebSockets before activation. Disable path logging/caching and keep the
+bookmark private. Write gateway files in place when Docker binds individual files;
+replacing an inode can leave the container using the old configuration.
 
-A random path reduces discovery; it is not a substitute for authentication and
-cannot hide the hostname or guarantee resistance to ISP filtering. Disable path
-logs/caching, set no-referrer and keep the panel bookmark private. Gateway files
-must be written in place if Docker uses a single-file bind mount; inode replacement
-can leave the container reading the old configuration.
+## Lightweight monitoring and bots
 
-Recovery snapshots retain the latest two complete sets by default. The root-owned
-host setting `backup_retention_count` can raise this limit (minimum two). Pruning
-runs only after a new full backup succeeds; operator-code rollback directories are
-separate. Backup-age monitoring counts database recovery sets, not code-only backups.
+`scripts/monitor.py` runs briefly every two minutes: containers/systemd, HTTP/TCP,
+disk/inodes, RAM/swap/load, backup age, Marzban status/quota/expiry and traffic growth.
+It stores root-only counters/state, not destinations, tokens or customer contacts.
+It does not prove physical hardware health or per-user connectivity. Idle users
+cannot be distinguished from failed connections. ISP probes need a domestic host.
+
+Install `monitor.py` under `/usr/local/lib/keyholder-admin/`, private config/env
+from `deploy/monitor*`, and its systemd service/timer. Keep configuration/state
+root-owned and secrets mode 0600. Run once without notifications before enabling.
+Use separate alert and management Telegram identities:
+
+```sh
+keyholder alert-bot configure
+keyholder alert-bot test
+keyholder management-bot configure
+keyholder management-bot test
+keyholder heartbeat configure
+keyholder heartbeat test
+```
+
+Interactive prompts hide secrets; never put tokens in shell arguments or chat.
+For whole-host outages, configure the external heartbeat with at least five minutes
+grace. A dead VPS cannot send Telegram itself. Customer quota warnings do not
+suppress infrastructure heartbeat health.
+
+`keyholder monitor status` reads state; `monitor run` checks without notifications.
+Bot `/help` lists commands; `/metrics`, `/monitor`, `/alerts` and `/ping` are read-only.
+Mutations use a bounded serial queue and expire after five minutes. Lost replies
+are not replayed: inspect state before retrying. Destructive commands require
+single-use confirmation. Only the configured private admin is admitted; retrieve
+subscription links through SSH, not Telegram.
+
+For thresholds, deduplication and mute/repair commands, use the single
+[alert policy](alerts.md). Runtime paths and personal deployment instructions
+belong in private inventory, not duplicate public guides.

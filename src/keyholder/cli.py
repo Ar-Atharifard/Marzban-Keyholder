@@ -95,6 +95,7 @@ COMMAND_HELP = {
     "user-inbounds": "Replace one protocol's selected Marzban inbound tags.",
     "user-usage": "Read an upstream user's current traffic and plan state.",
     "user-reset-usage": "Reset an upstream user's traffic counter after confirmation.",
+    "user-dnstt": "Export a selected DNSTT user's private desktop profile and helper settings.",
     "panel": "Open the private Marzban panel through a local SSH tunnel.",
     "panel-url": "Show or privately save the legacy prepared panel bookmark.",
     "list": "List canonical Keyholder customers without subscription tokens.",
@@ -317,6 +318,11 @@ def parser() -> KeyholderParser:
     reconcile.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply changes")
 
     _, user = group("user")
+    dnstt = leaf("user", user, "dnstt", "user-dnstt")
+    dnstt.add_argument("username", help="Marzban username with DNSTT selected")
+    dnstt.add_argument(
+        "--save-link", type=Path, required=True, help="New private profile JSON file"
+    )
     user_create = leaf("user", user, "create", "user-create")
     user_create.add_argument("username", help="New Marzban username")
     user_create.add_argument("--name", help="Private customer name; defaults to username")
@@ -562,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
         "user-inbounds",
         "user-usage",
         "user-reset-usage",
+        "user-dnstt",
     } and not re.fullmatch(r"[A-Za-z0-9_]{3,32}", args.username):
         p.error("Marzban usernames must be 3–32 ASCII letters, digits or underscores.")
     if (
@@ -605,7 +612,14 @@ def main(argv: list[str] | None = None) -> int:
             getattr(args, k) is None for k in ["quota_gb", "days", "status"]
         ):
             p.error("Specify at least one change.")
-    secret = args.operation in {"create", "user-create", "link", "rotate-token", "panel-url"}
+    secret = args.operation in {
+        "create",
+        "user-create",
+        "link",
+        "rotate-token",
+        "panel-url",
+        "user-dnstt",
+    }
     destination = getattr(args, "save_link", None)
     if secret and not destination and (not sys.stdout.isatty() or args.json):
         p.error("Links require an interactive terminal or explicit --save-link private file.")
@@ -654,14 +668,15 @@ def main(argv: list[str] | None = None) -> int:
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
         )["result"]
         if secret:
-            credentials = (
-                {"panel_url": result["panel_url"], "active": result["active"]}
-                if args.operation == "panel-url"
-                else {
+            if args.operation == "user-dnstt":
+                credentials = result
+            elif args.operation == "panel-url":
+                credentials = {"panel_url": result["panel_url"], "active": result["active"]}
+            else:
+                credentials = {
                     "customer_id": result["customer"]["id"],
                     "subscription_url": result["subscription_url"],
                 }
-            )
             if getattr(args, "info", False):
                 credentials["usage_url"] = result["subscription_url"] + "?format=info"
             if fd is not None:

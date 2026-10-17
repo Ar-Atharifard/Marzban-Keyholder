@@ -10,7 +10,7 @@ from keyholder.models import Customer
 from keyholder.policies import stored_policy
 from keyholder.rendering.information import information_profile, render_information
 from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
-from keyholder.rendering.renderers import select_renderer
+from keyholder.rendering.renderers import URIRenderer, select_renderer
 from keyholder.schemas import ErrorResponse, Policy
 from keyholder.security import hash_token, valid_token, verify_token
 
@@ -115,8 +115,10 @@ async def subscription(
         profiles = apply_cdn_ech(
             profiles, settings.cdn_ech_config, allowed_hosts, settings.cdn_tls_compatibility
         )
+        if not profiles:
+            raise ValueError("No compatible profiles")
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
-        if data.info is not None and output in {None, "uri"}:
+        if data.info is not None and isinstance(renderer, URIRenderer):
             profiles.insert(0, information_profile(data.info, data.status))
         content = renderer.render(profiles)
     except UpstreamUnavailable:

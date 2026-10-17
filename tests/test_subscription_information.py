@@ -16,7 +16,7 @@ from tests.conftest import ADMIN_KEY, LINK, UUID
 from tests.test_api import create
 
 
-@pytest.mark.parametrize("format", ["uri", "xray", "info"])
+@pytest.mark.parametrize("format", ["uri", "xray", "info", "xray-agent"])
 def test_metadata_and_usage_share_original_token(client: TestClient, format: str) -> None:
     app = cast(FastAPI, client.app)
     registered = create(client)
@@ -32,7 +32,11 @@ def test_metadata_and_usage_share_original_token(client: TestClient, format: str
     backend = Backend()
     app.state.backends = {"marzban-default": backend}
     url = "/s/" + str(registered["token"])
-    r = client.get(url + "?format=" + format)
+    r = (
+        client.get(url, headers={"User-Agent": "Keyholder-Xray"})
+        if format == "xray-agent"
+        else client.get(url + "?format=" + format)
+    )
     assert r.status_code == 200 and backend.calls == 1
     assert r.headers["subscription-userinfo"] == info.header()
     assert r.headers["cache-control"] == "no-store"
@@ -83,6 +87,36 @@ def test_limited_account_can_view_information_but_not_configurations(client: Tes
 def test_unknown_usage_is_not_invented(client: TestClient) -> None:
     registered = create(client)
     assert client.get("/s/" + str(registered["token"]) + "?format=info").status_code == 503
+
+
+@pytest.mark.parametrize("cause", ["upstream", "global", "policy"])
+def test_information_record_cannot_hide_an_empty_subscription(
+    client: TestClient, cause: str
+) -> None:
+    app = cast(FastAPI, client.app)
+    registered = create(client)
+
+    class Backend:
+        async def subscription_details(self, username: str) -> SubscriptionData:
+            return SubscriptionData(
+                [] if cause == "upstream" else [LINK], info=SubscriptionInfo(0, 1, 10, 0)
+            )
+
+    app.state.backends = {"marzban-default": Backend()}
+    if cause == "global":
+        app.state.settings.enabled_profiles = ()
+    if cause == "policy":
+        customer = registered["customer"]
+        assert isinstance(customer, dict)
+        client.patch(
+            f"/admin/customers/{customer['id']}",
+            headers={"Authorization": f"Bearer {ADMIN_KEY}"},
+            json={"policy": {"profiles": []}},
+        )
+    url = "/s/" + str(registered["token"])
+    assert client.get(url).status_code == 503
+    assert client.get(url + "?format=xray").status_code == 503
+    assert client.get(url + "?format=info").status_code == 200
 
 
 def test_information_unlimited_escaped_and_bounded() -> None:

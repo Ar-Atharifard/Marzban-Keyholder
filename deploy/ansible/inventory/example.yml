@@ -1,0 +1,37 @@
+all:
+  children:
+    recovery_targets:
+      hosts:
+        recovery-vm:
+          ansible_host: 192.0.2.10
+          ansible_user: ubuntu
+          ansible_port: 22
+      vars:
+        # Explicitly opt in only for a disposable Ubuntu 22.04 VM / empty new VPS.
+        recovery_target_is_disposable: false
+        recovery_environment: rehearsal
+        recovery_bundle: /var/lib/keyholder-recovery/downloaded/bundle
+        recovery_stage: /var/lib/keyholder-recovery/staged
+        # Reviewed original Compose files must be included in the capture inventory.
+        recovery_compose_projects: []
+        # Example: {name: keyholder, files: [/srv/releases/RELEASE/release.json]}
+        recovery_volumes:
+          - name: keyholder_keyholder-data
+            files: [keyholder.db]
+        # Explicitly list only application paths. Never copy /etc as a whole.
+        recovery_rootfs_paths:
+          - etc/keyholder
+          - opt/marzban
+          - opt/braavos-gateway
+          - srv/keyholder
+          - srv/keyholder-releases
+          - usr/local/lib/keyholder-admin
+          - usr/local/lib/keyholder-recovery
+          # Optional DNSTT binary; no files are restored unless captured.
+          - usr/local/libexec/keyholder
+          - usr/local/sbin/keyholder-recovery
+          - var/lib/marzban
+          - var/lib/keyholder-monitor
+          - var/lib/keyholder-management-bot
+        recovery_public_http_checks: []
+        recovery_start_applications: false

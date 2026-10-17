@@ -1,0 +1,89 @@
+---
+- name: Prepare an explicitly disposable recovery target
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Restrict bootstrap to supported empty targets
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '22.04'
+          - ansible_facts.architecture == 'x86_64'
+          - recovery_environment in ['rehearsal', 'production']
+        fail_msg: Use an explicitly selected empty Ubuntu 22.04 VM or new VPS.
+    - name: Check for existing application data
+      ansible.builtin.stat:
+        path: /var/lib/marzban/db.sqlite3
+      register: existing_marzban
+    - name: Refuse bootstrap over an existing service
+      ansible.builtin.assert:
+        that: not existing_marzban.stat.exists
+    - name: Install small host prerequisites
+      ansible.builtin.apt:
+        name: [ca-certificates, python3, restic, curl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Create Docker repository key directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+    - name: Download Docker repository signing key over HTTPS
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+    - name: Configure Docker upstream repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ 'amd64' if ansible_facts.architecture == 'x86_64' else 'arm64' }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/ubuntu jammy stable
+        filename: docker
+        state: present
+    - name: Install Docker and Compose plugin
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        state: present
+        update_cache: true
+    - name: Start Docker on this new target only
+      ansible.builtin.systemd_service:
+        name: docker
+        enabled: true
+        state: started
+    - name: Create private recovery directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - /etc/keyholder
+        - /var/lib/keyholder-recovery
+        - /usr/local/lib/keyholder-admin
+        - /usr/local/lib/keyholder-recovery
+    - name: Install reviewed recovery helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-recovery/{{ item }}'
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [recovery.py, backup_database.py]
+    - name: Install recovery command
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../recovery/keyholder-recovery'
+        dest: /usr/local/sbin/keyholder-recovery
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Explain security activation boundary
+      ansible.builtin.debug:
+        msg: >-
+          Host prerequisites installed. SSH and firewall were not changed.
+          Keep rehearsal VM isolated. Complete the reviewed host-security step
+          before exposing a replacement production host or starting applications.

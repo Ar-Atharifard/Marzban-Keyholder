@@ -78,6 +78,8 @@ def load_config(path: Path) -> dict[str, Any]:
         "swap_warning_percent": 75,
         "load_warning_per_cpu": 1.5,
         "backup_max_age_hours": 26,
+        "offsite_backup_status_file": "",
+        "offsite_backup_max_age_hours": 24,
         "expiry_warning_days": [7, 3, 1],
         "quota_warning_percent": [80, 95],
         "terminal_reminder_hours": 24,
@@ -253,6 +255,26 @@ def backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
         age = "missing" if newest == 0 else f"{age_hours:.1f} hours old"
         return {"backup:age": f"Latest recovery snapshot is {age}"}
     return {}
+
+
+def offsite_backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
+    path = config.get("offsite_backup_status_file", "")
+    if not path:
+        return {}
+    try:
+        status = json.loads(Path(path).read_text())
+        captured = dt.datetime.fromisoformat(status["capture_started_at"])
+        uploaded = dt.datetime.fromisoformat(status["uploaded_at"])
+        if captured.tzinfo is None or uploaded.tzinfo is None:
+            raise ValueError("UTC timestamps required")
+        if not captured.timestamp() <= uploaded.timestamp() <= now + 300:
+            raise ValueError("Invalid completion order")
+        maximum_age = float(config.get("offsite_backup_max_age_hours", 24)) * 3600
+        if now - captured.timestamp() <= maximum_age:
+            return {}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return {"backup:offsite": "Encrypted off-server recovery backup is missing, invalid or overdue"}
 
 
 def baseline_by_user(db: sqlite3.Connection, current_hour: str) -> dict[int, float]:
@@ -466,6 +488,7 @@ RULES = {
     "service.http": "HTTP probe failed; inspect origin, TLS, gateway and upstream.",
     "service.tcp": "TCP listener unavailable; inspect the owning service.",
     "backup.age": "Recovery snapshot overdue; run system backup and verify integrity.",
+    "backup.offsite": "Offsite backup overdue; inspect recovery service, storage and credentials.",
     "marzban.usage": "Usage DB unavailable; inspect permissions and database health.",
     "marzban.users": "Inventory below expected minimum; inspect the panel inventory.",
 }
@@ -483,8 +506,10 @@ def rule_for_key(key: str) -> str:
 
 
 def severity_for_key(key: str) -> str:
-    if key.endswith(":critical") or key.startswith(
-        ("container:", "systemd:", "http:", "tcp:", "marzban:")
+    if (
+        key == "backup:offsite"
+        or key.endswith(":critical")
+        or key.startswith(("container:", "systemd:", "http:", "tcp:", "marzban:"))
     ):
         return "critical"
     return "warning"
@@ -598,6 +623,7 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     alerts.update(resource_alerts(config))
     alerts.update(network_alerts(config))
     alerts.update(backup_alerts(config, now.timestamp()))
+    alerts.update(offsite_backup_alerts(config, now.timestamp()))
     try:
         per_user, counters = user_alerts(config, previous, now)
         alerts.update(per_user)
@@ -677,9 +703,7 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
                     notification_ids.pop(key, None)
                 for key in new.keys() & terminal.keys():
                     terminal[key]["last_sent"] = now.timestamp()
-            # Business warnings (quota, expiry, account status and traffic) must not
-            # suppress the infrastructure heartbeat. Otherwise Better Stack reports
-            # the whole VPS down when one customer merely approaches a quota.
+            # Customer warnings must not make the host heartbeat report an outage.
             if infrastructure_healthy(alerts):
                 heartbeat(env)
         except Exception as error:

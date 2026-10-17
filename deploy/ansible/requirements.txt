@@ -1,0 +1,2 @@
+# Controller only: Python 3.12+, no Ansible agent on the VPS.
+ansible-core==2.20.1

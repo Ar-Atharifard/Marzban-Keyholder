@@ -89,6 +89,11 @@ protocol while preserving credentials and other selections.
 .BR "user usage USERNAME" ", " "user reset-usage USERNAME --confirm"
 Read plan and traffic state, or explicitly reset used traffic.
 .TP
+.B user dnstt USERNAME --save-link FILE
+Export a private profile URI and public helper settings for a Marzban user with
+the dedicated DNSTT inbound selected. Requires configured DNSTT host metadata.
+The desktop client still needs a separately running DNSTT helper.
+.TP
 .B customer list [--limit N] [--offset N] [--history]
 List canonical customers without bearer tokens. History includes revoked registrations.
 .TP

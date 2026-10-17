@@ -160,6 +160,7 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
         "user-inbounds",
         "user-usage",
         "user-reset-usage",
+        "user-dnstt",
     }:
         return asyncio.run(panel_operation(operation, args))
     if operation == "doctor":
@@ -450,6 +451,46 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                 },
             )
         user = await call("GET", path)
+        if operation == "user-dnstt":
+            import base64
+
+            from keyholder.rendering.profiles import Profile
+            from keyholder.rendering.renderers import URIRenderer
+
+            transport = args["dnstt"]
+            tag = transport["inbound_tag"]
+            if user["status"] != "active" or tag not in user.get("inbounds", {}).get("vless", []):
+                raise OperatorError("DNSTT is not enabled for this active user in Marzban.")
+            core = await call("GET", "/api/core/config")
+            inbound = next((x for x in core["inbounds"] if x.get("tag") == tag), None)
+            if not inbound or inbound.get("listen") != "127.0.0.1":
+                raise OperatorError("DNSTT requires a dedicated loopback inbound.")
+            stream = inbound.get("streamSettings", {})
+            if inbound.get("protocol") != "vless" or stream.get("security") != "reality":
+                raise OperatorError("Unsupported DNSTT inner protocol.")
+            reality = stream["realitySettings"]
+            if not reality.get("publicKey"):
+                raise OperatorError("DNSTT public REALITY key is missing from core configuration.")
+            proxy = user["proxies"]["vless"]
+            profile = Profile(
+                kind="tcp_reality",
+                name="DNSTT | " + name,
+                address="127.0.0.1",
+                port=7000,
+                transport="tcp",
+                security="reality",
+                uuid=proxy["id"],
+                flow=proxy.get("flow", ""),
+                sni=reality["serverNames"][0],
+                public_key=reality["publicKey"],
+                short_id=reality["shortIds"][0],
+                fingerprint="chrome",
+            )
+            return {
+                "username": name,
+                "profile_uri": base64.b64decode(URIRenderer().render([profile])).decode().strip(),
+                "transport": {k: transport[k] for k in ("domain", "public_key", "doh_url")},
+            }
         if operation == "user-update":
             body = {}
             if args.get("quota_gb") is not None:

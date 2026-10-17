@@ -1,0 +1,162 @@
+---
+- name: Restore a verified bundle onto a deliberately selected empty target
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require explicit recovery scope
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '22.04'
+          - recovery_environment in ['rehearsal', 'production']
+          - recovery_environment != 'production' or (recovery_security_validated | default(false) | bool)
+          - recovery_stage.startswith('/var/lib/keyholder-recovery/')
+          - recovery_bundle.startswith('/var/lib/keyholder-recovery/')
+    - name: Refuse restoration over live Marzban data
+      ansible.builtin.stat:
+        path: /var/lib/marzban/db.sqlite3
+      register: existing_db
+    - name: Guard database overwrite
+      ansible.builtin.assert:
+        that: not existing_db.stat.exists
+    - name: Verify and stage bundle without writing into the live filesystem
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/lib/keyholder-recovery/recovery.py
+          - stage
+          - --bundle
+          - '{{ recovery_bundle }}'
+          - --destination
+          - '{{ recovery_stage }}'
+      changed_when: true
+    - name: Read verified manifest privately
+      ansible.builtin.slurp:
+        src: '{{ recovery_bundle }}/manifest.json'
+      register: manifest_file
+      no_log: true
+    - name: Parse manifest privately
+      ansible.builtin.set_fact:
+        recovery_manifest: '{{ manifest_file.content | b64decode | from_json }}'
+      no_log: true
+    - name: Validate explicitly permitted application roots
+      ansible.builtin.assert:
+        that:
+          - item is match('^(etc/keyholder|opt/marzban|opt/braavos-gateway|srv/keyholder|srv/keyholder-releases|usr/local/lib/keyholder-admin|usr/local/lib/keyholder-recovery|usr/local/libexec/keyholder|usr/local/sbin/keyholder-recovery|var/lib/marzban|var/lib/keyholder-monitor|var/lib/keyholder-management-bot)$')
+      loop: '{{ recovery_rootfs_paths }}'
+    - name: Create destination application directories
+      ansible.builtin.file:
+        path: '/{{ item.path | regex_replace("^rootfs/", "") }}'
+        state: directory
+        owner: '{{ item.uid }}'
+        group: '{{ item.gid }}'
+        mode: '{{ "%04o" | format(item.mode) }}'
+      loop: '{{ recovery_manifest.directories }}'
+      when:
+        - item.path.startswith('rootfs/')
+        - (item.path | regex_replace('^rootfs/', '')) is match('^(' + (recovery_rootfs_paths | join('|')) + ')(/|$)')
+      no_log: true
+    - name: Restore only allowlisted application files
+      ansible.builtin.copy:
+        src: '{{ recovery_stage }}/{{ item.path }}'
+        dest: '/{{ item.path | regex_replace("^rootfs/", "") }}'
+        remote_src: true
+        owner: '{{ item.uid }}'
+        group: '{{ item.gid }}'
+        mode: '{{ "%04o" | format(item.mode) }}'
+      loop: '{{ recovery_manifest.files }}'
+      when:
+        - item.path.startswith('rootfs/')
+        - (item.path | regex_replace('^rootfs/', '')) is match('^(' + (recovery_rootfs_paths | join('|')) + ')(/|$)')
+      no_log: true
+    - name: Create application data volume
+      ansible.builtin.command:
+        argv: [docker, volume, create, '{{ item.name }}']
+      loop: '{{ recovery_volumes }}'
+      changed_when: true
+    - name: Restore operator CLI link to its captured dispatcher
+      ansible.builtin.file:
+        src: /usr/local/lib/keyholder-admin/cli.py
+        dest: /usr/local/bin/keyholder
+        state: link
+    - name: Discover volume locations on this host
+      ansible.builtin.command:
+        argv: [docker, volume, inspect, '{{ item.name }}']
+      loop: '{{ recovery_volumes }}'
+      register: volume_locations
+      changed_when: false
+    - name: Require empty destination volumes before restoration
+      ansible.builtin.find:
+        paths: '{{ (item.stdout | from_json)[0].Mountpoint }}'
+        hidden: true
+        recurse: true
+      loop: '{{ volume_locations.results }}'
+      register: existing_volume_files
+    - name: Refuse volume overwrite
+      ansible.builtin.assert:
+        that: item.matched == 0
+      loop: '{{ existing_volume_files.results }}'
+    - name: Restore declared volume data preserving captured ownership
+      ansible.builtin.include_tasks: restore-volume.yml
+      loop: '{{ volume_locations.results }}'
+      loop_control:
+        loop_var: volume
+    - name: Load exact captured container images
+      ansible.builtin.command:
+        argv: [docker, load, --input, '{{ recovery_stage }}/{{ item.archive }}']
+      loop: '{{ recovery_manifest.images }}'
+      changed_when: true
+    - name: Create private immutable-image overrides
+      ansible.builtin.template:
+        src: '{{ playbook_dir }}/../templates/image-override.json.j2'
+        dest: '{{ recovery_stage }}/{{ item.name }}.override.json'
+        owner: root
+        group: root
+        mode: '0600'
+      loop: '{{ recovery_compose_projects }}'
+      no_log: true
+    - name: Validate restored Compose configuration without starting services
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', item.name]
+          + (item.files | map('regex_replace', '^(.*)$', '--file=\1') | list)
+          + ['--file=' + recovery_stage + '/' + item.name + '.override.json', 'config', '--quiet'] }}
+      loop: '{{ recovery_compose_projects }}'
+      changed_when: false
+      no_log: true
+    - name: Require explicit validated startup and complete project inventory
+      ansible.builtin.assert:
+        that:
+          - recovery_compose_projects | length > 0
+          - recovery_addresses_reviewed | default(false) | bool
+      when: recovery_start_applications | bool
+    - name: Start only the restored application projects with local images
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', item.name]
+          + (item.files | map('regex_replace', '^(.*)$', '--file=\1') | list)
+          + ['--file=' + recovery_stage + '/' + item.name + '.override.json',
+          'up', '--detach', '--no-build', '--pull', 'never'] }}
+      loop: '{{ recovery_compose_projects }}'
+      when: recovery_start_applications | bool
+      changed_when: true
+      no_log: true
+    - name: Validate local Keyholder health when applications were started
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        status_code: 200
+        use_proxy: false
+      register: restored_health
+      retries: 12
+      delay: 5
+      until: restored_health.status == 200
+      when: recovery_start_applications | bool
+    - name: Explain final cutover gate
+      ansible.builtin.debug:
+        msg: >-
+          Data and pinned images restored. Bots, monitoring and backup timers
+          remain inactive. Validate panel, credentials, routes, IPv4/IPv6 and
+          subscriptions before DNS cutover. Never activate two management bots
+          using the same token. No SSH or firewall rules were restored.

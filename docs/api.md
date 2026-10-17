@@ -1,258 +1,132 @@
 # API reference
 
-This documents the application API. Public `/s/` uses the configured subscription
-base. Keep admin and health routes private behind your ingress or SSH access.
+Expose only `/s/` publicly; keep `/admin/` and `/health` private. Admin requests
+require `Authorization: Bearer <KEYHOLDER_ADMIN_KEY>` (one operator key, no roles).
+Unauthorized requests return 401 with `WWW-Authenticate: Bearer`.
 
-## Authentication and response conventions
+Responses use `Cache-Control: no-store`, `nosniff` and `Referrer-Policy: no-referrer`.
+Errors are `{"detail":"message"}`; validation returns `{"detail":"Invalid request"}`
+without echoing inputs. Never log bearer paths, credentials or response bodies.
 
-Admin endpoints require `Authorization: Bearer <KEYHOLDER_ADMIN_KEY>`. Missing or
-incorrect credentials return 401 with `WWW-Authenticate: Bearer`. There is one
-operator key, without roles or per-administrator audit identity.
+## Schemas
 
-Subscription tokens are bearer credentials in `/s/{token}`. They contain 256 random
-bits, are stored as SHA-256 hashes plus authenticated encrypted ciphertext.
-An authenticated subscription-retrieval endpoint recovers the same URL; listing never reveals it. Protect URLs from access logs, shell history and
-analytics. Mapping/policy changes preserve the URL; rotation invalidates it.
-
-All responses have `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and
-`Referrer-Policy: no-referrer`. Error bodies use `{"detail":"message"}`. Request
-validation errors return `{"detail":"Invalid request"}` without echoing inputs.
-
-## Customer request and response schemas
-
-`MappingInput`:
-
-| Field | Rules |
+| Type | Fields and rules |
 |---|---|
-| `backend_id` | Default `marzban-default`; 1–64 ASCII letters, digits, `_` or `-` |
-| `upstream_username` | Required; 3–32 ASCII letters, digits or `_` |
+| `MappingInput` | `backend_id` defaults to `marzban-default` (1–64 ASCII letters/digits/`_-`); required `upstream_username` (3–32 letters/digits/`_`) |
+| `CustomerView` | `id`, private `name`, nullable `telegram`/`phone`, `status`, `policy`, UTC `created_at`/`updated_at`/`revoked_at`, `mapping`; no token/hash |
+| `TokenResult` | `customer` (CustomerView), `token`, `subscription_url` |
+| `Policy` | `profiles` list, at most eleven names; defaults retain original five families; empty list allowed |
 
-Adapters are registered from server-owned configuration. A backend row does not automatically
-enable a provider. Mapping changes do not contact upstream providers or validate user existence;
-missing users or permission failures surface when fetching the subscription.
+IDs are opaque UUID strings. Unknown fields/profile names are rejected. Names are
+private display metadata, not upstream usernames. Telegram/phone are nullable and
+unique when present; handles normalize to lowercase `@name`, phones to international
+`+digits`. Contacts never enter subscription output or Marzban.
 
-`Policy` has one field, `profiles`: a list of at most eleven supported profile names.
-The defaults retain the original five profiles for compatibility. An empty list is allowed
-and disables compatible output in legacy policy mode, producing 503.
-With `KEYHOLDER_PROFILE_SOURCE=upstream`: supported current upstream
-selections control output; stored policy is retained for compatibility. Supported choices are:
+Supported families: `tcp_reality`, `xhttp_reality`, `grpc_cdn`, `tcp_reality_ipv6`,
+`shadowsocks_ipv6`, `ws_tls_cdn`, `xhttp_tls_cdn`, `trojan_grpc_cdn`,
+`vmess_httpupgrade_cdn`, `trojan_reality_ipv6`, `trojan_xhttp_cdn`.
+Legacy stored policies retain supported choices and omit obsolete fields. With
+`PROFILE_SOURCE=upstream`, supported provider selections control output instead;
+the global enabled-family/CDN restrictions always apply.
 
-- `tcp_reality`
-- `xhttp_reality`
-- `grpc_cdn`
-- `tcp_reality_ipv6`
-- `shadowsocks_ipv6`
-- `ws_tls_cdn`
-- `xhttp_tls_cdn`
-- `trojan_grpc_cdn`
-- `vmess_httpupgrade_cdn`
-- `trojan_reality_ipv6`
-- `trojan_xhttp_cdn`
+## Routes
 
-Unknown request fields/profile names are rejected. `ech_enabled`,
-`include_base_cdn`, `xhttp_cdn` and `ws_cdn` are no longer accepted API inputs.
-Legacy stored policies are read conservatively: supported selections remain, old
-fields are omitted, and new families are not added automatically.
+All `/admin` routes require the bearer key.
 
-`CustomerView` contains `id`, private `name`, nullable `telegram` and `phone`,
-`status`, `policy`, `created_at`, `updated_at`, `revoked_at` and `mapping`. IDs are
-opaque strings generated as UUIDs. Timestamps
-are ISO datetime values; `revoked_at` is null until revocation. SQLite may serialize
-timestamps internally without an offset; API views normalize them to UTC. No token
-hash or raw token is included in this view.
+| Method and path | Input → success |
+|---|---|
+| GET `/health` | No auth → 200 `{"status":"ok"}`; DB connectivity only |
+| GET `/s/{token}` | `format=uri` (default), `xray`, or `info`; details below |
+| GET `/admin/backends` | → 200 list of `id`, `provider`, `config_ref`, `registered` |
+| POST `/admin/backends/register` | No body → 200 same list; idempotently registers configured metadata |
+| POST `/admin/customers` | MappingInput + required `name` (1–200), optional contacts/policy → 201 TokenResult |
+| GET `/admin/customers` | `offset` ≥0 (default 0), `limit` 1–100 (default 50) → 200 CustomerView array |
+| GET `/admin/customers/{id}` | → 200 CustomerView |
+| GET `/admin/customers/{id}/subscription` | → 200 TokenResult with existing URL; no mutation |
+| PATCH `/admin/customers/{id}` | Optional `name`, `telegram`, `phone`, `status`, `policy` → 200 CustomerView |
+| PUT `/admin/customers/{id}/mapping` | MappingInput replaces both mapping fields → 200 CustomerView |
+| POST `/admin/customers/{id}/rotate-token` | No body → 200 TokenResult; old URL invalid immediately |
 
-`TokenResult` contains `customer` (a CustomerView), `token` and `subscription_url`.
-Registration, explicit rotation and authenticated retrieval return it.
+Registration attaches local identity to an existing upstream account; the API does
+not provision panel users. It atomically returns the same canonical identity/token
+for repeated backend/account registration (201 retained for compatibility); it does
+not update metadata on repeated calls. Listing is ordered by creation/ID, contains
+no total count and never exposes URLs. Provisioning/inventory is in the CLI.
 
-## Endpoints
+PATCH omission leaves fields unchanged; explicit null clears contacts, not name.
+A supplied policy replaces the entire policy (`{}` restores compatibility defaults).
+Statuses: `active`, `disabled`, `revoked`. Revocation is terminal; later PATCH,
+remapping and rotation return 409. Local disable/revoke stops subscription delivery,
+not proxy credentials already downloaded; enforce access in the upstream panel.
 
-### GET `/health`
+Mappings do not verify upstream existence; delivery detects unavailable accounts.
+Unknown backend is 422, another registered owner of the target mapping is 409.
+Tokens/URLs survive remapping. Configured provider identity cannot be overwritten
+under an existing backend ID: register a new ID and remap explicitly.
 
-Unauthenticated. Success: 200, `{"status":"ok"}`. Checks database connectivity
-only; it does not log in to Marzban or prove subscription delivery.
+Retrieval/rotation work for disabled identities, but delivery remains disabled.
+Revoked/legacy-unrecoverable tokens return 409. Missing/broken vault key returns
+503; restore it rather than creating another identity. Tokens have 256 random bits,
+a SHA-256 lookup hash and authenticated encrypted ciphertext. They have no scheduled
+expiry; status/quota/expiry and infrastructure still affect delivery.
 
-### GET `/s/{token}`
-
-No admin authorization. `format=uri` returns `text/plain`: standard base64 of
-newline-separated proxy URIs, with a final newline before encoding. `format=xray`
-returns `application/json`: an array of individual Xray client configurations,
-each with remarks, a loopback SOCKS inbound and one proxy outbound. These formats
-include supported profiles selected by Marzban in production; legacy policy mode
-uses the stored selection. The configured CDN allowlist applies in either mode.
-
-When validated usage metadata exists, URI output begins with one deliberately
-unusable informational record because common clients ignore the standard header.
-Its name shows remaining/total traffic and time, and it points only to `127.0.0.1:1`.
-It must not be selected. Its failed delay result is expected. Xray JSON output
-does not include this record, and every real profile remains unchanged.
-
-With no format, URI output is the default. An opt-in `Keyholder-Xray` User-Agent
-marker selects Xray JSON. Other client names/versions are not guessed. Invalid
-format values return 422.
-
-Only active local and upstream customers can receive output. Unsupported/malformed
-links are omitted. Empty compatible output returns 503. XHTTP `extra` is omitted
-from the URI query and JSON `xhttpSettings`, while allowed host/path/mode fields
-are retained. Legacy ECH is not generated. Optional trusted native CDN ECH is added by delivery configuration (see [configuration](configuration.md)); upstream ECH remains ignored. This processing never rewrites panel inbounds.
-
-### POST `/admin/customers`
-
-Create the Marzban user separately first. This endpoint atomically registers or retrieves only local identity
-and mapping. A database constraint guarantees one canonical registration per
-backend/username, including concurrent calls. Body combines MappingInput with
-required private `name` (1–200 characters), nullable `telegram` and `phone`, and
-optional `policy`. Telegram and phone are administrator-only and unique when
-present. Telegram usernames are stored lowercase with `@`; phone numbers are
-stored in international `+digits` form. Example:
+Example registration:
 
 ```json
-{
-  "name": "Example customer",
-  "telegram": "@example_customer",
-  "phone": "+989121234567",
-  "upstream_username": "alice",
-  "backend_id": "marzban-default",
-  "policy": {
-    "profiles": ["xhttp_reality", "tcp_reality", "grpc_cdn", "tcp_reality_ipv6", "shadowsocks_ipv6"]
-  }
-}
+{"name":"Example customer","upstream_username":"alice","telegram":"@example_customer","phone":null}
 ```
 
-Success: 201, TokenResult, including repeated registration for compatibility.
-Repeated calls return the same ID/token and do not rename or update the customer.
-Unknown backend: 422. Revoked or legacy-unrecoverable registration: 409. Broken
-vault key: 503; restore the key rather than minting another identity.
+## Subscription output
 
-### GET `/admin/customers`
+- **URI:** `text/plain`, standard base64 of newline-separated URIs, final newline
+  inside encoding. Optional usage information adds one leading informational record
+  at `127.0.0.1:1`; it is deliberately unusable, shows remaining/total traffic/time
+  and must not be selected. Its failed delay result is expected.
+- **Xray:** `application/json`, array of individual client configs with remarks,
+  loopback SOCKS inbound and proxy outbound; no informational record. Explicit
+  `format=xray` or `Keyholder-Xray` User-Agent opts in; other apps are not guessed.
+- **Info:** `?format=info` is script-free HTML showing current usage, remaining time,
+  allowance, status and UTC expiry. Limited/expired upstream accounts may view it;
+  locally disabled/revoked tokens cannot. Missing statistics returns 503. No proxy
+  credentials or external assets; restrictive CSP and no caching/referrers.
 
-Query: `offset` defaults to 0, minimum 0; `limit` defaults to 50, range 1–100.
-Success: 200, array of CustomerView, ordered by creation time then ID. There is no
-total-count field or panel-wide user listing. Token retrieval uses the endpoint below.
+Only active local/upstream accounts receive configurations. Invalid/malformed or
+unsupported profiles are omitted; no compatible output returns 503. XHTTP `extra`
+is stripped from URI/JSON transport output, not unrelated fields. Certificate
+verification remains enabled; upstream ECH is ignored and trusted native ECH is
+controlled by [settings](getting-started.md#settings). Delivery never edits inbounds.
 
-### GET `/admin/customers/{customer_id}`
+When available, `subscription-userinfo` contains byte counters and Unix expiry:
+`upload=0; download=1024; total=4096; expire=1893456000`. Zero total/expiry means
+unlimited/no expiry. Marzban combined usage is represented as download, upload zero.
+It refreshes on fetch; clients may ignore it. `keyholder customer link USER --info`
+retrieves the same URL with `format=info` privately.
 
-Success: 200, CustomerView. Missing customer: 404.
-
-### GET `/admin/customers/{customer_id}/subscription`
-
-Admin authentication required. Success: 200, TokenResult with the existing URL.
-No mutation or implicit rotation. Missing customer: 404; revoked or legacy token
-without ciphertext: 409; missing/wrong encryption key: 503. Disabled customers
-can retrieve their URL, but delivery remains disabled.
-
-### PATCH `/admin/customers/{customer_id}`
-
-Optional fields: `name`, `telegram`, `phone`, `status`, `policy`. Omitted fields
-remain unchanged. Explicit `null` clears Telegram or phone; name cannot be null.
-Duplicate contacts return 409. Status is `active`, `disabled` or `revoked`.
-Example: `{"telegram":"@new_handle","phone":null}`.
-
-**A supplied policy replaces the complete policy; it is not merged.**
-In production Marzban-authority mode it does not override panel inbound selections.
-`{"policy":{}}` replaces it with defaults. To select only gRPC, send
-`{"policy":{"profiles":["grpc_cdn"]}}`.
-
-Success: 200, CustomerView. Revocation records a timestamp and is terminal: all
-later PATCH, mapping and token-rotation requests return 409. Disable/revoke stops
-Keyholder delivery only; downloaded proxy credentials remain usable until the
-upstream account is changed separately.
-
-### PUT `/admin/customers/{customer_id}/mapping`
-
-Body: MappingInput. Both mapping fields are replaced; omitting `backend_id`
-selects its default. Success: 200, CustomerView. Subscription token and URL remain
-unchanged. Unknown backend: 422. Revoked customer or target account already registered: 409.
-
-### POST `/admin/customers/{customer_id}/rotate-token`
-
-No request body. Success: 200, TokenResult. The previous token becomes invalid
-immediately; there is no grace period. Disabled customers can rotate but cannot
-receive output until re-enabled. Revoked customers return 409.
-
-### Retired / unavailable APIs
-
-`GET/PUT /admin/settings/ech` returns 404. There are no delete-customer, upstream
-provisioning, node-management, billing, plan or application-settings endpoints.
-`/docs`, `/redoc` and `/openapi.json` are disabled over HTTP. Generate an offline
-OpenAPI document with `scripts/export_openapi.py`; it needs no production secrets
-and neither creates tables nor starts the application lifespan.
-
-## Error reference
+## Errors and limits
 
 | Status | Meaning |
 |---|---|
-| 401 | Missing/incorrect admin authentication |
-| 404 | Missing customer; invalid/unknown/disabled/revoked subscription; inactive upstream user |
-| 409 | Revoked identity, canonical mapping conflict or unrecoverable legacy token |
-| 422 | Invalid body/query or unknown backend |
-| 429 | Rate limit exceeded; `Retry-After: 60` |
-| 502 | Upstream fetch/auth/schema/permission failure or total deadline exceeded |
-| 503 | Missing runtime adapter, no compatible profiles or unavailable token vault |
-| 500 | Unexpected application/database failure; sanitized response |
+| 401 | Missing/incorrect admin key |
+| 404 | Missing customer or unknown/disabled/revoked subscription; inactive upstream |
+| 409 | Revoked identity, mapping/contact conflict, backend mismatch or legacy token |
+| 422 | Invalid input/format or unknown backend |
+| 429 | Rate limit; `Retry-After: 60` |
+| 502 | Upstream fetch/auth/schema/permission failure or total deadline |
+| 503 | Missing adapter, no compatible output or unavailable vault/statistics |
+| 500 | Sanitized unexpected application/DB failure |
 
-Upstream 404/403 responses currently become 502, not a local customer-not-found
-response. The adapter cannot distinguish a missing upstream account from other
-read failures through the public API.
+Marzban read HTTP 403/404 currently becomes 502, not local customer-not-found.
+Subscription rate limits use token hashes; admin limits use immediate peer IP,
+which can be shared behind a gateway. Forwarded headers do not change identity.
+Limits are per process: one worker only. No stale subscriptions are served.
 
-Subscription rate limits are per token hash. Admin limits are per immediate peer,
-which can be shared behind a reverse proxy. Forwarded IP headers do not change
-identity. Rate limiting is per process; run exactly one worker.
+Marzban uses form login `/api/admin/token` and bearer GET `/api/user/{username}`;
+status/links/usage are validated, at most 128 links/1 MiB, redirects refused and
+HTTPS verified. Password login gets one refresh/retry; static tokens do not refresh.
+The configured deadline covers the full login/fetch sequence. HTTP-export providers
+are read-only and must enforce availability; see [provider boundary](development.md).
 
-## Integration contract
-
-Marzban login: `POST /api/admin/token` with form username/password; response includes
-`access_token`. Read: `GET /api/user/{username}` with bearer authentication; Keyholder
-requires `status == "active"` and `links: list[str]` (maximum 128 entries).
-Static tokens are not refreshed. Password-login tokens get one refresh/retry.
-Redirects are refused, HTTPS is verified, responses are bounded to 1 MiB and the
-entire login/fetch sequence has a configured deadline. No stale output is served.
-
-The installed Marzban OpenAPI was verified as 0.8.4. Guarded private database-clone
-checks on October 11, 2026 rendered all ten selected profiles for both current
-users in both formats. Installed Xray accepted all client configs and each profile
-completed a real certificate-verified HTTPS request, including Titan CDN and IPv6.
-XHTTP `extra` was omitted from both output forms.
-
-The owner-approved token rotation and duplicate retirement are documented in
-`IDENTITY-AND-AUTHORITY.md`. Future upgrades preserve the replacement URLs.
-The gRPC public destination stays on 443; existing Titan/Sealord origin-port rules
-use 2053, retained by Nginx. New CDN templates use Titan only. VPS validation does
-not guarantee every Iranian ISP or client version; refresh the same URL and test
-on the actual client without sharing its credential.
-
-The October 12 streaming expansion adds `trojan_xhttp_cdn` without changing existing
-endpoints, subscription paths, tokens, defaults or legacy output fixtures. VLESS
-streaming XHTTP uses the existing `xhttp_tls_cdn` family. Multiple Marzban host
-entries can produce multiple configurations in the same family.
-
-## Provider metadata endpoints
-
-`GET /admin/backends` lists configured adapters as `id`, `provider`, `config_ref`
-and `registered`. No source URLs or credentials are returned.
-`POST /admin/backends/register` explicitly registers configured metadata. It is
-idempotent; existing provider/config-reference mismatches return 409 and are not
-overwritten. Both endpoints require the same administrator bearer authentication.
-Server configuration, not this API, controls adapter credentials and URLs.
-
-### Subscription usage information
-
-Successful subscriptions include `subscription-userinfo` when the provider supplies
-usage: `upload=0; download=1024; total=4096; expire=1893456000`. Counters are bytes;
-expiry is Unix seconds. Zero total/expiry means unlimited/no expiry. Marzban supplies
-combined traffic usage, represented as download with upload zero, not a directional
-breakdown. The figures follow Marzban's current quota/reset accounting and refresh
-when the subscription is fetched. Client support for displaying headers varies.
-
-`GET /s/{token}?format=info` returns a small HTML page with remaining traffic, used
-traffic, allowance, account status, remaining time and UTC expiry. It uses the same
-bearer token and current upstream data. Limited/expired upstream accounts may view
-information while configuration delivery remains unavailable. Disabled/revoked
-Keyholder tokens remain denied. Missing provider statistics return 503 rather than
-inventing a quota. No configurations, credentials, scripts or external assets are
-included. The page uses no-store, no-referrer and a restrictive content security
-policy. It adds no dummy profile and never changes the subscription URL.
-
-Administrators can retrieve the usage-page URL with `keyholder customer link USER --info`
-(or append `?format=info` to the existing subscription URL). This retrieves the
-existing canonical identity; it does not create a new subscription. As with link
-retrieval, use an interactive terminal or explicit private `--save-link` file.
+`/docs`, `/redoc`, `/openapi.json` and retired `/admin/settings/ech` are unavailable.
+Generate offline OpenAPI with `scripts/export_openapi.py` (no production secrets,
+DB creation or lifespan startup). No delete-customer, billing, node-management,
+plan, provisioning or application-settings API is implemented.

@@ -1,0 +1,7 @@
+{
+  "services": {
+{% for image in recovery_manifest.images | selectattr('project', 'equalto', item.name) %}
+    {{ image.service | to_json }}: {"image": {{ image.id | to_json }}}{% if not loop.last %},{% endif %}
+{% endfor %}
+  }
+}

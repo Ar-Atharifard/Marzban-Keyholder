@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly recovery repository integrity sampling and compaction
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00 UTC
+Persistent=true
+Unit=keyholder-recovery-maintenance.service
+
+[Install]
+WantedBy=timers.target

@@ -66,6 +66,7 @@ Other runtimes need a separate host dispatcher, not API contract changes.
 | Provision user with private identity | `keyholder user create customer_001 --name 'Alice Example' --telegram @alice --phone +989121234567 --quota-gb 20 --days 30 --protocols vless trojan` |
 | Update plan / traffic | `keyholder user update alice --quota-gb 30 --days 30`, `keyholder user usage alice` |
 | Explicit usage reset | `keyholder user reset-usage alice --confirm` |
+| Export enabled DNSTT desktop profile | `keyholder user dnstt alice --save-link ./alice-dnstt.json` |
 | Select protocol inbounds | `keyholder user inbounds alice --protocol trojan --tags 'TROJAN TLS'` |
 | Update private identity / clear contact | `keyholder customer update customer_001 --name 'Alice Example' --telegram @alice`, `keyholder customer update customer_001 --clear-phone` |
 | Rename / remap without URL rotation | `keyholder customer rename customer_001 'Alice'`, `keyholder customer remap customer_001 replacement` |

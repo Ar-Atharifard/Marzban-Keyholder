@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted off-server recovery backup
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=keyholder-recovery.service
+
+[Install]
+WantedBy=timers.target

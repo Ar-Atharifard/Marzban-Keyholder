@@ -18,7 +18,7 @@ for upstreams across untrusted networks. Never commit this file.
 
 Set `KEYHOLDER_ALLOWED_CDN_HOSTS` if restricting CDN delivery. Keep
 `KEYHOLDER_PROFILE_SOURCE=upstream` to follow current supported provider selections.
-See configuration/providers for multiple panels or HTTP subscription sources.
+See Settings below for multiple panels or HTTP subscription sources.
 
 ## Local development
 
@@ -79,3 +79,50 @@ For Marzban, create `alice` in the panel first or use the CLI provisioning comma
 with explicit quota and expiry. For HTTP sources, its configured account endpoint
 must already exist. Link commands require a terminal or explicit private output
 file. Repeated registration returns the same identity and URL.
+
+## Settings
+
+All names below use the `KEYHOLDER_` prefix. Environment overrides `.env`;
+collections are JSON, not comma-separated strings. `.env.example` and
+`src/keyholder/config.py` define the complete accepted settings and validation.
+
+| Setting | Purpose / default |
+|---|---|
+| `ADMIN_KEY` | Required bearer secret, at least 32 characters |
+| `TOKEN_ENCRYPTION_KEY` | Fernet key; preserve with DB to retrieve existing URLs |
+| `DATABASE_URL` | `sqlite:///./data/keyholder.db`; Compose uses `/data/keyholder.db` |
+| `PUBLIC_BASE_URL` | Permanent public HTTPS subscription hostname |
+| `MARZBAN_URL` | Legacy single panel, default `http://127.0.0.1:8000` |
+| `MARZBAN_TOKEN` or `MARZBAN_USERNAME`/`MARZBAN_PASSWORD` | Static bearer or refreshable login |
+| `BACKENDS` | Explicit provider JSON list; empty uses legacy Marzban settings |
+| `PROFILE_SOURCE` | Set `upstream`; legacy default `policy`, alias `marzban` supported |
+| `ENABLED_PROFILES` | Supported families allowed globally; `[]` disables output |
+| `ALLOWED_CDN_HOSTS`, `ALLOWED_CDN_NETWORKS` | Trusted CDN hostnames and edge CIDRs |
+| `CDN_ECH_CONFIG` | Optional trusted dynamic ECH lookup; empty disables |
+| `CDN_TLS_COMPATIBILITY` | False by default; prefer ordinary TLS with labelled ECH alternatives |
+| `UPSTREAM_TIMEOUT` | Entire upstream/login deadline, 10 seconds (1–60) |
+| `RATE_LIMIT_PER_MINUTE` | Per-process limit, 60; run one worker |
+
+Example multiple providers (replace credentials privately):
+
+```dotenv
+KEYHOLDER_BACKENDS=[{"id":"west","provider":"marzban","config_ref":"west","url":"https://panel.example.com","username":"admin","password":"replace-privately"},{"id":"export","provider":"http_subscription","config_ref":"export","url":"https://export.example.com/accounts/{username}","token":"replace-privately"}]
+KEYHOLDER_PROFILE_SOURCE=upstream
+```
+
+HTTP templates require exactly one `{username}` outside the authority. No URL
+userinfo, redirects or caller-selected hosts. Account references retain the API's
+3–32 ASCII letters/digits/underscores. Register configured metadata explicitly
+with `keyholder backend register`; startup does not write it. Use a new backend
+ID for another provider identity, then explicitly remap customers. Select a
+namespace with `keyholder --backend west user attach alice`.
+
+Literal CDN IPs require trusted networks and matching allowed TLS/HTTP identity;
+existing recognized Cloudflare IPv6 edges remain compatible. Never trust arbitrary
+origin CIDRs. ECH applies only to eligible trusted CDN hostname profiles, not direct
+or literal-IP profiles, and retains credentials/ports/paths. It cannot guarantee
+ISP reachability. Unsupported inputs fail closed.
+
+Compose uses `KEYHOLDER_ENV_FILE` and bridge `KEYHOLDER_PUBLISH_ADDRESS`/`PORT`;
+keep publishing on loopback. CLI config is selected by `KEYHOLDER_ADMIN_CONFIG`,
+host dispatcher config by `KEYHOLDER_HOST_CONFIG`; see the operator reference.

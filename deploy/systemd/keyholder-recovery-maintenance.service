@@ -1,0 +1,25 @@
+[Unit]
+Description=Verify and compact encrypted recovery repository
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/keyholder/recovery.env
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+EnvironmentFile=/etc/keyholder/recovery.env
+ExecStart=/usr/bin/flock --nonblock /var/lib/keyholder-recovery/backup.lock /usr/bin/restic check --read-data-subset=5%%
+ExecStart=/usr/bin/flock --nonblock /var/lib/keyholder-recovery/backup.lock /usr/bin/restic prune --max-repack-size=256M --max-unused=10%%
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=192M
+MemoryMax=320M
+TimeoutStartSec=1h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/keyholder-recovery /var/cache/keyholder-recovery
+

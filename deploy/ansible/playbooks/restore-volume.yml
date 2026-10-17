@@ -1,0 +1,12 @@
+---
+- name: Restore captured files into an empty Docker volume
+  ansible.builtin.copy:
+    src: '{{ recovery_stage }}/{{ item.path }}'
+    dest: '{{ (volume.stdout | from_json)[0].Mountpoint }}/{{ item.path.split("/", 2)[2] }}'
+    remote_src: true
+    owner: '{{ item.uid }}'
+    group: '{{ item.gid }}'
+    mode: '{{ "%04o" | format(item.mode) }}'
+  loop: '{{ recovery_manifest.files }}'
+  when: item.path.startswith('volumes/' + volume.item.name + '/')
+  no_log: true

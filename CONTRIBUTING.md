@@ -1,6 +1,6 @@
 # Contributing
 
-Read `docs/development.md` and `docs/compatibility.md` before changing contracts.
+Read `docs/development.md` before changing code or contracts.
 Use synthetic test data. Never submit customer links, real credentials, databases,
 private deployment configuration or personal troubleshooting notes.
 
