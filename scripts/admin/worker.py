@@ -413,9 +413,15 @@ def inbound_catalog(
 
     from keyholder.config import Settings
     from keyholder.rendering.inbound_preview import host_profiles
+    from keyholder.rendering.profiles import normalize
 
     settings = Settings()  # type: ignore[call-arg]
     account_key = backend_id() + "/" + user["username"]
+    known = [
+        p
+        for link in user.get("links", [])
+        if (p := normalize(link, settings.allowed_cdn_networks)) is not None
+    ]
     entries: list[dict[str, Any]] = []
     for protocol, items in sorted(available.items()):
         for item in sorted(items, key=lambda row: row["tag"]):
@@ -423,12 +429,21 @@ def inbound_catalog(
             labels = [h["remark"] for h in enabled]
             if not labels:
                 continue
-            previews = [
-                host_profiles({**item, "protocol": protocol}, h, settings, account_key)
-                if settings.profile_source in {"marzban", "upstream"}
-                else None
-                for h in enabled
-            ]
+            previews = []
+            for h in enabled:
+                name = h["remark"].replace("{USERNAME}", user["username"])
+                matches = [p for p in known if p.name == name and p.protocol == protocol]
+                previews.append(
+                    host_profiles(
+                        {**item, "protocol": protocol},
+                        h,
+                        settings,
+                        account_key,
+                        matches[0] if len(matches) == 1 else None,
+                    )
+                    if settings.profile_source in {"marzban", "upstream"}
+                    else None
+                )
             generated = [name for preview in previews if preview is not None for name in preview]
             entries.append(
                 {

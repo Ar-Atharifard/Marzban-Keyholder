@@ -151,3 +151,21 @@ def test_ipv6_host_identity_is_preserved(settings: Settings) -> None:
     assert host_profiles(inbound, host, settings, "marzban-default/OWNER") == ["Stream | IPv6"]
     host["allowinsecure"] = True
     assert host_profiles(inbound, host, settings, "marzban-default/OWNER") == []
+
+
+def test_address_scoped_fragmentation_uses_actual_selected_upstream_profile(
+    settings: Settings,
+) -> None:
+    from keyholder.rendering.profiles import normalize
+    from tests.conftest import TCP
+
+    profile = normalize(TCP)
+    assert profile is not None
+    settings.fragmentation_hosts = (profile.address,)
+    host = {"remark": profile.name, "address": "{SERVER_IP}"}
+    inbound = {"protocol": "vless", "network": "tcp", "tls": "reality"}
+    assert host_profiles(inbound, host, settings, "marzban-default/OWNER", profile) == [
+        profile.name,
+        profile.name + " | FRAG",
+    ]
+    assert host_profiles(inbound, host, settings, "marzban-default/OWNER") is None

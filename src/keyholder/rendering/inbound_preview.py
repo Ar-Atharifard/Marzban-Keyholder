@@ -1,15 +1,28 @@
-"""Preview host variants without reading or creating customer credentials."""
+"""Preview delivery names without exporting customer credentials."""
 
 from typing import Any
 from urllib.parse import quote, urlencode
 
 from keyholder.config import Settings
-from keyholder.rendering.profiles import delivery_profiles, normalize
+from keyholder.rendering.profiles import Profile, delivery_profiles, normalize
 
 
 def host_profiles(
-    inbound: dict[str, Any], host: dict[str, Any], settings: Settings, account_key: str
+    inbound: dict[str, Any],
+    host: dict[str, Any],
+    settings: Settings,
+    account_key: str,
+    actual: Profile | None = None,
 ) -> list[str] | None:
+    if actual is not None:
+        return [p.name for p in delivery_profiles([actual], settings, account_key)]
+    # An address-scoped rule needs the real address, not a classification placeholder.
+    if (
+        "{SERVER_IP}" in str(host.get("address"))
+        and settings.fragmentation_hosts
+        and account_key in settings.fragmentation_accounts
+    ):
+        return None
     # Only static templates can be predicted without Marzban's runtime variables.
     address = str(host.get("address") or "")
     address = (
