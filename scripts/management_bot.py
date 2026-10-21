@@ -238,6 +238,21 @@ def planned(command: str, args: dict[str, Any]) -> dict[str, Any]:
     return {"operation": command, "args": args, "expires": time.time() + CONFIRM_SECONDS}
 
 
+def profile_label(row: dict[str, Any]) -> str:
+    names = row.get("generated_names")
+    if names is None:
+        return "; ".join(row["names"]) + " [preview unavailable]"
+    return "; ".join(names) if names else "No compatible profiles (filtered by delivery rules)"
+
+
+def profile_summary(rows: list[dict[str, Any]]) -> str:
+    previews = [row.get("generated_names") for row in rows]
+    if any(p is None for p in previews):
+        return "Profile total unavailable: one or more host templates cannot be previewed."
+    total = sum(len(p) for p in previews if p is not None)
+    return f"{len(rows)} inbounds → {total} connection profiles (usage-information row excluded)."
+
+
 def command(text: str, state: dict[str, Any]) -> str:
     if len(text) > 2048:
         raise ValueError("Command exceeds 2048 characters")
@@ -258,10 +273,10 @@ def command(text: str, state: dict[str, Any]) -> str:
             [
                 "Available inbounds ([x] default):",
                 *[
-                    f"{row['number']}. [{'x' if row['selected'] else ' '}] "
-                    + "; ".join(row["names"])
+                    f"{row['number']}. [{'x' if row['selected'] else ' '}] " + profile_label(row)
                     for row in catalog["entries"]
                 ],
+                "Selected: " + profile_summary([r for r in catalog["entries"] if r["selected"]]),
                 "Create with inbounds=1,3 or inbounds=all/default. Omitted means default.",
             ]
         )
@@ -274,10 +289,10 @@ def command(text: str, state: dict[str, Any]) -> str:
             [
                 f"Profiles for {catalog['username']}:",
                 *[
-                    f"{row['number']}. [{'x' if row['selected'] else ' '}] "
-                    + "; ".join(row["names"])
+                    f"{row['number']}. [{'x' if row['selected'] else ' '}] " + profile_label(row)
                     for row in catalog["entries"]
                 ],
+                "Selected: " + profile_summary([r for r in catalog["entries"] if r["selected"]]),
                 "Reply /select 1,3,5 to replace the selection. /cancel leaves it unchanged.",
             ]
         )
@@ -319,7 +334,9 @@ def command(text: str, state: dict[str, Any]) -> str:
         }
         return (
             "New selection: "
-            + "; ".join(" / ".join(row["names"]) for row in rows)
+            + "; ".join(profile_label(row) for row in rows)
+            + "\n"
+            + profile_summary(rows)
             + f"\nConfirm within five minutes with /confirm {code}"
         )
     if name in {"link", "configs", "config"}:

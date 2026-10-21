@@ -15,6 +15,12 @@ from scripts.admin import worker
 from tests.test_api import HEADERS, create
 from tests.test_inbound_picker import AVAILABLE, HOSTS
 
+
+@pytest.fixture(autouse=True)
+def operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", "a" * 40)
+
+
 URL = "/admin/backends/marzban-default/inbound-defaults"
 
 

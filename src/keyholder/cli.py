@@ -535,7 +535,7 @@ def display(result: Any, as_json: bool) -> None:
 
 
 def pick_inbounds(args: argparse.Namespace) -> int:
-    from keyholder.inbounds import select_tags
+    from keyholder.inbounds import profile_label, profile_summary, select_tags
 
     base = {"username": getattr(args, "username", None), "backend_id": args.backend_id}
 
@@ -553,9 +553,10 @@ def pick_inbounds(args: argparse.Namespace) -> int:
         for row in catalog["entries"]:
             print(
                 f"{row['number']:2}. [{'x' if row['selected'] else ' '}] "
-                + "; ".join(row["names"])
+                + profile_label(row)
                 + f" ({row['protocol']})"
             )
+        print("Selected: " + profile_summary([r for r in catalog["entries"] if r["selected"]]))
     selection = args.select
     if selection is None:
         if not sys.stdin.isatty() or not base["username"]:
@@ -569,7 +570,8 @@ def pick_inbounds(args: argparse.Namespace) -> int:
         raise CLIError(str(error)) from None
     chosen = [row for tag in selected for row in catalog["entries"] if row["tag"] == tag]
     if not args.json:
-        print("New selection: " + "; ".join(" / ".join(row["names"]) for row in chosen))
+        print("New selection: " + "; ".join(profile_label(row) for row in chosen))
+        print(profile_summary(chosen))
     if not args.confirmed:
         if not sys.stdin.isatty():
             raise CLIError("Use --confirm to apply a noninteractive selection.")

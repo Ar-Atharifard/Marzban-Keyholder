@@ -23,3 +23,20 @@ def select_tags(entries: list[dict[str, Any]], selection: str, defaults: list[st
             "The selection is empty or contains unavailable inbounds; review defaults."
         )
     return chosen
+
+
+def profile_summary(entries: list[dict[str, Any]]) -> str:
+    previews = [row.get("generated_names") for row in entries]
+    if any(p is None for p in previews):
+        return "Profile total unavailable: one or more host templates cannot be previewed."
+    total = sum(len(p) for p in previews if p is not None)
+    return (
+        f"{len(entries)} inbounds → {total} connection profiles (usage-information row excluded)."
+    )
+
+
+def profile_label(row: dict[str, Any]) -> str:
+    names = row.get("generated_names")
+    if names is None:
+        return "; ".join(row["names"]) + " [preview unavailable]"
+    return "; ".join(names) if names else "No compatible profiles (filtered by delivery rules)"

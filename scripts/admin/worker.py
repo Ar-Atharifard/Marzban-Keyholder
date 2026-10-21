@@ -411,15 +411,29 @@ def inbound_catalog(
 ) -> dict[str, Any]:
     import hashlib
 
+    from keyholder.config import Settings
+    from keyholder.rendering.inbound_preview import host_profiles
+
+    settings = Settings()  # type: ignore[call-arg]
+    account_key = backend_id() + "/" + user["username"]
     entries: list[dict[str, Any]] = []
     for protocol, items in sorted(available.items()):
         for item in sorted(items, key=lambda row: row["tag"]):
-            labels = [h["remark"] for h in hosts.get(item["tag"], []) if not h.get("is_disabled")]
+            enabled = [h for h in hosts.get(item["tag"], []) if not h.get("is_disabled")]
+            labels = [h["remark"] for h in enabled]
             if not labels:
                 continue
+            previews = [
+                host_profiles({**item, "protocol": protocol}, h, settings, account_key)
+                if settings.profile_source in {"marzban", "upstream"}
+                else None
+                for h in enabled
+            ]
+            generated = [name for preview in previews if preview is not None for name in preview]
             entries.append(
                 {
                     "number": len(entries) + 1,
+                    "generated_names": generated if all(p is not None for p in previews) else None,
                     "tag": item["tag"],
                     "protocol": protocol,
                     "names": labels,

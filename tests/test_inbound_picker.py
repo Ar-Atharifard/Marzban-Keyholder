@@ -13,6 +13,12 @@ from scripts import management_bot
 from scripts.admin import worker
 from tests.conftest import GRPC, PBK
 
+
+@pytest.fixture(autouse=True)
+def operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", "a" * 40)
+
+
 USER: dict[str, Any] = {
     "username": "alice",
     "inbounds": {"vless": ["A"], "trojan": ["B"]},

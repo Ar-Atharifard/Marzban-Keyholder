@@ -4,11 +4,15 @@ import ipaddress
 import json
 import re
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import UUID
 
 from keyholder.profile_types import ProfileKind
 from keyholder.schemas import Policy
+
+if TYPE_CHECKING:
+    from keyholder.config import Settings
 
 
 @dataclass(frozen=True, repr=False)
@@ -435,3 +439,25 @@ def normalize_vmess(link: str, networks: tuple[str, ...] = ()) -> Profile | None
         path=text(str(data.get("path") or "/")),
         alpn=("http/1.1",),
     )
+
+
+def delivery_profiles(
+    profiles: list[Profile], settings: "Settings", account_key: str
+) -> list[Profile]:
+    """Apply deployment rules to both subscriptions and operator previews."""
+    profiles = [
+        p
+        for p in profiles
+        if p.kind in settings.enabled_profiles
+        and allowed_cdn(p, settings.allowed_cdn_hosts, settings.allowed_cdn_networks)
+    ]
+    profiles = apply_cdn_ech(
+        profiles,
+        settings.cdn_ech_config,
+        settings.allowed_cdn_hosts,
+        settings.cdn_tls_compatibility,
+        None if account_key in settings.cdn_ech_full_catalog else settings.cdn_ech_kinds,
+    )
+    if account_key in settings.fragmentation_accounts:
+        profiles = apply_fragmentation(profiles, settings.fragmentation_kinds)
+    return profiles

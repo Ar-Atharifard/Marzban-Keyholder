@@ -131,7 +131,13 @@ selection; the advanced `--protocol --tags` form changes just one protocol.
 Both preserve existing credentials. Telegram: `/inbounds USER`, then `/select 1,3,5`,
 then the returned `/confirm CODE`. `/cancel` leaves selections unchanged. Numbers
 belong to that catalog, not permanent identifiers. Stale selections are rejected.
-Each entry is one Marzban inbound and may export several host/ECH variants.
+Each entry is one Marzban inbound. The picker lists its generated host/ECH/fragmentation
+variants and totals the selected connection profiles before confirmation. OWNER-specific
+rules apply only when viewing OWNER; the global/default catalog uses ordinary-user rules.
+The usage-information row is excluded. Dynamic templates that cannot be predicted are
+marked unavailable instead of showing an invented total. Totals require provider-authoritative
+mode (`KEYHOLDER_PROFILE_SOURCE=upstream` or `marzban`); legacy customer-policy mode
+may further restrict delivery. This previews delivery, not connectivity.
 
 Creation accepts `--inbounds 1,3,5`, `all`, or `default` (also used when omitted).
 Protocols are inferred. `all` means the current catalog of enabled public host entries,

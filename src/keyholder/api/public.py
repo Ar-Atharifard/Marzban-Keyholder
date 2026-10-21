@@ -10,9 +10,7 @@ from keyholder.models import Customer
 from keyholder.policies import stored_policy
 from keyholder.rendering.information import information_profile, render_information
 from keyholder.rendering.profiles import (
-    allowed_cdn,
-    apply_cdn_ech,
-    apply_fragmentation,
+    delivery_profiles,
     generate_profiles,
 )
 from keyholder.rendering.renderers import URIRenderer, select_renderer
@@ -113,20 +111,7 @@ async def subscription(
         profiles = generate_profiles(
             links, Policy.model_validate(policy), settings.allowed_cdn_networks
         )
-        profiles = [p for p in profiles if p.kind in settings.enabled_profiles]
-        allowed_hosts = request.app.state.settings.allowed_cdn_hosts
-        profiles = [
-            p for p in profiles if allowed_cdn(p, allowed_hosts, settings.allowed_cdn_networks)
-        ]
-        profiles = apply_cdn_ech(
-            profiles,
-            settings.cdn_ech_config,
-            allowed_hosts,
-            settings.cdn_tls_compatibility,
-            None if account_key in settings.cdn_ech_full_catalog else settings.cdn_ech_kinds,
-        )
-        if account_key in settings.fragmentation_accounts:
-            profiles = apply_fragmentation(profiles, settings.fragmentation_kinds)
+        profiles = delivery_profiles(profiles, settings, account_key)
         if not profiles:
             raise ValueError("No compatible profiles")
         renderer = select_renderer(output, request.headers.get("user-agent", ""))
