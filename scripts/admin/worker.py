@@ -33,7 +33,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+def api(method: str, path: str, body: dict[str, Any] | None = None, *, raw: bool = False) -> Any:
     request = Request(
         os.getenv("KEYHOLDER_OPERATOR_API_URL", "http://127.0.0.1:18000").rstrip("/") + path,
         data=json.dumps(body).encode() if body is not None else None,
@@ -48,7 +48,7 @@ def api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
             data = response.read(1024 * 1024 + 1)
             if len(data) > 1024 * 1024:
                 raise OperatorError("API response exceeds the operator limit.")
-            return json.loads(data)
+            return data if raw else json.loads(data)
     except HTTPError as error:
         raise OperatorError(
             f"API returned HTTP {error.code}; inspect the customer state.", status=error.code
@@ -72,17 +72,24 @@ def resolve(selector: str) -> dict[str, Any]:
         identifier = str(UUID(selector))
     except ValueError:
         needle = selector.lower().removeprefix("@")
-        matches = [
+        candidates = [
             c
             for c in customers()
+            if c["mapping"]["backend_id"] == backend_id() and c["status"] != "revoked"
+        ]
+        matches = [
+            c
+            for c in candidates
             if (
                 c["mapping"]["upstream_username"] == selector
                 or c.get("phone") == selector
                 or str(c.get("telegram") or "").lower().removeprefix("@") == needle
             )
-            and c["mapping"]["backend_id"] == backend_id()
-            and c["status"] != "revoked"
         ]
+        if not matches:
+            matches = [
+                c for c in candidates if str(c.get("name") or "").casefold() == selector.casefold()
+            ]
         if not matches:
             raise OperatorError("No Keyholder registration for this customer selector.") from None
         if len(matches) > 1:
@@ -158,9 +165,9 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
         "user-create",
         "user-update",
         "user-inbounds",
+        "user-defaults",
         "user-usage",
         "user-reset-usage",
-        "user-dnstt",
     }:
         return asyncio.run(panel_operation(operation, args))
     if operation == "doctor":
@@ -231,7 +238,22 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
         rows = [c for c in customers() if c["mapping"]["backend_id"] == backend_id()]
         if not args.get("history"):
             rows = [c for c in rows if c["status"] != "revoked"]
-        return rows[args["offset"] : args["offset"] + args["limit"]]
+        if search := str(args.get("search") or "").casefold():
+            rows = [
+                c
+                for c in rows
+                if any(
+                    search in str(value or "").casefold()
+                    for value in (c["mapping"]["upstream_username"], c.get("name"))
+                )
+            ]
+        rows = rows[args["offset"] : args["offset"] + args["limit"]]
+        if args.get("brief"):
+            return [
+                {"username": c["mapping"]["upstream_username"], "name": c.get("name") or ""}
+                for c in rows
+            ]
+        return rows
     if operation == "create":
         username = args["username"]
         matches = [
@@ -271,6 +293,57 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
     path = "/admin/customers/" + quote(customer["id"], safe="")
     if operation == "link":
         return api("GET", path + "/subscription")
+    if operation in {"configs", "config"}:
+        import base64
+        import hashlib
+
+        from keyholder.config import Settings
+        from keyholder.rendering.profiles import normalize
+        from keyholder.security import valid_token
+
+        if customer["status"] != "active":
+            raise OperatorError("Customer subscription delivery is not active.")
+        token = api("GET", path + "/subscription")["token"]
+        if not valid_token(token):
+            raise OperatorError("Subscription token is unavailable.")
+        contents = api("GET", "/s/" + token + "?format=uri", raw=True)
+        settings = Settings()  # type: ignore[call-arg]
+        networks = getattr(settings, "allowed_cdn_networks", ())
+        entries: dict[str, dict[str, Any]] = {}
+        try:
+            links = base64.b64decode(contents, validate=True).decode().splitlines()
+            for link in links:
+                profile = normalize(link, networks) if networks else normalize(link)
+                if profile is None or profile.address in {"127.0.0.1", "::1", "localhost"}:
+                    continue
+                identifier = hashlib.sha256(link.encode()).hexdigest()[:16]
+                entries[identifier] = {
+                    "id": identifier,
+                    "kind": profile.kind,
+                    "name": profile.name,
+                    "protocol": profile.protocol,
+                    "transport": profile.transport,
+                    "security": profile.security,
+                    "ech": bool(profile.ech_config_list or "ech=" in link),
+                    "config_uri": link,
+                }
+        except (ValueError, UnicodeError):
+            raise OperatorError("Subscription output is invalid.") from None
+        if operation == "configs":
+            return {
+                "customer_id": customer["id"],
+                "configs": [
+                    {k: v for k, v in item.items() if k != "config_uri"}
+                    for item in entries.values()
+                ],
+            }
+        selector = args["profile"]
+        matches = [
+            item for item in entries.values() if item["id"] == selector or item["kind"] == selector
+        ]
+        if len(matches) != 1:
+            raise OperatorError("Choose one exact configuration ID from customer configs.")
+        return {"customer_id": customer["id"], **matches[0]}
     if operation == "show":
         return {**customer, "profile_source": os.getenv("KEYHOLDER_PROFILE_SOURCE", "policy")}
     if operation == "customer-update":
@@ -331,6 +404,53 @@ def summary(user: dict[str, Any]) -> dict[str, Any]:
         k: user.get(k)
         for k in ["username", "status", "data_limit", "used_traffic", "expire", "inbounds"]
     }
+
+
+def inbound_catalog(
+    user: dict[str, Any], available: dict[str, Any], hosts: dict[str, Any]
+) -> dict[str, Any]:
+    import hashlib
+
+    entries: list[dict[str, Any]] = []
+    for protocol, items in sorted(available.items()):
+        for item in sorted(items, key=lambda row: row["tag"]):
+            labels = [h["remark"] for h in hosts.get(item["tag"], []) if not h.get("is_disabled")]
+            if not labels:
+                continue
+            entries.append(
+                {
+                    "number": len(entries) + 1,
+                    "tag": item["tag"],
+                    "protocol": protocol,
+                    "names": labels,
+                    "selected": item["tag"] in user["inbounds"].get(protocol, []),
+                }
+            )
+    revision = hashlib.sha256(
+        json.dumps([entries, user["inbounds"], sorted(user["proxies"])], sort_keys=True).encode()
+    ).hexdigest()
+    return {"username": user["username"], "revision": revision, "entries": entries}
+
+
+def default_inbounds() -> dict[str, Any]:
+    return api("GET", "/admin/backends/" + quote(backend_id(), safe="") + "/inbound-defaults")  # type: ignore[no-any-return]
+
+
+def checked_inbounds(catalog: dict[str, Any], args: dict[str, Any]) -> list[str]:
+    if args.get("revision") != catalog["revision"]:
+        raise OperatorError("Selection changed; reopen the inbound picker before applying.")
+    selected = args["selected_tags"]
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or any(
+            not isinstance(tag, str) or tag not in {r["tag"] for r in catalog["entries"]}
+            for tag in selected
+        )
+        or len(set(selected)) != len(selected)
+    ):
+        raise OperatorError("Choose at least one unique inbound from the current catalog.")
+    return selected
 
 
 async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
@@ -410,6 +530,31 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                     )
                     count += 1
             return {"marzban_users": len(users), "registered": count, "duplicates_revoked": revoked}
+        if operation == "user-defaults" or (
+            operation == "user-inbounds" and not args.get("username")
+        ):
+            defaults = default_inbounds()
+            available = await call("GET", "/api/inbounds")
+            initial = {
+                protocol: [row["tag"] for row in rows if row["tag"] in defaults["inbound_tags"]]
+                for protocol, rows in available.items()
+            }
+            catalog = inbound_catalog(
+                {"username": "", "inbounds": initial, "proxies": {}},
+                available,
+                await call("GET", "/api/hosts"),
+            )
+            catalog.update(default_tags=defaults["inbound_tags"], source=defaults["source"])
+            if "selected_tags" not in args:
+                return catalog
+            if operation != "user-defaults" or not args.get("confirmed"):
+                raise OperatorError("Changing defaults requires confirmation.")
+            selected = checked_inbounds(catalog, args)
+            return api(
+                "PUT",
+                "/admin/backends/" + quote(backend_id(), safe="") + "/inbound-defaults",
+                {"inbound_tags": selected},
+            )
         name = args["username"]
         path = "/api/user/" + quote(name, safe="")
         if operation == "user-usage":
@@ -431,13 +576,58 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                     raise OperatorError("Telegram is already registered.")
                 if phone is not None and customer.get("phone") == phone:
                     raise OperatorError("Phone is already registered.")
+            legacy = bool(args.get("protocols") or args.get("inbound_tags"))
+            if legacy and args.get("inbounds") is not None:
+                raise OperatorError(
+                    "Use --inbounds, or legacy --protocols/--inbound-tags, not both."
+                )
+            available = await call("GET", "/api/inbounds")
+            protocols_by_tag = {
+                item["tag"]: protocol for protocol, items in available.items() for item in items
+            }
+            if legacy:
+                chosen_tags = args.get("inbound_tags") or default_inbounds()["inbound_tags"]
+                protocols = args.get("protocols") or sorted(
+                    {protocols_by_tag[t] for t in chosen_tags if t in protocols_by_tag}
+                )
+            else:
+                from keyholder.inbounds import select_tags
+
+                catalog = inbound_catalog(
+                    {"username": "", "inbounds": {}, "proxies": {}},
+                    available,
+                    await call("GET", "/api/hosts"),
+                )
+                try:
+                    chosen_tags = select_tags(
+                        catalog["entries"],
+                        args["inbounds"] if args.get("inbounds") is not None else "default",
+                        default_inbounds()["inbound_tags"],
+                    )
+                except ValueError as error:
+                    raise OperatorError(str(error)) from None
+                protocols = sorted({protocols_by_tag[tag] for tag in chosen_tags})
             body = {
                 "username": name,
-                "proxies": {p: {} for p in args["protocols"]},
+                "proxies": {p: {} for p in protocols},
                 "inbounds": {},
                 "data_limit": int(args["quota_gb"] * 1024**3),
                 "expire": int(time.time()) + args["days"] * 86400 if args["days"] else 0,
             }
+            if chosen_tags:
+                if not set(chosen_tags) <= protocols_by_tag.keys():
+                    raise OperatorError(
+                        "The configured initial selection contains unavailable inbounds."
+                    )
+                if {protocols_by_tag[tag] for tag in chosen_tags} != set(protocols):
+                    raise OperatorError(
+                        "Initial inbounds must match --protocols; use the default plan's "
+                        "protocols or explicit --inbound-tags."
+                    )
+                body["inbounds"] = {
+                    protocol: [tag for tag in chosen_tags if protocols_by_tag[tag] == protocol]
+                    for protocol in protocols
+                }
             await call("POST", "/api/user", body)
             return api(
                 "POST",
@@ -451,46 +641,29 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
                 },
             )
         user = await call("GET", path)
-        if operation == "user-dnstt":
-            import base64
-
-            from keyholder.rendering.profiles import Profile
-            from keyholder.rendering.renderers import URIRenderer
-
-            transport = args["dnstt"]
-            tag = transport["inbound_tag"]
-            if user["status"] != "active" or tag not in user.get("inbounds", {}).get("vless", []):
-                raise OperatorError("DNSTT is not enabled for this active user in Marzban.")
-            core = await call("GET", "/api/core/config")
-            inbound = next((x for x in core["inbounds"] if x.get("tag") == tag), None)
-            if not inbound or inbound.get("listen") != "127.0.0.1":
-                raise OperatorError("DNSTT requires a dedicated loopback inbound.")
-            stream = inbound.get("streamSettings", {})
-            if inbound.get("protocol") != "vless" or stream.get("security") != "reality":
-                raise OperatorError("Unsupported DNSTT inner protocol.")
-            reality = stream["realitySettings"]
-            if not reality.get("publicKey"):
-                raise OperatorError("DNSTT public REALITY key is missing from core configuration.")
-            proxy = user["proxies"]["vless"]
-            profile = Profile(
-                kind="tcp_reality",
-                name="DNSTT | " + name,
-                address="127.0.0.1",
-                port=7000,
-                transport="tcp",
-                security="reality",
-                uuid=proxy["id"],
-                flow=proxy.get("flow", ""),
-                sni=reality["serverNames"][0],
-                public_key=reality["publicKey"],
-                short_id=reality["shortIds"][0],
-                fingerprint="chrome",
+        if operation == "user-inbounds" and not args.get("protocol"):
+            catalog = inbound_catalog(
+                user, await call("GET", "/api/inbounds"), await call("GET", "/api/hosts")
             )
-            return {
-                "username": name,
-                "profile_uri": base64.b64decode(URIRenderer().render([profile])).decode().strip(),
-                "transport": {k: transport[k] for k in ("domain", "public_key", "doh_url")},
-            }
+            catalog["default_tags"] = default_inbounds()["inbound_tags"]
+            if "selected_tags" not in args:
+                return catalog
+            selected = checked_inbounds(catalog, args)
+            catalog_protocols = {row["tag"]: row["protocol"] for row in catalog["entries"]}
+            inbounds: dict[str, list[str]] = {protocol: [] for protocol in user["proxies"]}
+            proxies = user["proxies"]
+            for tag in selected:
+                protocol = catalog_protocols[tag]
+                inbounds.setdefault(protocol, []).append(tag)
+            body = {"inbounds": inbounds}
+            if any(protocol not in proxies for protocol in inbounds):
+                if set(proxies) - set(await call("GET", "/api/inbounds")):
+                    raise OperatorError(
+                        "Retired protocol credentials exist; select existing protocols "
+                        "or review them in Marzban before adding a protocol."
+                    )
+                body["proxies"] = {**proxies, **{p: {} for p in inbounds if p not in proxies}}
+            return summary(await call("PUT", path, body))
         if operation == "user-update":
             body = {}
             if args.get("quota_gb") is not None:
@@ -505,11 +678,11 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
             allowed = {item["tag"] for item in available.get(args["protocol"], [])}
             if not set(args["tags"]) <= allowed:
                 raise OperatorError("An inbound tag does not belong to the selected protocol.")
-            proxies = user["proxies"]
-            proxies.setdefault(args["protocol"], {})
             inbounds = user["inbounds"]
             inbounds[args["protocol"]] = args["tags"]
-            body = {"proxies": proxies, "inbounds": inbounds}
+            body = {"inbounds": inbounds}
+            if args["protocol"] not in user["proxies"]:
+                body["proxies"] = {**user["proxies"], args["protocol"]: {}}
         return summary(await call("PUT", path, body))
 
 

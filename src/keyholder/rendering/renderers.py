@@ -3,7 +3,7 @@ import json
 from typing import Any, Protocol
 from urllib.parse import quote, urlencode
 
-from keyholder.rendering.profiles import Profile
+from keyholder.rendering.profiles import Profile, fragment_mask
 
 
 class Renderer(Protocol):
@@ -60,6 +60,8 @@ class URIRenderer:
             }
             if p.ech_config_list:
                 q["ech"] = p.ech_config_list
+            if p.fragment:
+                q["fm"] = json.dumps(fragment_mask(p), separators=(",", ":"))
             if p.protocol == "vmess":
                 q["encryption"] = p.cipher
             if p.security == "reality":
@@ -117,6 +119,8 @@ class XrayRenderer:
                     "network": "tcp" if p.transport == "raw" else p.transport,
                     "security": p.security,
                 }
+                if p.fragment:
+                    stream["finalmask"] = fragment_mask(p)
                 tls: dict[str, Any] = {"serverName": p.sni, "fingerprint": p.fingerprint}
                 if p.alpn:
                     tls["alpn"] = list(p.alpn)

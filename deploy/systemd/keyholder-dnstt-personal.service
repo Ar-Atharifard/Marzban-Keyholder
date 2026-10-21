@@ -1,0 +1,34 @@
+[Unit]
+Description=Owner-only authenticated backend for DNSTT
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/keyholder/dnstt-personal.json
+
+[Service]
+DynamicUser=true
+LoadCredential=core.json:/etc/keyholder/dnstt-personal.json
+ExecStart=/var/lib/marzban/xray-core/xray run -config ${CREDENTIALS_DIRECTORY}/core.json
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+LimitNOFILE=4096
+TasksMax=64
+MemoryHigh=64M
+MemoryMax=96M
+
+[Install]
+WantedBy=multi-user.target

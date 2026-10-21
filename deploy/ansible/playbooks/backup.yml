@@ -48,7 +48,7 @@
           - item.stat.mode == '0600'
       loop: '{{ private_files.results }}'
       no_log: true
-    - name: Install daily recovery units without enabling them
+    - name: Install scheduled recovery units without enabling them
       ansible.builtin.copy:
         src: '{{ playbook_dir }}/../../systemd/{{ item }}'
         dest: '/etc/systemd/system/{{ item }}'
@@ -65,7 +65,7 @@
       ansible.builtin.systemd_service:
         daemon_reload: true
       when: backup_units.changed
-    - name: Enable daily timer only after a successful verified initial upload
+    - name: Enable backup timer only after a successful verified initial upload
       ansible.builtin.systemd_service:
         name: keyholder-recovery.timer
         enabled: true

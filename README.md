@@ -50,6 +50,7 @@ Docker, TLS routing and operator setup. Do not expose the administrator API publ
 | [Alerts](docs/alerts.md) | Deduplication, thresholds, suppression and repairs |
 | [Recovery](docs/disaster-recovery.md) | Offsite backup, Ansible and VM rehearsal |
 | [Networking](docs/networking.md) | Subscription delivery, Worker and DNSTT |
+| [Domestic entry](docs/domestic-node.md) | Split routing, reverse tunnel and node recovery |
 
 ## Verify a change
 

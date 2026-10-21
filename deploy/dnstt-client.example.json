@@ -1,6 +1,8 @@
 {
-  "inbound_tag": "VLESS DNSTT",
-  "domain": "t.example.com",
-  "public_key": "REPLACE_WITH_DNSTT_PUBLIC_KEY_64_HEX",
-  "doh_url": "https://8.8.8.8/dns-query"
+  "profile_uri": "REPLACE_WITH_OWNER_ONLY_LOOPBACK_REALITY_URI",
+  "transport": {
+    "domain": "t.example.com",
+    "public_key": "REPLACE_WITH_DNSTT_PUBLIC_KEY_64_HEX",
+    "doh_url": "https://8.8.8.8/dns-query"
+  }
 }

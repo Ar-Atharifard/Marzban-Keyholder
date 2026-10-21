@@ -1,0 +1,28 @@
+---
+- name: Validate recovery mode before modifying a target
+  hosts: recovery_targets
+  gather_facts: false
+  tasks:
+    - name: Require a supported explicit mode
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | default(false) | bool
+          - recovery_environment in ['rehearsal', 'production']
+          - not (recovery_check_only | default(false) | bool) or recovery_environment == 'rehearsal'
+        fail_msg: Check-only validates the isolated VM; production needs reviewed activation gates.
+- import_playbook: bootstrap.yml
+  when: not (recovery_finish_only | default(false) | bool)
+- import_playbook: download.yml
+  when: not (recovery_finish_only | default(false) | bool)
+- import_playbook: restore.yml
+  vars:
+    recovery_start_applications: false
+  when: not (recovery_finish_only | default(false) | bool)
+- import_playbook: activate.yml
+  when: recovery_environment == 'production' and not (recovery_check_only | default(false) | bool)
+- import_playbook: rehearse.yml
+  vars:
+    recovery_rehearsal_persist: true
+  when: recovery_environment == 'rehearsal' and not (recovery_check_only | default(false) | bool)
+- import_playbook: finish.yml
+  when: recovery_environment == 'rehearsal'

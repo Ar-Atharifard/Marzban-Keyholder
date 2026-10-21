@@ -47,6 +47,27 @@ class Policy(BaseModel):
     )
 
 
+class InboundDefaults(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    inbound_tags: list[str] = Field(min_length=1, max_length=128)
+
+    @field_validator("inbound_tags")
+    @classmethod
+    def valid_tags(cls, tags: list[str]) -> list[str]:
+        if len(set(tags)) != len(tags) or any(
+            not 1 <= len(tag) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in tag)
+            for tag in tags
+        ):
+            raise ValueError("Use unique, nonempty inbound tags without control characters")
+        return tags
+
+
+class InboundDefaultsView(BaseModel):
+    backend_id: str
+    inbound_tags: list[str]
+    source: Literal["environment", "database"]
+
+
 class MappingInput(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
     backend_id: str = Field(default="marzban-default", pattern=r"^[a-zA-Z0-9_-]{1,64}$")

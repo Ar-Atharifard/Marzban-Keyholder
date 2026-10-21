@@ -1,0 +1,25 @@
+[Unit]
+Description=Marzban Node (domestic gateway)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marzban-node
+Group=marzban-node
+WorkingDirectory=/opt/marzban-node
+EnvironmentFile=/etc/marzban-node/node.env
+ExecStart=/opt/marzban-node/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/marzban-node
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

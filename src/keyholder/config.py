@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     allowed_cdn_hosts: tuple[str, ...] = ()
     cdn_ech_config: str = ""
     cdn_tls_compatibility: bool = False
+    cdn_ech_kinds: tuple[str, ...] = SUPPORTED_KINDS
+    cdn_ech_full_catalog: tuple[str, ...] = ()
+    fragmentation_accounts: tuple[str, ...] = ()
+    fragmentation_kinds: tuple[str, ...] = ("tcp_reality", "grpc_cdn")
+    default_inbound_tags: tuple[str, ...] = ()
     profile_source: Literal["policy", "marzban", "upstream"] = "policy"
     backends: list[BackendConfig] = Field(default_factory=list, repr=False)
     # Configured CIDRs are a trusted deployment decision, never imported from links.
@@ -84,7 +89,7 @@ class Settings(BaseSettings):
 
         return tuple(str(ipaddress.ip_network(v, strict=True)) for v in value)
 
-    @field_validator("enabled_profiles")
+    @field_validator("enabled_profiles", "cdn_ech_kinds", "fragmentation_kinds")
     @classmethod
     def validate_profiles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         from keyholder.policies import SUPPORTED_KINDS

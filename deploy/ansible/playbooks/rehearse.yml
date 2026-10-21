@@ -1,0 +1,131 @@
+---
+- name: Start an isolated restore rehearsal
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require a disposable rehearsal VM
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - recovery_environment == 'rehearsal'
+          - ansible_facts.virtualization_role == 'guest'
+          - recovery_compose_projects | length == 3
+          - recovery_compose_projects | map(attribute='name') | list | sort == ['braavos-gateway', 'keyholder', 'marzban']
+    - name: Keep restored listeners on VM loopback
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-']
+        stdin: |
+          import json, re, sqlite3
+          from pathlib import Path
+          core = Path('/var/lib/marzban/xray_config.json')
+          nginx = Path('/opt/braavos-gateway/nginx/nginx.conf')
+          for path in (core, nginx):
+              saved = path.with_name(path.name + '.before-rehearsal')
+              if not saved.exists():
+                  saved.write_bytes(path.read_bytes())
+                  saved.chmod(0o600)
+          data = json.loads(core.read_text())
+          for inbound in data['inbounds']:
+              inbound['listen'] = '127.0.0.1'
+          core.write_text(json.dumps(data, indent=2) + '\n')
+          text = nginx.read_text()
+          text = re.sub(r'^\s*listen\s+\[::\]:[^;]+;\s*$', '', text, flags=re.M)
+          text = re.sub(r'(\blisten\s+)(\d+)(?=[\s;])', r'\g<1>127.0.0.1:\2', text)
+          nginx.write_text(text)
+          # A rehearsal must not connect a restored node identity to production.
+          with sqlite3.connect('/var/lib/marzban/db.sqlite3') as db:
+              db.execute("UPDATE nodes SET status='disabled'")
+      changed_when: true
+      no_log: true
+    - name: Create rehearsal overrides with explicit restart policy
+      ansible.builtin.copy:
+        dest: '{{ recovery_stage }}/{{ item.name }}.rehearsal.json'
+        owner: root
+        group: root
+        mode: '0600'
+        content: >-
+          {{ {'services': {rehearsal_services[item.name]:
+          ({'restart': restart_policy, 'environment': {'UVICORN_HOST': '127.0.0.1'}}
+          if item.name == 'marzban' else {'restart': restart_policy})}} | to_nice_json }}
+      vars:
+        restart_policy: '{{ "unless-stopped" if recovery_rehearsal_persist | default(false) | bool else "no" }}'
+        rehearsal_services: {marzban: marzban, keyholder: api, braavos-gateway: gateway}
+      loop: '{{ recovery_compose_projects }}'
+    - name: Detect the optional shared-core DNS exit
+      ansible.builtin.stat:
+        path: /etc/keyholder-foreign-exit/config.json
+      register: rehearsal_dns_exit
+    - name: Create the loopback DNS exit service identity
+      ansible.builtin.user:
+        name: keyholder-exit
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+      when: rehearsal_dns_exit.stat.exists
+    - name: Set private DNS exit configuration permissions
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        owner: root
+        group: keyholder-exit
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: /etc/keyholder-foreign-exit, mode: '0750'}
+        - {path: /etc/keyholder-foreign-exit/config.json, mode: '0640'}
+      when: rehearsal_dns_exit.stat.exists
+    - name: Restore only the loopback exit unit for rehearsal DNS
+      ansible.builtin.copy:
+        src: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-foreign-exit.service'
+        dest: /etc/systemd/system/keyholder-foreign-exit.service
+        remote_src: true
+        mode: '0644'
+      when: rehearsal_dns_exit.stat.exists
+    - name: Start loopback exit without connecting any production reverse tunnel
+      ansible.builtin.systemd_service:
+        name: keyholder-foreign-exit
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: rehearsal_dns_exit.stat.exists
+    - name: Validate each restored project
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', item.name]
+          + (item.files | map('regex_replace', '^(.*)$', '--file=\1') | list)
+          + ['--file=' + recovery_stage + '/' + item.name + '.override.json',
+          '--file=' + recovery_stage + '/' + item.name + '.rehearsal.json', 'config', '--quiet'] }}
+      loop: '{{ recovery_compose_projects }}'
+      changed_when: false
+      no_log: true
+    - name: Start captured services without builds or downloads
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', item.name]
+          + (item.files | map('regex_replace', '^(.*)$', '--file=\1') | list)
+          + ['--file=' + recovery_stage + '/' + item.name + '.override.json',
+          '--file=' + recovery_stage + '/' + item.name + '.rehearsal.json',
+          'up', '--detach', '--no-build', '--pull', 'never'] }}
+      loop: '{{ recovery_compose_projects }}'
+      changed_when: true
+      no_log: true
+    - name: Check restored API database health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        status_code: 200
+        use_proxy: false
+      register: api_health
+      retries: 12
+      delay: 5
+      until: api_health.status == 200
+    - name: Check panel and TLS gateway listeners
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: '{{ item }}'
+        timeout: 60
+      loop: [8000, 443, 8443]
+    - name: Explain remaining checks
+      ansible.builtin.debug:
+        msg: >-
+          VM services started on loopback. Bots and timers remain disabled;
+          container restart policy is declared in the rehearsal override. Production DNS is unchanged. Next validate
+          restored identities, subscriptions, proxy traffic and reboot startup.

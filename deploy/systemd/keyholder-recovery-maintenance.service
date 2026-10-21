@@ -9,8 +9,7 @@ Type=oneshot
 User=root
 UMask=0077
 EnvironmentFile=/etc/keyholder/recovery.env
-ExecStart=/usr/bin/flock --nonblock /var/lib/keyholder-recovery/backup.lock /usr/bin/restic check --read-data-subset=5%%
-ExecStart=/usr/bin/flock --nonblock /var/lib/keyholder-recovery/backup.lock /usr/bin/restic prune --max-repack-size=256M --max-unused=10%%
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-recovery/recovery.py maintain --work /var/lib/keyholder-recovery
 Nice=15
 IOSchedulingClass=idle
 CPUQuota=50%

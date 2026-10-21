@@ -46,66 +46,37 @@ Do not redirect canonical links or cache bearer responses. Rollback deletes only
 the Worker. [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/),
 [logging](https://developers.cloudflare.com/workers/observability/logs/workers-logs/).
 
-## DNSTT
+## Personal DNSTT
+
+DNSTT is an optional owner recovery tool, outside customer subscriptions,
+Marzban accounting and production alerts. It needs a separate client helper:
 
 ```text
-Xray client → loopback DNSTT helper → recursive DNS → DNSTT server → Marzban REALITY
+Xray client → loopback helper → recursive DNS → DNSTT → owner-only loopback Xray
 ```
 
-DNSTT encrypts the tunnel with Noise; the inner protocol authenticates customers.
-Never expose unauthenticated SOCKS behind it. Marzban retains quota, expiry, status
-and destination blocking. For production, use a dedicated loopback-only VLESS
-REALITY inbound tagged `VLESS DNSTT`; select it per user in Marzban. Its traffic
-shares that user's quota. A disabled host entry keeps it out of ordinary
-subscriptions: clients cannot start the required helper from a normal URI.
-Its authoritative IP/domain remain discoverable; performance depends on the resolver.
+The owner Xray uses independent credentials; customer credentials must not work
+there. Bind both local TCP endpoints to loopback. Never put an unauthenticated
+SOCKS server behind the public DNS tunnel. DNSTT uses Noise encryption; the inner
+REALITY connection provides authentication and encrypted proxy transport.
 
-Create DNS-only `ns1.example.com` A and delegated `t.example.com` NS records.
-Check authority/recursion, assigned public address and free UDP 53. Bind the specific
-public address; preserve systemd-resolved. Cloudflare's HTTP proxy cannot proxy DNS.
+Build pinned upstream `www.bamsoftware.com/git/dnstt.git@v1.20260501.0` with Go 1.26+,
+apply `deploy/dnstt/dependency-updates.patch`, test and scan dependencies, and record
+binary hashes. The sample units are in `deploy/systemd/`. Set the DNSTT upstream
+to the independent owner listener, not a Marzban inbound. DNS-only A/AAAA and NS
+records expose the authoritative address; normal Cloudflare proxying cannot hide it.
+Review any UDP 53 allowance using the firewall procedure in [Operations](operations.md).
 
-Build pinned source `www.bamsoftware.com/git/dnstt.git@v1.20260501.0` with Go 1.26+.
-Apply `deploy/dnstt/dependency-updates.patch` (`patch -p1`), run `go test ./...` and
-`govulncheck ./...`, then build client/server with
-`CGO_ENABLED=0 go build -buildvcs=false -trimpath`. Record versions and hashes.
-
-Install the server at `/usr/local/libexec/keyholder/dnstt-server`, generate keys
-on-server using `-privkey-file`/`-pubkey-file`, and protect
-`/etc/keyholder/dnstt.key` as root-only 0600. Configure the example environment
-and hardened `deploy/systemd/keyholder-dnstt.service` (Ubuntu 22.04 credentials).
-Share only the public key. Add only the required UDP 53 allowance using the
-[firewall safety procedure](operations.md); no SSH/Docker/Xray restart is required.
-
-Desktop helper (choose a tested resolver; DoH/DoT also exist upstream):
+Store root-owned 0600 owner export metadata using
+`deploy/dnstt-client.example.json` at `/etc/keyholder/dnstt-personal-client.json`:
 
 ```sh
-dnstt-client -udp RESOLVER_IP:53 -pubkey-file server.pub t.example.com 127.0.0.1:7000
-# Alternative: replace -udp with -doh https://RESOLVER/dns-query
+keyholder personal dnstt --save-link ./owner-dnstt.json
+dnstt-client -doh https://RESOLVER/dns-query -pubkey-file server.pub t.example.com 127.0.0.1:7000
 ```
 
-For managed exports, install the root-owned 0600 client metadata file from
-`deploy/dnstt-client.example.json` at `/etc/keyholder/dnstt-client.json`. Set its
-actual tunnel domain, DNSTT public key, tested DoH endpoint and inbound tag.
-`keyholder user dnstt USER --save-link USER-dnstt.json` retrieves the enabled user's
-private `profile_uri` plus public helper settings; existing files are never replaced.
-Import that URI and run the matching helper separately. Deselecting `VLESS DNSTT`
-in Marzban stops new tunnel authentication without affecting other selected inbounds.
-Disabled hosts control advertisement, not access; inbound selection controls access.
-
-This is a manual desktop workflow, not one-click customer delivery. Standard
-v2rayN does not start the helper; Android DNSTT+SSH apps cannot use this REALITY
-backend. Never use administrator SSH credentials. A second VPS does not remove
-the client-side helper requirement unless it acts as a separate ordinary proxy entry.
-
-DNS tunnels have limited throughput. Test browsing under load and resolver errors,
-not just idle ping; respect resolver backoff.
-
-Validate authenticated browsing, invalid-user rejection and domestic blocking;
-compare authority/recursive paths and multiple ISPs. A DNS reply or local listener
-is not a passed tunnel test. Start payload 1232; change only after measured size loss.
-Avoid testing by switching the workstation's only working connection.
-
-Recovery must preserve keys, binary, environment and unit, with liveness monitoring.
-Review bind address and DNS on a new host; restore/activate the unit explicitly.
-Rollback stops only DNSTT and removes its additive UDP 53 rule. Existing profiles
-and DNS must remain intact. [Upstream protocol](https://www.bamsoftware.com/software/dnstt/protocol.html).
+Import the exported `profile_uri`; run the helper separately. This is not one-click
+customer delivery. Standard Xray clients cannot start DNSTT from a subscription URI.
+Keep keys, owner config and binaries in encrypted recovery backups; personal service
+activation after recovery is opt-in. Test browsing, not only idle delay. Throughput
+and availability depend on the resolver. [DNSTT protocol](https://www.bamsoftware.com/software/dnstt/protocol.html).

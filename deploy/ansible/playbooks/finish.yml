@@ -1,0 +1,65 @@
+---
+- name: Verify the restored stack and reboot the isolated VM
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require a disposable rehearsal VM
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - recovery_environment == 'rehearsal'
+          - ansible_facts.virtualization_role == 'guest'
+    - name: Install the verification tool
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/verify_recovery.py'
+        dest: /usr/local/lib/keyholder-recovery/verify_recovery.py
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Verify identities, token retrieval, subscriptions and proxy traffic
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/lib/keyholder-recovery/verify_recovery.py
+          - --bundle
+          - '{{ recovery_bundle }}'
+          - --report
+          - '{{ recovery_stage }}/verification-before-reboot.json'
+      changed_when: false
+      when: not (recovery_check_only | default(false) | bool)
+    - name: Reboot the VM and wait for key-authenticated SSH
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+        post_reboot_delay: 10
+      when: not (recovery_check_only | default(false) | bool)
+    - name: Wait for restored API startup
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        status_code: 200
+        use_proxy: false
+      register: api_health
+      retries: 24
+      delay: 5
+      until: api_health.status == 200
+    - name: Verify services and data again after reboot
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - /usr/local/lib/keyholder-recovery/verify_recovery.py
+          - --bundle
+          - '{{ recovery_bundle }}'
+          - --report
+          - '{{ recovery_stage }}/verification-after-reboot.json'
+      changed_when: false
+    - name: Save the aggregate report on the controller
+      ansible.builtin.fetch:
+        src: '{{ recovery_stage }}/verification-after-reboot.json'
+        dest: '{{ playbook_dir }}/../../../.private/recovery-reports/{{ inventory_hostname }}.json'
+        flat: true
+    - name: Explain completion boundary
+      ansible.builtin.debug:
+        msg: >-
+          Identity/subscription and loopback REALITY checks passed.
+          Reboot was skipped only when check-only mode was requested. Bots/timers remain disabled.
+          Public DNS, firewall activation and ISP/CDN reachability were not tested.

@@ -5,6 +5,27 @@ import pytest
 from scripts import management_bot
 
 
+def test_directory_only_returns_names_and_usernames(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def dispatch(operation: str, args: dict[str, Any]) -> Any:
+        calls.append((operation, args))
+        return [{"username": "alice", "name": "Alice Example"}]
+
+    monkeypatch.setattr(management_bot, "dispatch", dispatch)
+    assert management_bot.command('/directory 2 "Alice Example"', {}) == "alice | Alice Example"
+    assert calls == [
+        ("list", {"limit": 30, "offset": 30, "brief": True, "search": "Alice Example"})
+    ]
+    management_bot.command('/show "Alice Example"', {})
+    assert calls[-1] == ("show", {"customer": "Alice Example"})
+    management_bot.command('/customers "Alice Example"', {})
+    assert calls[-1] == (
+        "list",
+        {"limit": 10, "offset": 0, "history": False, "search": "Alice Example"},
+    )
+
+
 def test_create_uses_allowlisted_dispatch_and_redacts_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -52,10 +73,25 @@ def test_destructive_command_requires_matching_confirmation(
     assert calls == [("revoke", {"customer": "alice", "confirmed": True})]
 
 
-def test_management_help_does_not_offer_subscription_links() -> None:
+def test_management_help_lists_explicit_private_link_commands() -> None:
     text = management_bot.help_text()
-    assert "/link" not in text
-    assert "SSH CLI" in text
+    assert "/link SELECTOR" in text
+    assert "/config SELECTOR CONFIG_ID" in text
+    assert "private administrator chat" in text
+
+
+def test_help_describes_commands_and_distinguishes_global_inbound_list() -> None:
+    text = management_bot.help_text()
+    assert len(text) <= management_bot.MAX_MESSAGE
+    assert "/inbounds — ALL available inbounds" in text
+    assert "/inbounds USER — Open that user's selection picker" in text
+    assert "omitted means default" in text
+    assert "not panel username" in text
+    for command in management_bot.BOT_COMMANDS:
+        assert "/" + command["command"] in text
+    for line in text.splitlines():
+        if line.startswith("/"):
+            assert " — " in line
 
 
 def test_management_daily_inspection_and_identity_commands(
@@ -136,7 +172,6 @@ def test_customer_inventory_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
         ("/runmonitor", "monitor-run", {}),
         ("/alerts", "alerts-status", {}),
         ("/users", "users", {}),
-        ("/inbounds", "inbounds", {}),
         ("/sync", "sync", {}),
         ("/backup", "backup", {}),
         ("/customers", "list", {"limit": 10, "offset": 0, "history": False}),
@@ -230,7 +265,6 @@ def test_all_regular_command_contracts(
         "/enable a b",
         "/customers 0",
         "/customers -1",
-        "/customers abc",
         "/history 1 2",
         "/create alice",
         "/create alice quota=nan days=1 protocols=vless",
@@ -393,14 +427,14 @@ def test_telegram_rate_limit_retries_delivery_only(monkeypatch: pytest.MonkeyPat
     calls: list[object] = []
 
     class Response:
-        def __enter__(self) -> object:
+        def __enter__(self: Any) -> object:
             return io.BytesIO(b'{"ok":true,"result":{}}')
 
-        def __exit__(self, *args: object) -> None:
+        def __exit__(self: Any, *args: object) -> None:
             pass
 
     class Opener:
-        def open(self, request: object, **kwargs: object) -> Response:
+        def open(self: Any, request: object, **kwargs: object) -> Response:
             calls.append(request)
             if len(calls) == 1:
                 raise urllib.error.HTTPError(
@@ -416,3 +450,41 @@ def test_telegram_rate_limit_retries_delivery_only(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(time, "sleep", delays.append)
     assert management_bot.telegram("synthetic", "sendMessage", {"text": "hello"})["ok"]
     assert len(calls) == 2 and delays == [2.1]
+
+
+@pytest.mark.parametrize(
+    "name,expected", [("link", "https://example.invalid/s/secret"), ("config", "vless://secret")]
+)
+def test_only_explicit_link_commands_return_requested_credential(
+    monkeypatch: pytest.MonkeyPatch, name: str, expected: str
+) -> None:
+    calls = []
+
+    def dispatch(operation: str, args: dict[str, Any]) -> Any:
+        calls.append((operation, args))
+        return {
+            "subscription_url": "https://example.invalid/s/secret",
+            "config_uri": "vless://secret",
+            "token": "RAW-TOKEN-NEVER-RETURN",
+        }
+
+    monkeypatch.setattr(management_bot, "dispatch", dispatch)
+    text = "/link alice" if name == "link" else "/config alice abc123"
+    assert management_bot.command(text, {}) == expected
+    assert calls[0][0] == name
+    assert management_bot.redact(dispatch("", {})) == {}
+
+
+def test_link_commands_reject_wrong_arguments_and_oversized_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for text in ["/link", "/link alice extra", "/config alice", "/configs alice extra"]:
+        with pytest.raises(ValueError):
+            management_bot.command(text, {})
+    monkeypatch.setattr(
+        management_bot,
+        "dispatch",
+        lambda *args: {"subscription_url": "x" * (management_bot.MAX_MESSAGE + 1)},
+    )
+    with pytest.raises(ValueError, match="message size"):
+        management_bot.command("/link alice", {})

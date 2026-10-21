@@ -74,6 +74,23 @@ def test_traffic_anomaly_requires_absolute_and_relative_thresholds(tmp_path: Pat
     assert "user:1:traffic" in alerts
 
 
+def test_baseline_sums_all_nodes_before_averaging_hours(tmp_path: Path) -> None:
+    path = tmp_path / "usage.sqlite3"
+    database(path)
+    with sqlite3.connect(path) as db:
+        db.executemany(
+            "INSERT INTO node_user_usages VALUES (?, ?, 1, ?, ?)",
+            [
+                (1, "2026-01-08 09:00:00", None, 100),
+                (2, "2026-01-08 09:00:00", 1, 200),
+                (3, "2026-01-08 10:00:00", 1, 500),
+                (4, "2026-01-08 12:00:00", 1, 9999),
+                (5, "2025-12-01 09:00:00", 1, 9999),
+            ],
+        )
+        assert monitor.baseline_by_user(db, "2026-01-08 12:00:00") == {1: 400}
+
+
 def test_state_is_private_and_public_result_omits_counters(tmp_path: Path) -> None:
     path = tmp_path / "state.json"
     monitor.save_state(path, {"healthy": True, "user_counters": {"1": 5}})
@@ -270,3 +287,38 @@ def test_operator_backup_does_not_mask_stale_database_recovery(tmp_path: Path) -
     assert "backup:age" in monitor.backup_alerts(
         {"backup_dir": str(tmp_path), "backup_max_age_hours": 26}, 1000000
     )
+
+
+@pytest.mark.parametrize(
+    "loaded,result,alert",
+    [
+        ("loaded", "success", False),
+        ("loaded", "exit-code", True),
+        ("not-found", "success", True),
+    ],
+)
+def test_completed_backup_job_is_not_confused_with_failed_job(
+    monkeypatch: pytest.MonkeyPatch, loaded: str, result: str, alert: bool
+) -> None:
+    def command(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess([], 0, f"LoadState={loaded}\nResult={result}\n".encode())
+
+    monkeypatch.setattr(subprocess, "run", command)
+    assert bool(monitor.failed_job_alerts(["backup.service"])) is alert
+
+
+def test_conntrack_pressure_has_own_rule_and_metrics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        monitor, "connection_tracking", lambda: {"conntrack_entries": 950, "conntrack_limit": 1000}
+    )
+    assert monitor.system_metrics()["conntrack_limit"] == 1000
+    path = tmp_path / "monitor.json"
+    path.write_text("{}")
+    path.chmod(0o600)
+    cfg = monitor.load_config(path)
+    alerts = monitor.resource_alerts(cfg)
+    assert "conntrack:critical" in alerts
+    assert monitor.rule_for_key("conntrack:critical") == "host.conntrack"
+    assert monitor.severity_for_key("conntrack:critical") == "critical"

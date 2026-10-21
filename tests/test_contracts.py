@@ -46,8 +46,9 @@ def test_existing_api_contract_is_unchanged(client: TestClient) -> None:
                 "vmess_httpupgrade_cdn",
                 "trojan_reality_ipv6",
                 "trojan_xhttp_cdn",
+                "grpc_reality",
             ]
-            assert new["maxItems"] == 11 and old["maxItems"] == 5
+            assert new["maxItems"] == 12 and old["maxItems"] == 5
             new["items"]["enum"] = old["items"]["enum"]
             new["maxItems"] = old["maxItems"]
         if name in {"CustomerCreate", "CustomerUpdate", "CustomerView"}:

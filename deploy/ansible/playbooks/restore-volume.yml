@@ -1,4 +1,15 @@
 ---
+- name: Restore volume directories and ownership before database files
+  ansible.builtin.file:
+    path: '{{ (volume.stdout | from_json)[0].Mountpoint }}{{ item.path | replace("volumes/" + volume.item.name, "", 1) }}'
+    state: directory
+    owner: '{{ item.uid }}'
+    group: '{{ item.gid }}'
+    mode: '{{ "%04o" | format(item.mode) }}'
+  loop: '{{ recovery_manifest.directories }}'
+  when: item.path == 'volumes/' + volume.item.name or item.path.startswith('volumes/' + volume.item.name + '/')
+  no_log: true
+
 - name: Restore captured files into an empty Docker volume
   ansible.builtin.copy:
     src: '{{ recovery_stage }}/{{ item.path }}'

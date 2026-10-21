@@ -1,0 +1,21 @@
+[Unit]
+Description=Keyholder foreign SOCKS exit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=keyholder-exit
+Group=keyholder-exit
+Environment=XRAY_LOCATION_ASSET=/var/lib/marzban/xray-core
+ExecStart=/var/lib/marzban/xray-core/xray run -config /etc/keyholder-foreign-exit/config.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

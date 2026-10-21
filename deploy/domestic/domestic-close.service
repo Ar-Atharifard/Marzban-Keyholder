@@ -1,0 +1,6 @@
+[Unit]
+Description=Fail closed if domestic lease verification fails
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl stop haproxy.service

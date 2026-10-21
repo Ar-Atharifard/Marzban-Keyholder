@@ -250,6 +250,13 @@ def capture(config: dict[str, Any], output: Path) -> None:
             with source.open("rb") as reader, target.open("xb") as writer:
                 shutil.copyfileobj(reader, writer)
             target.chmod(0o600)
+            after = source.stat()
+            if (info.st_ino, info.st_size, info.st_mtime_ns) != (
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                raise ValueError("Source changed while capturing")
         records.append(
             {
                 "path": name,
@@ -272,6 +279,7 @@ def capture(config: dict[str, Any], output: Path) -> None:
             for item in regular_tree(root):
                 add(item, str(Path(name) / item.relative_to(root)))
         images = []
+        projects: dict[str, list[str]] = {}
         for container in config.get("containers", []):
             inspected = json.loads(run(["docker", "inspect", container]))[0]
             image = inspected["Image"]
@@ -297,6 +305,15 @@ def capture(config: dict[str, Any], output: Path) -> None:
                 claimed.add(image_path)
             labels = inspected["Config"].get("Labels") or {}
             # Only nonsecret identity metadata is recorded here; never dump inspect's Env.
+            project = labels.get("com.docker.compose.project")
+            compose_files = labels.get("com.docker.compose.project.config_files", "").split(",")
+            if not project or not all(compose_files):
+                raise ValueError("Missing Compose project metadata")
+            if any("rootfs/" + name.lstrip("/") not in claimed for name in compose_files):
+                raise ValueError("Deployment changed while capturing")
+            if project in projects and projects[project] != compose_files:
+                raise ValueError("Inconsistent Compose project metadata")
+            projects[project] = compose_files
             images.append(
                 {
                     "container": container,
@@ -313,6 +330,9 @@ def capture(config: dict[str, Any], output: Path) -> None:
             "files": records,
             "directories": list(directories.values()),
             "images": images,
+            "compose_projects": [
+                {"name": name, "files": paths} for name, paths in projects.items()
+            ],
         }
         with (output / "manifest.json").open("x") as stream:
             json.dump(manifest, stream, indent=2)
@@ -451,6 +471,17 @@ def upload(config: dict[str, Any], work: Path, status: Path) -> None:
                 shutil.rmtree(bundle)
 
 
+def maintain(work: Path) -> None:
+    """Hold the shared lock across repository checks and compaction."""
+    if work.is_symlink() or not work.is_dir() or work.stat().st_mode & 0o077:
+        raise ValueError("Work directory must be private")
+    with (work / "backup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        full = dt.datetime.now(dt.timezone.utc).day <= 7  # noqa: UP017
+        run(["restic", "check", "--read-data" if full else "--read-data-subset=5%"], timeout=1800)
+        run(["restic", "prune", "--max-repack-size=256M", "--max-unused=10%"], timeout=1800)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
@@ -475,6 +506,8 @@ def main() -> None:
     remote.add_argument("--config", type=Path, required=True)
     remote.add_argument("--work", type=Path, required=True)
     remote.add_argument("--status", type=Path, required=True)
+    maintenance = commands.add_parser("maintain", help="Check and compact the existing repository")
+    maintenance.add_argument("--work", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
     try:
@@ -482,6 +515,8 @@ def main() -> None:
             configure_b2(args.directory)
         elif args.action == "prepare-s3":
             prepare_s3(args.environment)
+        elif args.action == "maintain":
+            maintain(args.work)
         elif args.action == "inventory":
             config = discover(private_json(args.seed))
             with args.output.open("x") as stream:

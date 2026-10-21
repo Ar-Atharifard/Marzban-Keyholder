@@ -1,0 +1,179 @@
+---
+- name: Restore the domestic service onto a prepared empty host
+  hosts: domestic_targets
+  become: true
+  gather_facts: true
+  vars:
+    domestic_stage: /var/lib/keyholder-recovery/domestic-staged
+    domestic_units:
+      - marzban-node.service
+      - keyholder-rathole-server.service
+      - keyholder-domestic-guard.service
+      - keyholder-domestic-guard.timer
+      - keyholder-domestic-close.service
+  tasks:
+    - name: Require reviewed host access and network policy
+      ansible.builtin.assert:
+        that:
+          - domestic_target_is_empty | default(false) | bool
+          - domestic_security_validated | default(false) | bool
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '22.04'
+          - ansible_facts.architecture == 'x86_64'
+          - domestic_archive is defined
+        fail_msg: Prepare and verify SSH/firewall first; select an empty Ubuntu 22.04 amd64 target.
+    - name: Refuse overwriting an existing node installation
+      ansible.builtin.stat:
+        path: /opt/marzban-node/main.py
+      register: domestic_existing
+    - name: Enforce empty-target restore
+      ansible.builtin.assert:
+        that: not domestic_existing.stat.exists
+    - name: Install missing prerequisites without upgrading the OS
+      ansible.builtin.apt:
+        name: [python3-venv, haproxy, ca-certificates]
+        state: present
+        update_cache: false
+        policy_rc_d: 101
+    - name: Create private recovery helper directory
+      ansible.builtin.file:
+        path: /usr/local/lib/keyholder-recovery
+        state: directory
+        mode: '0700'
+    - name: Install reviewed staging helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-recovery/{{ item }}'
+        mode: '0700'
+      loop: [gate_backup.py, gate_snapshot.py, restore_domestic.py]
+    - name: Validate and stage the private fixed-file archive
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/restore_domestic.py,
+               --archive, '{{ domestic_archive }}', --destination, '{{ domestic_stage }}']
+        creates: '{{ domestic_stage }}'
+      no_log: true
+    - name: Create service users without login
+      ansible.builtin.user:
+        name: '{{ item }}'
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+      loop: [marzban-node, keyholder-tunnel]
+    - name: Create application and credential directories
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        owner: '{{ item.owner | default("root") }}'
+        group: '{{ item.group | default("root") }}'
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: /opt/marzban-node, mode: '0755'}
+        - {path: /etc/marzban-node, mode: '0750', group: marzban-node}
+        - {path: /var/lib/marzban-node, mode: '0700', owner: marzban-node, group: marzban-node}
+        - {path: /etc/keyholder-rathole, mode: '0750', group: keyholder-tunnel}
+        - {path: /etc/keyholder-domestic, mode: '0700'}
+        - {path: /var/lib/keyholder-domestic, mode: '0700'}
+        - {path: /usr/local/lib/keyholder-admin, mode: '0755'}
+        - {path: /usr/local/libexec, mode: '0755'}
+    - name: Restore captured node source and Xray assets
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/opt/marzban-node/'
+        dest: /opt/marzban-node/
+        remote_src: true
+        owner: root
+        group: root
+        mode: 'u=rwX,go=rX'
+      no_log: true
+    - name: Restore captured reverse tunnel binary
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/usr/local/bin/rathole'
+        dest: /usr/local/bin/rathole
+        remote_src: true
+        mode: '0755'
+    - name: Restore pinned dependency wheels
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/var/cache/keyholder-node-wheels/'
+        dest: /var/cache/keyholder-node-wheels/
+        remote_src: true
+        mode: preserve
+      no_log: true
+    - name: Install isolated dependencies without contacting a package index
+      ansible.builtin.pip:
+        requirements: /opt/marzban-node/requirements.txt
+        virtualenv: /opt/marzban-node/.venv
+        virtualenv_command: /usr/bin/python3 -m venv
+        extra_args: --no-index --find-links /var/cache/keyholder-node-wheels
+    - name: Restore node environment and certificates
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/{{ item }}'
+        dest: '/{{ item }}'
+        remote_src: true
+        owner: marzban-node
+        group: marzban-node
+        mode: '0600'
+      loop:
+        - etc/marzban-node/node.env
+        - var/lib/marzban-node/ssl_cert.pem
+        - var/lib/marzban-node/ssl_key.pem
+        - var/lib/marzban-node/ssl_client_cert.pem
+      no_log: true
+    - name: Restore reverse tunnel credentials
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/etc/keyholder-rathole/server.toml'
+        dest: /etc/keyholder-rathole/server.toml
+        remote_src: true
+        owner: root
+        group: keyholder-tunnel
+        mode: '0640'
+      no_log: true
+    - name: Restore and validate gateway routing
+      ansible.builtin.copy:
+        src: '{{ domestic_stage }}/etc/haproxy/haproxy.cfg'
+        dest: /etc/haproxy/haproxy.cfg
+        remote_src: true
+        mode: '0644'
+        validate: /usr/sbin/haproxy -c -f %s
+      no_log: true
+    - name: Install current guard and telemetry helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-admin/{{ item }}'
+        mode: '0755'
+      loop: [domestic_guard.py, gate_status.py, monitor.py]
+    - name: Install guard arm file
+      ansible.builtin.copy:
+        content: ''
+        dest: /etc/keyholder-domestic/armed
+        mode: '0600'
+    - name: Install reviewed domestic service units
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../domestic/{{ item | regex_replace("^keyholder-", "") }}'
+        dest: '/etc/systemd/system/{{ item }}'
+        mode: '0644'
+      loop: '{{ domestic_units }}'
+    - name: Keep public gateway closed until a valid heartbeat
+      ansible.builtin.systemd_service:
+        name: haproxy
+        state: stopped
+        enabled: false
+        daemon_reload: true
+    - name: Start node and reverse listener under the prepared firewall
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        state: started
+        enabled: true
+      loop: [marzban-node, keyholder-rathole-server, keyholder-domestic-guard.timer]
+      when:
+        - domestic_activate | default(false) | bool
+        - domestic_old_node_stopped | default(false) | bool
+        - domestic_peers_reviewed | default(false) | bool
+    - name: Explain required peer handover
+      ansible.builtin.debug:
+        msg: >-
+          Captured node restored; no SSH, UFW or DNS configuration was replayed.
+          If IP changed, review foreign reverse connector address, Marzban node address,
+          source-restricted firewall and observer SSH key/host pin. Validate heartbeat,
+          subscriptions, routing and accounting before DNS cutover. The guard keeps
+          the gateway closed until the panel reconnects. Do not run two nodes with
+          the same restored identity. Python dependencies use captured wheels;
+          installing missing Ubuntu prerequisites still needs its package repository.

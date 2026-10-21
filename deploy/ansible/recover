@@ -1,0 +1,31 @@
+#!/bin/sh
+# Run from the laptop. Credentials are entered on the target, not in arguments.
+set -eu
+umask 077
+base=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+if [ "$#" -lt 1 ] || [ "${1:-}" = --help ]; then
+    echo "Usage: $0 PRIVATE_INVENTORY [--finish|--check] [ansible options]" >&2
+    exit 2
+fi
+inventory=$1
+shift
+finish=false
+check=false
+if [ "${1:-}" = --finish ]; then
+    finish=true
+    shift
+fi
+if [ "${1:-}" = --check ]; then
+    finish=true
+    check=true
+    shift
+fi
+runner="$base/.private/ansible-venv/bin/ansible-playbook"
+if [ ! -x "$runner" ]; then
+    python3.12 -m venv "$base/.private/ansible-venv"
+    "$base/.private/ansible-venv/bin/pip" install -r "$base/deploy/ansible/requirements.txt"
+fi
+export ANSIBLE_CONFIG="$base/deploy/ansible/ansible.cfg"
+export ANSIBLE_LOCAL_TEMP="$base/.private/ansible-tmp"
+exec "$runner" -i "$inventory" "$base/deploy/ansible/playbooks/recover.yml" \
+    --ask-become-pass -e "recovery_finish_only=$finish" -e "recovery_check_only=$check" "$@"

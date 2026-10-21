@@ -273,6 +273,7 @@ def test_active_deployment_discovery_does_not_export_container_environment(
     recovery.capture(config, tmp_path / "bundle")
     manifest = recovery.verify(tmp_path / "bundle")
     assert manifest["images"][0]["id"] == image_id
+    assert manifest["compose_projects"] == [{"name": "app", "files": [str(compose)]}]
     assert "SECRET" not in json.dumps(manifest)
     assert "rootfs/" + str(compose).lstrip("/") in config["files"]
     newer = tmp_path / "new-release.json"
@@ -323,3 +324,68 @@ def test_s3_preparation_validates_endpoint_and_preserves_password(
         with pytest.raises(ValueError):
             recovery.prepare_s3(path)
         assert path.read_text() == original
+
+
+@pytest.mark.parametrize("day,flag", [(1, "--read-data"), (18, "--read-data-subset=5%")])
+def test_maintenance_checks_before_pruning_and_holds_shared_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, day: int, flag: str
+) -> None:
+    import fcntl
+
+    work = tmp_path / "maintenance"
+    work.mkdir(mode=0o700)
+    calls: list[list[str]] = []
+
+    class Clock(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> "Clock":
+            return cls(2026, 10, day, tzinfo=tz)
+
+    def command(args: list[str], timeout: int = 60) -> bytes:
+        with (work / "backup.lock").open("a") as other:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        calls.append(args)
+        return b""
+
+    monkeypatch.setattr(dt, "datetime", Clock)
+    monkeypatch.setattr(recovery, "run", command)
+    recovery.maintain(work)
+    assert calls[0] == ["restic", "check", flag]
+    assert calls[1][1] == "prune"
+
+
+def test_failed_repository_check_never_prunes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "maintenance"
+    work.mkdir(mode=0o700)
+    calls: list[list[str]] = []
+
+    def command(args: list[str], timeout: int = 60) -> bytes:
+        calls.append(args)
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(recovery, "run", command)
+    with pytest.raises(subprocess.CalledProcessError):
+        recovery.maintain(work)
+    assert len(calls) == 1 and calls[0][1] == "check"
+
+
+def test_capture_refuses_a_file_modified_during_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = fixture_config(tmp_path)
+    source = tmp_path / "application.env"
+    import shutil
+
+    real_copy = shutil.copyfileobj
+
+    def changing_copy(reader: Any, writer: Any, length: int = 0) -> None:
+        real_copy(reader, writer, length)
+        source.write_text("changed-during-copy")
+
+    monkeypatch.setattr(shutil, "copyfileobj", changing_copy)
+    with pytest.raises(ValueError, match="Source changed"):
+        recovery.capture(config, tmp_path / "bundle")
+    assert not (tmp_path / "bundle").exists()

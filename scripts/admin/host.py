@@ -29,7 +29,7 @@ def configuration() -> dict[str, Any]:
         "monitor_config": "/etc/keyholder/monitor.json",
         "management_bot_env": "/etc/keyholder/management-bot.env",
         "management_bot_service": "keyholder-management-bot.service",
-        "dnstt_client_file": "/etc/keyholder/dnstt-client.json",
+        "dnstt_client_file": "/etc/keyholder/dnstt-personal-client.json",
     }
     file = Path(os.getenv("KEYHOLDER_HOST_CONFIG", str(Path(__file__).with_name("host.json"))))
     if file.exists():
@@ -194,6 +194,24 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     config = configuration()
     container = str(config["api_container"])
     operation = payload["operation"]
+    if operation in {"tls-configure", "tls-status", "tls-issue"}:
+        action = operation.removeprefix("tls-")
+        if action == "issue":
+            subprocess.run(
+                ["systemctl", "start", "--no-block", "keyholder-tls.service"],
+                capture_output=True,
+                check=True,
+                timeout=10,
+            )
+            return {"ok": True, "result": {"started": True}}
+        result = subprocess.run(
+            [sys.executable, "/usr/local/lib/keyholder-admin/tls.py", action],
+            input=json.dumps(payload.get("args", {})).encode(),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        return {"ok": True, "result": json.loads(result.stdout)}
     if operation == "status":
         states = []
         for name in config["status_containers"]:
@@ -438,11 +456,16 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
                 ],
             },
         }
-    if operation == "user-dnstt":
+    if operation == "personal-dnstt":
         path = Path(config["dnstt_client_file"])
         if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o077:
-            raise ValueError("DNSTT client settings must be root-owned and private")
-        payload.setdefault("args", {})["dnstt"] = json.loads(path.read_text())
+            raise ValueError("Personal DNSTT settings must be root-owned and private")
+        data = json.loads(path.read_text())
+        if set(data) != {"profile_uri", "transport"}:
+            raise ValueError("Invalid personal DNSTT profile")
+        return {"ok": True, "result": data}
+    if operation == "user-dnstt":
+        raise ValueError("DNSTT is owner-only; use personal dnstt")
     worker = Path(__file__).with_name("worker.py").read_text()
     result = subprocess.run(
         [

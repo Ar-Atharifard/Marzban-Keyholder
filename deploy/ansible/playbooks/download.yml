@@ -1,0 +1,69 @@
+---
+- name: Download the existing encrypted recovery snapshot
+  hosts: recovery_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require a deliberately selected target
+      ansible.builtin.assert:
+        that: recovery_target_is_disposable | bool
+    - name: Check repository credentials on the target
+      ansible.builtin.stat:
+        path: /etc/keyholder/recovery.env
+      register: repository_env
+    - name: Wait for private credential setup when needed
+      ansible.builtin.pause:
+        prompt: >-
+          In a second terminal SSH into this target and run
+          sudo keyholder-recovery configure-b2 then sudo keyholder-recovery prepare-s3.
+          Use the EXISTING repository password. Do not run restic init.
+          Press Enter here after both succeed.
+      when: not repository_env.stat.exists
+    - name: Check for an already downloaded bundle
+      ansible.builtin.stat:
+        path: '{{ recovery_bundle }}/manifest.json'
+      register: downloaded
+    - name: Check incomplete download destination
+      ansible.builtin.find:
+        paths: /var/lib/keyholder-recovery/downloaded
+        hidden: true
+        recurse: false
+        file_type: any
+      register: previous_download
+      when: not downloaded.stat.exists
+    - name: Refuse to overwrite an incomplete download
+      ansible.builtin.assert:
+        that: previous_download.matched == 0
+        fail_msg: Review the partial download before retrying; existing files will not be overwritten.
+      when: not downloaded.stat.exists
+    - name: Create private download parent
+      ansible.builtin.file:
+        path: /var/lib/keyholder-recovery/downloaded
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Download and verify the latest recovery snapshot
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --wait
+          - --collect
+          - --unit=keyholder-restore-download
+          - --property=EnvironmentFile=/etc/keyholder/recovery.env
+          - /usr/bin/restic
+          - --quiet
+          - restore
+          - latest
+          - --tag
+          - keyholder-recovery-v1
+          - --target
+          - /var/lib/keyholder-recovery/downloaded
+          - --verify
+      when: not downloaded.stat.exists
+      changed_when: true
+      no_log: true
+    - name: Verify bundle inventory and hashes
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/keyholder-recovery, verify, --bundle, '{{ recovery_bundle }}']
+      changed_when: false

@@ -1,0 +1,20 @@
+[Unit]
+Description=Encrypted reverse tunnel (foreign connector)
+After=network-online.target keyholder-foreign-exit.service
+Wants=network-online.target
+
+[Service]
+User=keyholder-tunnel
+Group=keyholder-tunnel
+ExecStart=/usr/local/bin/rathole /etc/keyholder-rathole/client.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

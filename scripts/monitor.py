@@ -67,9 +67,14 @@ def load_config(path: Path) -> dict[str, Any]:
         "backup_dir": "/var/backups/keyholder",
         "containers": [],
         "systemd_units": [],
+        "systemd_failed_units": [],
         "required_user_count": 1,
         "http_checks": [],
         "tcp_checks": [],
+        "certificate_checks": [],
+        "proxy_status_file": "",
+        "proxy_status_max_age_seconds": 420,
+        "remote_hosts": [],
         "disk_warning_percent": 80,
         "disk_critical_percent": 90,
         "inode_warning_percent": 85,
@@ -135,6 +140,39 @@ def systemd_alerts(units: list[str]) -> dict[str, str]:
     return alerts
 
 
+def failed_job_alerts(units: list[str]) -> dict[str, str]:
+    """Completed oneshot jobs may be inactive; only missing/failed jobs alert."""
+    alerts = {}
+    for unit in units:
+        result = subprocess.run(
+            ["systemctl", "show", unit, "--property=LoadState,Result"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        values = dict(
+            line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line
+        )
+        if (
+            result.returncode
+            or values.get("LoadState") != "loaded"
+            or values.get("Result") != "success"
+        ):
+            alerts[f"systemd:{unit}"] = f"Scheduled job {unit} is missing or failed"
+    return alerts
+
+
+def connection_tracking() -> dict[str, int]:
+    try:
+        base = Path("/proc/sys/net/netfilter")
+        return {
+            "conntrack_entries": int((base / "nf_conntrack_count").read_text()),
+            "conntrack_limit": int((base / "nf_conntrack_max").read_text()),
+        }
+    except (OSError, ValueError):
+        return {}
+
+
 def system_metrics() -> dict[str, Any]:
     memory = read_meminfo()
     disk = shutil.disk_usage("/")
@@ -167,6 +205,7 @@ def system_metrics() -> dict[str, Any]:
         "cpu_total_ticks": sum(cpu),
         "cpu_idle_ticks": cpu[3] + cpu[4],
         **network,
+        **connection_tracking(),
     }
 
 
@@ -201,6 +240,13 @@ def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
     load = os.getloadavg()[0]
     if load >= float(config["load_warning_per_cpu"]) * cpu_count:
         alerts["cpu:load"] = f"One-minute load is {load:.2f} across {cpu_count} CPUs"
+    tracking = connection_tracking()
+    if tracking.get("conntrack_limit", 0):
+        percent = 100 * tracking["conntrack_entries"] / tracking["conntrack_limit"]
+        if percent >= 90:
+            alerts["conntrack:critical"] = f"Connection tracking table is {percent:.1f}% full"
+        elif percent >= 75:
+            alerts["conntrack:warning"] = f"Connection tracking table is {percent:.1f}% full"
     return alerts
 
 
@@ -232,6 +278,67 @@ def network_alerts(config: dict[str, Any]) -> dict[str, str]:
         except OSError:
             alerts[f"tcp:{name}"] = f"TCP check {name} failed"
     return alerts
+
+
+def certificate_alerts(items: list[dict[str, str]]) -> dict[str, str]:
+    alerts = {}
+    for item in items:
+        name = item["name"]
+        for days, severity in [(2, "critical"), (14, "warning")]:
+            try:
+                result = subprocess.run(
+                    [
+                        "openssl",
+                        "x509",
+                        "-in",
+                        item["path"],
+                        "-noout",
+                        "-checkend",
+                        str(days * 86400),
+                    ],
+                    capture_output=True,
+                    timeout=3,
+                    check=False,
+                )
+                if result.returncode:
+                    alerts[f"tls:{name}:{severity}"] = (
+                        f"{name}: certificate unreadable or expires within {days} days"
+                    )
+                    break
+            except (OSError, subprocess.SubprocessError):
+                alerts[f"tls:{name}:critical"] = f"{name}: certificate inspection failed"
+                break
+    return alerts
+
+
+def proxy_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
+    filename = config.get("proxy_status_file")
+    if not filename:
+        return {}
+    try:
+        report = json.loads(Path(filename).read_text())
+        sampled = dt.datetime.fromisoformat(report["checked_at"]).timestamp()
+        if not 0 <= now - sampled <= float(config.get("proxy_status_max_age_seconds", 420)):
+            return {"proxy:monitor": "Authenticated proxy checks are overdue"}
+        if report.get("error"):
+            return (
+                {"proxy:monitor": "Probe failed; inspect service and monitoring account"}
+                if int(report.get("failures", 0)) >= 2
+                else {}
+            )
+        failed = [
+            name
+            for name, item in report["profiles"].items()
+            if not item["healthy"] and int(item.get("failures", 0)) >= 2
+        ]
+        # One incident for the failing set prevents a complete outage sending 16 messages.
+        return (
+            {"proxy:delivery": "Authenticated HTTPS failed: " + ", ".join(sorted(failed))}
+            if failed
+            else {}
+        )
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {"proxy:monitor": "Authenticated proxy check report is missing or invalid"}
 
 
 def backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
@@ -280,14 +387,79 @@ def offsite_backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
 def baseline_by_user(db: sqlite3.Connection, current_hour: str) -> dict[int, float]:
     rows = db.execute(
         """
-        SELECT user_id, AVG(used_traffic) FROM node_user_usages
-        WHERE created_at >= datetime('now', '-7 days') AND created_at < ?
-          AND used_traffic > 0
+        SELECT user_id, AVG(hourly_traffic) FROM (
+          SELECT user_id, created_at, SUM(used_traffic) AS hourly_traffic
+          FROM node_user_usages
+          WHERE created_at >= datetime(?, '-7 days') AND created_at < ?
+          GROUP BY user_id, created_at
+          HAVING SUM(used_traffic) > 0
+        )
         GROUP BY user_id
         """,
-        (current_hour,),
+        (current_hour, current_hour),
     )
     return {int(user_id): float(value) for user_id, value in rows}
+
+
+def remote_hosts(items: list[dict[str, str]]) -> tuple[dict[str, str], dict[str, Any]]:
+    alerts, snapshots = {}, {}
+    for item in items:
+        name = item["name"]
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+            raise ValueError("Invalid remote host label")
+        prefix = f"remote:{name}"
+        try:
+            response = subprocess.run(
+                [
+                    "ssh",
+                    "-F",
+                    item["ssh_config"],
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=3",
+                    item["target"],
+                    "status",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            if len(response.stdout) > 65536:
+                raise ValueError("Oversize telemetry")
+            snapshot = json.loads(response.stdout)
+            if (
+                not isinstance(snapshot, dict)
+                or not isinstance(snapshot.get("metrics"), dict)
+                or not isinstance(snapshot.get("services"), dict)
+                or not isinstance(snapshot.get("guard"), dict)
+                or not isinstance(snapshot["guard"].get("entry_permitted"), bool)
+            ):
+                raise ValueError("Invalid telemetry structure")
+            metrics = snapshot["metrics"]
+            failed = [key for key, value in snapshot["services"].items() if value != "active"]
+            if failed or not snapshot["guard"]["entry_permitted"]:
+                alerts[prefix + ":service"] = f"{name}: entry/control services unhealthy"
+            disk = 100 * metrics["disk_used_gib"] / metrics["disk_total_gib"]
+            if disk >= 80:
+                alerts[prefix + ":disk"] = f"{name}: root disk is {disk:.0f}% full"
+            if metrics["memory_available_mib"] < 200:
+                alerts[prefix + ":memory"] = f"{name}: available memory below 200 MiB"
+            if metrics["load_1_5_15"][1] > metrics["cpus"] * 1.5:
+                alerts[prefix + ":cpu"] = f"{name}: sustained high CPU load"
+            snapshots[name] = snapshot
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            ValueError,
+            KeyError,
+            TypeError,
+            IndexError,
+            ZeroDivisionError,
+        ):
+            alerts[prefix + ":unavailable"] = f"{name}: telemetry unavailable"
+    return alerts, snapshots
 
 
 def user_alerts(
@@ -483,10 +655,14 @@ RULES = {
     "host.memory": "Low available RAM; inspect resident processes and memory limits.",
     "host.swap": "High swap use; inspect memory pressure and paging.",
     "host.cpu": "High CPU load; inspect processes and host contention.",
+    "host.conntrack": "Connection tracking pressure; inspect entry count, limit and kernel drops.",
     "service.container": "Container stopped/unhealthy; inspect its health and logs.",
     "service.systemd": "Required unit inactive; inspect its status and journal.",
     "service.http": "HTTP probe failed; inspect origin, TLS, gateway and upstream.",
     "service.tcp": "TCP listener unavailable; inspect the owning service.",
+    "service.proxy": "Proxy traffic failed twice; inspect container DNS, Xray and gateway.",
+    "service.remote": "Domestic host/entry unavailable; inspect its SSH, guard and node services.",
+    "service.tls": "Certificate needs attention; run tls status and inspect renewal service.",
     "backup.age": "Recovery snapshot overdue; run system backup and verify integrity.",
     "backup.offsite": "Offsite backup overdue; inspect recovery service, storage and credentials.",
     "marzban.usage": "Usage DB unavailable; inspect permissions and database health.",
@@ -495,10 +671,16 @@ RULES = {
 
 
 def rule_for_key(key: str) -> str:
+    if key.startswith("tls:"):
+        return "service.tls"
+    if key.startswith("remote:"):
+        return "service.remote"
+    if key.startswith("proxy:"):
+        return "service.proxy"
     parts = key.split(":")
     if parts[0] == "user" and len(parts) == 3:
         return "user." + parts[2]
-    if parts[0] in {"disk", "inode", "memory", "swap", "cpu"}:
+    if parts[0] in {"disk", "inode", "memory", "swap", "cpu", "conntrack"}:
         return "host." + parts[0]
     if parts[0] in {"container", "systemd", "http", "tcp"}:
         return "service." + parts[0]
@@ -506,10 +688,12 @@ def rule_for_key(key: str) -> str:
 
 
 def severity_for_key(key: str) -> str:
+    if key.startswith("remote:") and key.endswith((":unavailable", ":service")):
+        return "critical"
     if (
         key == "backup:offsite"
         or key.endswith(":critical")
-        or key.startswith(("container:", "systemd:", "http:", "tcp:", "marzban:"))
+        or key.startswith(("container:", "systemd:", "http:", "tcp:", "marzban:", "proxy:"))
     ):
         return "critical"
     return "warning"
@@ -620,10 +804,15 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     alerts: dict[str, str] = {}
     alerts.update(container_alerts(config["containers"]))
     alerts.update(systemd_alerts(config["systemd_units"]))
+    alerts.update(failed_job_alerts(config.get("systemd_failed_units", [])))
     alerts.update(resource_alerts(config))
     alerts.update(network_alerts(config))
+    alerts.update(certificate_alerts(config.get("certificate_checks", [])))
+    alerts.update(proxy_alerts(config, now.timestamp()))
     alerts.update(backup_alerts(config, now.timestamp()))
     alerts.update(offsite_backup_alerts(config, now.timestamp()))
+    remote_alerts, remote_snapshots = remote_hosts(config.get("remote_hosts", []))
+    alerts.update(remote_alerts)
     try:
         per_user, counters = user_alerts(config, previous, now)
         alerts.update(per_user)
@@ -725,6 +914,7 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     result = {
         "alert_contract_version": 1,
         "metrics": metrics,
+        "remote_hosts": remote_snapshots,
         "incidents": incidents,
         "terminal_accounts": terminal,
         "silenced_alerts": sorted(silenced),
@@ -755,6 +945,7 @@ def public_result(state: dict[str, Any]) -> dict[str, Any]:
         "alerts": state.get("alerts", {}),
         "notification_error": state.get("notification_error"),
         "metrics": state.get("metrics", {}),
+        "remote_hosts": state.get("remote_hosts", {}),
         "incidents": state.get("incidents", {}),
         "silenced_alerts": state.get("silenced_alerts", []),
     }
@@ -791,6 +982,7 @@ def main(argv: list[str] | None = None) -> int:
             previous = load_state(Path(config["state_file"]))
             metrics["cpu_busy_percent"] = previous.get("metrics", {}).get("cpu_busy_percent")
             metrics["cpu_sampled_at"] = previous.get("checked_at")
+            metrics["remote_hosts"] = previous.get("remote_hosts", {})
             print(json.dumps(metrics))
             return 0
         if args.test_alert:

@@ -1,0 +1,227 @@
+---
+- name: Activate an explicitly reviewed replacement server
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require production security and address review
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - recovery_environment == 'production'
+          - recovery_security_validated | default(false) | bool
+          - recovery_addresses_reviewed | default(false) | bool
+          - recovery_address_map | default({}) | length > 0
+          - recovery_compose_projects | length > 0
+        fail_msg: Review target SSH/firewall and old-to-new IP mapping before activation.
+    - name: Detect captured domestic control-plane dependencies before startup
+      ansible.builtin.stat:
+        path: /etc/keyholder-rathole/client.toml
+      register: domestic_connector
+    - name: Prevent two foreign panels controlling the same node
+      ansible.builtin.assert:
+        that:
+          - recovery_domestic_peers_reviewed | default(false) | bool
+          - recovery_old_writers_stopped | default(false) | bool
+        fail_msg: Stop the old panel/controller and writers, and review domestic peers before startup.
+      when: domestic_connector.stat.exists
+    - name: Adapt only endpoint addresses on the replacement
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-']
+        stdin: |
+          import ipaddress, json, sqlite3, subprocess
+          from pathlib import Path
+          mapping = json.loads({{ recovery_address_map | to_json | to_json }})
+          assigned = {a['local'] for n in json.loads(subprocess.check_output(['ip','-j','address']))
+                      for a in n.get('addr_info', [])}
+          for old, new in mapping.items():
+              assert ipaddress.ip_address(old).version == ipaddress.ip_address(new).version
+              assert new in assigned, 'Replacement address is not assigned to this host'
+          core = Path('/var/lib/marzban/xray_config.json')
+          data = json.loads(core.read_text())
+          for inbound in data['inbounds']:
+              address = inbound.get('listen')
+              if address in mapping:
+                  inbound['listen'] = mapping[address]
+              elif address and not ipaddress.ip_address(address).is_unspecified:
+                  assert ipaddress.ip_address(address).is_loopback or address in assigned
+          core.write_text(json.dumps(data, indent=2) + '\n')
+          with sqlite3.connect('/var/lib/marzban/db.sqlite3') as db:
+              for old, new in mapping.items():
+                  db.execute('UPDATE hosts SET address=? WHERE address=?', (new, old))
+          env = Path('/etc/keyholder/dnstt.env')
+          if env.exists():
+              lines = env.read_text().splitlines()
+              for index, line in enumerate(lines):
+                  if line.startswith('DNSTT_LISTEN='):
+                      for old, new in mapping.items():
+                          line = line.replace(old, new)
+                      lines[index] = line
+              env.write_text('\n'.join(lines) + '\n')
+      changed_when: true
+      no_log: true
+    - name: Start only reviewed projects with captured immutable images
+      ansible.builtin.command:
+        argv: >-
+          {{ ['docker', 'compose', '--project-name', item.name]
+          + (item.files | map('regex_replace', '^(.*)$', '--file=\1') | list)
+          + ['--file=' + recovery_stage + '/' + item.name + '.override.json',
+          'up', '--detach', '--no-build', '--pull', 'never'] }}
+      loop: '{{ recovery_compose_projects }}'
+      changed_when: true
+      no_log: true
+    - name: Wait for local API health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        status_code: 200
+        use_proxy: false
+      register: api_health
+      retries: 24
+      delay: 5
+      until: api_health.status == 200
+    - name: Find captured operational unit definitions
+      ansible.builtin.find:
+        paths: '{{ recovery_stage }}/rootfs/etc/systemd/system'
+        patterns: 'keyholder-*'
+        file_type: file
+      register: captured_units
+    - name: Install captured units without starting scheduled jobs
+      ansible.builtin.copy:
+        src: '{{ item.path }}'
+        dest: '/etc/systemd/system/{{ item.path | basename }}'
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      loop: '{{ captured_units.files }}'
+      no_log: true
+    - name: Reload restored unit definitions
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+    - name: Create restored infrastructure service users
+      ansible.builtin.user:
+        name: '{{ item }}'
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+      loop: [keyholder-exit, keyholder-tunnel]
+      when: domestic_connector.stat.exists
+    - name: Set restored infrastructure credential ownership
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        owner: root
+        group: '{{ item.group }}'
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: /etc/keyholder-rathole, group: keyholder-tunnel, mode: '0750'}
+        - {path: /etc/keyholder-rathole/client.toml, group: keyholder-tunnel, mode: '0640'}
+        - {path: /etc/keyholder-foreign-exit, group: keyholder-exit, mode: '0750'}
+        - {path: /etc/keyholder-foreign-exit/config.json, group: keyholder-exit, mode: '0640'}
+      when: domestic_connector.stat.exists
+      no_log: true
+    - name: Start restored reverse connector after peer review
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop: [keyholder-foreign-exit, keyholder-rathole-client]
+      when: domestic_connector.stat.exists
+    - name: Restore the optional domestic backup preflight
+      ansible.builtin.stat:
+        path: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-recovery.service.d/domestic.conf'
+      register: domestic_backup_dropin
+    - name: Create recovery service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/keyholder-recovery.service.d
+        state: directory
+        mode: '0755'
+      when: domestic_backup_dropin.stat.exists
+    - name: Install the captured domestic backup preflight
+      ansible.builtin.copy:
+        src: '{{ domestic_backup_dropin.stat.path }}'
+        dest: /etc/systemd/system/keyholder-recovery.service.d/domestic.conf
+        remote_src: true
+        mode: '0644'
+      when: domestic_backup_dropin.stat.exists
+    - name: Reload operational overrides
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+    - name: Detect captured domestic routing canaries
+      ansible.builtin.stat:
+        path: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-proxy-probe.service.d/domestic.conf'
+      register: domestic_probe_dropin
+    - name: Create proxy probe override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/keyholder-proxy-probe.service.d
+        state: directory
+        mode: '0755'
+      when: domestic_probe_dropin.stat.exists
+    - name: Restore domestic routing canaries
+      ansible.builtin.copy:
+        src: '{{ domestic_probe_dropin.stat.path }}'
+        dest: /etc/systemd/system/keyholder-proxy-probe.service.d/domestic.conf
+        remote_src: true
+        mode: '0644'
+      when: domestic_probe_dropin.stat.exists
+    - name: Reload restored probe override
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+    - name: Check whether the optional DNSTT unit was captured
+      ansible.builtin.stat:
+        path: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-dnstt.service'
+      register: dnstt_unit
+    - name: Start restored DNSTT after reviewed address and firewall setup
+      ansible.builtin.systemd_service:
+        name: keyholder-dnstt.service
+        enabled: true
+        state: started
+      when: dnstt_unit.stat.exists and recovery_enable_personal_dnstt | default(false) | bool
+    - name: Guard operational handover after cutover
+      ansible.builtin.assert:
+        that:
+          - recovery_old_writers_stopped | default(false) | bool
+          - recovery_cutover_validated | default(false) | bool
+        fail_msg: Stop old bots/timers and validate cutover before activating new jobs.
+      when: recovery_activate_jobs | default(false) | bool
+    - name: Check for restored authenticated proxy monitoring
+      ansible.builtin.stat:
+        path: /etc/systemd/system/keyholder-proxy-probe.timer
+      register: recovery_proxy_probe
+    - name: Enable restored proxy probes on the selected production host
+      ansible.builtin.systemd_service:
+        name: keyholder-proxy-probe.timer
+        enabled: true
+        state: started
+      when:
+        - recovery_activate_jobs | default(false) | bool
+        - recovery_proxy_probe.stat.exists
+    - name: Enable jobs only on the selected production host
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop:
+        - keyholder-management-bot.service
+        - keyholder-monitor.timer
+        - keyholder-recovery.timer
+        - keyholder-recovery-maintenance.timer
+      when: recovery_activate_jobs | default(false) | bool
+    - name: Detect restored public certificate renewal
+      ansible.builtin.stat:
+        path: /etc/systemd/system/keyholder-tls.timer
+      register: recovery_tls_timer
+    - name: Enable certificate renewal on the selected production host
+      ansible.builtin.systemd_service:
+        name: keyholder-tls.timer
+        enabled: true
+        state: started
+      when:
+        - recovery_activate_jobs | default(false) | bool
+        - recovery_tls_timer.stat.exists
+    - name: Explain the public cutover boundary
+      ansible.builtin.debug:
+        msg: >-
+          Replacement applications started; production DNS was not changed.
+          Jobs activate only with explicit cutover/handover flags. Validate private
+          panel, tokens and real traffic before Cloudflare/DNS cutover. Daily
+          snapshots are not a final migration sync: preserve writes after the snapshot.

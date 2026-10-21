@@ -1,0 +1,11 @@
+[Unit]
+Description=Check public subscription certificate renewal daily
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=keyholder-tls.service
+
+[Install]
+WantedBy=timers.target

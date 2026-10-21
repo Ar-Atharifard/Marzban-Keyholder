@@ -1,7 +1,7 @@
 # Backup and disaster recovery
 
 Targets: **≤24 hours data loss**, **20-minute restore**, Ubuntu 22.04 amd64.
-These are objectives, not guarantees: an empty-VM timed restore is still required.
+Validate both objectives in a timed fresh-host rehearsal; scheduling alone is not a guarantee.
 Never reset the source until an independent backup has been downloaded and restored.
 
 ## What runs where
@@ -10,13 +10,19 @@ Never reset the source until an independent backup has been downloaded and resto
 |---|---|
 | `deploy/ansible/` | Laptop controller; bootstrap, gated restore and backup installation |
 | `scripts/recovery.py`, `deploy/recovery/` | VPS capture, consistency checks and restic upload |
-| `deploy/systemd/keyholder-recovery*` | Daily backup and weekly retention/maintenance |
+| `deploy/systemd/keyholder-recovery*` | 12-hour backup and weekly maintenance |
 | Private inventory and repository password | Separate protected storage; never public Git |
 
-Daily capture: 02:00 UTC; failures retry after 15 minutes, capped at three starts
+Capture: 02:00 and 14:00 UTC; failures retry after 15 minutes, capped at three starts
 per two hours. Retain seven daily/four weekly points. Refresh the latest two local
 rollback sets only after successful cloud upload. Failed uploads never advance
-success status or retention. Daily scheduling alone cannot guarantee a 24-hour RPO.
+success status or retention. Scheduling cannot guarantee a 24-hour RPO through
+prolonged outages.
+
+Keep controller source independently too. If captured, `controller-source.tar.gz`
+under the restored helper directory can recreate the laptop checkout without Git
+history or private notes. Recreate private inventory separately; deployed application
+images remain authoritative, not this potentially newer source archive.
 
 Keep the repository password, restricted storage credentials, SSH/DNS access and MFA
 recovery codes off-server. A delete-capable key on a compromised VPS can delete its
@@ -71,9 +77,10 @@ true` in private inventory and use the backup playbook to enable timers. Monitor
 ```
 
 Service ceilings are 50% CPU/320 MiB memory, not measured requirements. Weekly
-maintenance shares the capture lock. Normal failures remove temporary plaintext;
+maintenance holds the capture lock through checks and compaction; the first Sunday
+of each month reads the entire repository, other weeks sample 5%. Normal failures remove temporary plaintext;
 a forced kill may leave private staging: inspect before deleting. Monitor unit
-failures, perform a full repository read monthly and restore rehearsal quarterly.
+failures and perform a restore rehearsal quarterly.
 A local `system backup` does not resolve an offsite-backup incident.
 
 ## Empty VM rehearsal
@@ -82,30 +89,50 @@ Use an isolated Ubuntu 22.04 VM with SSH/sudo, 2 GB RAM and at least 20 GB disk;
 prefer synthetic data first. Never bootstrap an everyday laptop, change production
 DNS or run the same Telegram bot on both hosts. Use a private VM disk for real data.
 
+Copy `deploy/ansible/inventory/example.yml` to `.private/recovery-inventory.yml`.
+Set the target, user, disposable flag, approved restore roots and Compose projects
+in dependency order (panel, API, gateway), including overlays. New snapshots record
+project/release paths automatically; explicit entries support older backups. Review
+`recovery_project_order` for other stacks. Verify SSH fingerprints.
+Run from the laptop:
+
 ```sh
-python3.12 -m venv .private/ansible-venv
-.private/ansible-venv/bin/pip install -r deploy/ansible/requirements.txt
+./deploy/ansible/recover .private/recovery-inventory.yml
 ```
 
-Copy `deploy/ansible/inventory/example.yml` to `.private/recovery-inventory.yml`;
-set target, user, sudo and disposable-target flag. Verify SSH fingerprints.
+The command installs its pinned controller environment if missing, bootstraps the
+target and pauses if repository credentials need setup. Enter those **on the target**
+using `configure-b2` then `prepare-s3`, with the existing repository password.
+It downloads the latest tagged backup, verifies it and restores captured images
+with `--no-build --pull never`. Applications are not started by the restore stage.
+
+Rehearsal activation binds the three Braavos projects to loopback. It verifies DB
+identity, panel plans/credentials, token retrieval, URI/Xray/info output and loopback
+REALITY traffic, then reboots and checks again. Only those containers gain reboot
+persistence; bots and scheduled jobs stay disabled. The aggregate report is saved
+under `.private/recovery-reports/` without credentials or customer identifiers.
+The Braavos verifier expects its three project/container names and standard paths;
+other deployments must adapt those checks, not claim an untested successful restore.
+
+For an already restored target, resume validation with:
 
 ```sh
-.private/ansible-venv/bin/ansible-playbook -i .private/recovery-inventory.yml deploy/ansible/playbooks/bootstrap.yml --ask-become-pass
-.private/ansible-venv/bin/ansible-playbook -i .private/recovery-inventory.yml deploy/ansible/playbooks/restore.yml --ask-become-pass
+./deploy/ansible/recover .private/recovery-inventory.yml --finish
+# Verify an already running restored VM without reconfiguration or reboot:
+./deploy/ansible/recover .private/recovery-inventory.yml --check
 ```
 
-Between those commands, download the chosen restic snapshot **on the target** into
-a new private staging directory. Set `recovery_bundle` to its `bundle`, verify the
-manifest and approve roots/Compose projects in dependency order (panel, API, gateway),
-including all overlays. Review addresses before setting
-`recovery_addresses_reviewed: true` and `recovery_start_applications: true` on the
-first restore. Startup uses captured images with `--no-build --pull never`.
+Production activation additionally requires `recovery_security_validated: true`,
+`recovery_addresses_reviewed: true` and `recovery_address_map`, mapping old public
+IPv4/IPv6 to addresses assigned to the replacement. SSH/firewall validation, DNS
+cutover and scheduled-job handover are still explicit; do not copy host networking.
 
 Restore refuses populated destinations, databases/volumes and staging. It is one-time,
-not an upgrade/convergence tool: if staged without startup, validate/start Compose
-separately rather than rerunning restore. Systemd units are captured but not
-activated automatically; install/review them explicitly, including optional DNSTT.
+not an upgrade/convergence tool; use the finish path after a completed restore.
+The restore stage does not activate captured systemd units. Reviewed production
+activation installs them; owner-only DNSTT activation requires
+`recovery_enable_personal_dnstt: true`. Bots/timers require the explicit
+cutover/handover flags. Rehearsals leave operational jobs disabled.
 Bootstrap does not rewrite SSH/firewall. Before public activation follow the
 [network safety procedure](operations.md), validate key-only SSH and do not blindly
 restore host keys, interfaces or firewall tables.

@@ -9,7 +9,12 @@ from keyholder.backends.base import SubscriptionData, UpstreamError, UpstreamUna
 from keyholder.models import Customer
 from keyholder.policies import stored_policy
 from keyholder.rendering.information import information_profile, render_information
-from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, generate_profiles
+from keyholder.rendering.profiles import (
+    allowed_cdn,
+    apply_cdn_ech,
+    apply_fragmentation,
+    generate_profiles,
+)
 from keyholder.rendering.renderers import URIRenderer, select_renderer
 from keyholder.schemas import ErrorResponse, Policy
 from keyholder.security import hash_token, valid_token, verify_token
@@ -63,6 +68,7 @@ async def subscription(
     if adapter is None:
         raise HTTPException(503, "Backend unavailable")
     username = customer.mapping.upstream_username
+    account_key = customer.mapping.backend_id + "/" + username
     policy = (
         {"profiles": list(request.app.state.settings.enabled_profiles)}
         if request.app.state.settings.profile_source in {"marzban", "upstream"}
@@ -113,8 +119,14 @@ async def subscription(
             p for p in profiles if allowed_cdn(p, allowed_hosts, settings.allowed_cdn_networks)
         ]
         profiles = apply_cdn_ech(
-            profiles, settings.cdn_ech_config, allowed_hosts, settings.cdn_tls_compatibility
+            profiles,
+            settings.cdn_ech_config,
+            allowed_hosts,
+            settings.cdn_tls_compatibility,
+            None if account_key in settings.cdn_ech_full_catalog else settings.cdn_ech_kinds,
         )
+        if account_key in settings.fragmentation_accounts:
+            profiles = apply_fragmentation(profiles, settings.fragmentation_kinds)
         if not profiles:
             raise ValueError("No compatible profiles")
         renderer = select_renderer(output, request.headers.get("user-agent", ""))

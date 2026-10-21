@@ -1,3 +1,4 @@
+from hashlib import sha256
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -6,13 +7,15 @@ from sqlalchemy.exc import IntegrityError
 
 from keyholder.api.dependencies import DB, admin
 from keyholder.backends.registry import backend_configs
-from keyholder.models import Backend, Customer, CustomerMapping, Registration, now
+from keyholder.models import ApplicationData, Backend, Customer, CustomerMapping, Registration, now
 from keyholder.schemas import (
     BackendView,
     CustomerCreate,
     CustomerUpdate,
     CustomerView,
     ErrorResponse,
+    InboundDefaults,
+    InboundDefaultsView,
     MappingInput,
     TokenResult,
 )
@@ -42,6 +45,42 @@ def backends(request: Request, db: DB) -> list[BackendView]:
         )
         for c in backend_configs(request.app.state.settings)
     ]
+
+
+@router.get("/backends/{backend_id}/inbound-defaults", response_model=InboundDefaultsView)
+def inbound_defaults(backend_id: str, request: Request, db: DB) -> InboundDefaultsView:
+    if not any(
+        b.id == backend_id and b.provider == "marzban"
+        for b in backend_configs(request.app.state.settings)
+    ):
+        raise HTTPException(404, "Marzban backend not configured")
+    row = db.get(ApplicationData, "inbounds/" + sha256(backend_id.encode()).hexdigest()[:40])
+    return InboundDefaultsView(
+        backend_id=backend_id,
+        inbound_tags=row.value["inbound_tags"]
+        if row
+        else list(request.app.state.settings.default_inbound_tags),
+        source="database" if row else "environment",
+    )
+
+
+@router.put("/backends/{backend_id}/inbound-defaults", response_model=InboundDefaultsView)
+def set_inbound_defaults(
+    backend_id: str, body: InboundDefaults, request: Request, db: DB
+) -> InboundDefaultsView:
+    inbound_defaults(backend_id, request, db)
+    key = "inbounds/" + sha256(backend_id.encode()).hexdigest()[:40]
+    row = db.get(ApplicationData, key)
+    if row is None:
+        db.add(ApplicationData(key=key, value=body.model_dump()))
+    else:
+        row.value = body.model_dump()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Default selection changed concurrently; retry") from None
+    return inbound_defaults(backend_id, request, db)
 
 
 @router.post(

@@ -20,6 +20,15 @@
     - name: Refuse bootstrap over an existing service
       ansible.builtin.assert:
         that: not existing_marzban.stat.exists
+    - name: Refuse bootstrap on a host with running containers
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-c', "import shutil,subprocess; docker=shutil.which('docker'); print(subprocess.check_output([docker,'ps','-q'],text=True) if docker else '')"]
+      register: existing_containers
+      changed_when: false
+    - name: Require an unused container host
+      ansible.builtin.assert:
+        that: existing_containers.stdout | trim == ''
+        fail_msg: Bootstrap is only for a new empty host; existing containers were detected.
     - name: Install small host prerequisites
       ansible.builtin.apt:
         name: [ca-certificates, python3, restic, curl]

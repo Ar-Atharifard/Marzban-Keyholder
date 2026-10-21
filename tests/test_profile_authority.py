@@ -56,3 +56,27 @@ def test_policy_mode_remains_compatible(client: TestClient) -> None:
         json={"policy": {"profiles": []}},
     )
     assert client.get("/s/" + str(result["token"])).status_code == 503
+
+
+def test_full_catalog_ech_is_scoped_to_backend_and_account(client: TestClient) -> None:
+    app = cast(FastAPI, client.app)
+    result = create(client)
+    app.state.settings.profile_source = "marzban"
+    app.state.settings.allowed_cdn_hosts = ("titan.example",)
+    app.state.settings.cdn_ech_config = "cloudflare-ech.com+https://1.1.1.1/dns-query"
+    app.state.settings.cdn_tls_compatibility = True
+    app.state.settings.cdn_ech_kinds = ()
+    link = GRPC.replace("sni=tls.example", "sni=titan.example")
+
+    class Backend:
+        async def configurations(self, username: str) -> list[str]:
+            return [link]
+
+    app.state.backends = {"marzban-default": Backend()}
+    url = "/s/" + str(result["token"])
+    assert len(base64.b64decode(client.get(url).content).splitlines()) == 1
+    name = result["customer"]["mapping"]["upstream_username"]  # type: ignore[index]
+    app.state.settings.cdn_ech_full_catalog = ("another-backend/" + str(name),)
+    assert len(base64.b64decode(client.get(url).content).splitlines()) == 1
+    app.state.settings.cdn_ech_full_catalog = ("marzban-default/" + str(name),)
+    assert len(base64.b64decode(client.get(url).content).splitlines()) == 2

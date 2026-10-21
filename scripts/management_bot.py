@@ -34,7 +34,12 @@ BOT_COMMANDS = [
     {"command": "monitor", "description": "Show the latest monitoring result"},
     {"command": "alerts", "description": "Show alert bot and timer status"},
     {"command": "customers", "description": "List active customers"},
+    {"command": "directory", "description": "Usernames and names only; optional search"},
+    {"command": "inbounds", "description": "List all inbounds; add USER to edit a selection"},
     {"command": "users", "description": "List Marzban users"},
+    {"command": "link", "description": "Retrieve an existing subscription URL privately"},
+    {"command": "configs", "description": "List a customer's connection configurations"},
+    {"command": "config", "description": "Retrieve one configuration URI by ID"},
     {"command": "cancel", "description": "Cancel a pending destructive operation"},
 ]
 
@@ -116,7 +121,7 @@ def redact(value: Any) -> Any:
         return {
             key: redact(item)
             for key, item in value.items()
-            if key not in {"token", "subscription_url", "panel_url", "password"}
+            if key not in {"token", "subscription_url", "config_uri", "panel_url", "password"}
         }
     if isinstance(value, list):
         return [redact(item) for item in value]
@@ -164,22 +169,69 @@ def authorized(message: dict[str, Any], admin_id: int) -> bool:
 
 def help_text() -> str:
     return """Keyholder management
-/ping /metrics /status /health /doctor /monitor /runmonitor /alerts
-/users /customers [PAGE] /history [PAGE] /backends /show SELECTOR /check SELECTOR
-/usage USER /inbounds
-/create USER quota=GB days=N protocols=vless,trojan name="Full Name"
-/attach USER name="Full Name"
-/update USER quota=GB days=N status=active|disabled
-/identity SELECTOR name="Full Name" telegram=@id phone=+number
-/setinbounds USER protocol=vless tags=TAG1,TAG2
-/rename SELECTOR name="Full Name"
-/enable SELECTOR /disable SELECTOR /sync /backup
-/resetusage USER /remap SELECTOR username=NEW /revoke SELECTOR /rotate SELECTOR
-/confirm CODE /cancel
-/alertcontrols /ack KEY /unack KEY /silence KEY hours=24 /unsilence KEY
-/rule_disable RULE /rule_enable RULE
 
-Subscription links are intentionally available only through the SSH CLI."""
+Inspect
+/help — This reference; /start does the same.
+/ping — Check that the bot responds.
+/metrics — CPU, RAM, swap, disk and uptime.
+/status — Container status.
+/health — API/database connectivity.
+/doctor — Database integrity and integration checks.
+/monitor — Latest monitoring results.
+/runmonitor — Run checks now without sending alerts.
+/alerts — Alert bot and timer status.
+/backends — Configured panel/provider namespaces.
+
+Customers and links
+/users — Marzban accounts, quotas and selections.
+/customers [PAGE] [SEARCH] — Customer details; search username/name.
+/directory [PAGE] [SEARCH] — Only usernames and private names.
+/history [PAGE] — Include revoked registrations.
+/show SELECTOR — Customer identity and panel mapping.
+/check SELECTOR — Check upstream profile availability.
+/usage USER — Plan and traffic counters.
+/link SELECTOR — Existing permanent subscription URL.
+/configs SELECTOR — List individual configurations and IDs.
+/config SELECTOR CONFIG_ID — Retrieve one configuration link.
+
+Inbounds
+/inbounds — ALL available inbounds, numbered; [x] marks defaults.
+/inbounds USER — Open that user's selection picker.
+/select 1,3,5 — Preview a replacement; all/default also work.
+Numbers refer to the current list. Defaults apply to future CLI/bot users.
+
+Manage
+/create USER quota=20 days=30 inbounds=default — Create panel user and subscription.
+Use inbounds=all or 1,3 instead; omitted means default. Zero quota/days = unlimited.
+/attach USER — Register an existing panel account; reuse its URL.
+Create/attach accept name="Full Name", telegram=@id and phone=+number.
+/update USER quota=GB days=N status=active|disabled — Change panel plan/status.
+/identity SELECTOR name="Full Name" telegram=@id phone=+number — Edit private identity.
+/rename SELECTOR name="Full Name" — Change private name, not panel username.
+/setinbounds USER protocol=vless tags=TAG1,TAG2 — Advanced single-protocol selection.
+/enable SELECTOR — Resume subscription delivery.
+/disable SELECTOR — Pause delivery; downloaded proxies remain usable.
+/sync — Register missing panel accounts in Keyholder.
+/backup — Make a private local database snapshot.
+/resetusage USER — Reset used traffic to zero; confirmation required.
+/remap SELECTOR username=NEW — Change panel mapping, keep subscription URL.
+/revoke SELECTOR — Permanently revoke subscription delivery.
+/rotate SELECTOR — Replace subscription token; old URL stops working.
+/confirm CODE — Apply the pending operation within five minutes.
+/cancel — Cancel a pending operation or picker.
+
+Alerts
+/alertcontrols — Inspect incidents and overrides.
+/ack KEY — Acknowledge an alert; does not fix its cause.
+/unack KEY — Remove acknowledgement.
+/silence KEY hours=24 — Temporarily mute one incident (maximum 168 hours).
+/unsilence KEY — Remove that incident's mute.
+/rule_disable RULE — Disable a rule; confirmation required.
+/rule_enable RULE — Re-enable a rule.
+
+USER = panel username. SELECTOR also accepts quoted private name, ID, phone or Telegram.
+
+Links contain credentials. Retrieve them only in this private administrator chat."""
 
 
 def planned(command: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +252,93 @@ def command(text: str, state: dict[str, Any]) -> str:
         return "Online."
     if name in {"start", "help"}:
         return help_text()
+    if name == "inbounds" and not words:
+        catalog = dispatch("user-inbounds", {})
+        return "\n".join(
+            [
+                "Available inbounds ([x] default):",
+                *[
+                    f"{row['number']}. [{'x' if row['selected'] else ' '}] "
+                    + "; ".join(row["names"])
+                    for row in catalog["entries"]
+                ],
+                "Create with inbounds=1,3 or inbounds=all/default. Omitted means default.",
+            ]
+        )
+    if name == "inbounds" and words:
+        if len(words) != 1 or not re.fullmatch(r"[A-Za-z0-9_]{3,32}", words[0]):
+            raise ValueError("Usage: /inbounds USER")
+        catalog = dispatch("user-inbounds", {"username": words[0]})
+        state["picker"] = {**catalog, "expires": time.time() + CONFIRM_SECONDS}
+        return "\n".join(
+            [
+                f"Profiles for {catalog['username']}:",
+                *[
+                    f"{row['number']}. [{'x' if row['selected'] else ' '}] "
+                    + "; ".join(row["names"])
+                    for row in catalog["entries"]
+                ],
+                "Reply /select 1,3,5 to replace the selection. /cancel leaves it unchanged.",
+            ]
+        )
+    if name == "select":
+        picker = state.get("picker", {})
+        if picker.get("expires", 0) < time.time():
+            raise ValueError("Picker expired; use /inbounds USER again.")
+        choice = "".join(words)
+        if choice.lower() in {"all", "default"}:
+            defaults = picker.get("default_tags", [])
+            rows = [
+                row
+                for row in picker["entries"]
+                if choice.lower() == "all" or row["tag"] in defaults
+            ]
+            if not rows or (choice.lower() == "default" and len(rows) != len(defaults)):
+                raise ValueError("Default selection is empty or unavailable; review defaults.")
+        else:
+            if not re.fullmatch(r"\d+(?:,\d+)*", choice):
+                raise ValueError("Usage: /select 1,3,5 or all/default")
+            numbers = [int(n) for n in choice.split(",")]
+            if len(set(numbers)) != len(numbers) or any(
+                n < 1 or n > len(picker["entries"]) for n in numbers
+            ):
+                raise ValueError("Choose unique numbers from the current list.")
+            rows = [picker["entries"][n - 1] for n in numbers]
+        tags = [row["tag"] for row in rows]
+        code = secrets.token_hex(3)
+        state["pending"] = {
+            "code": code,
+            **planned(
+                "user-inbounds",
+                {
+                    "username": picker["username"],
+                    "revision": picker["revision"],
+                    "selected_tags": tags,
+                },
+            ),
+        }
+        return (
+            "New selection: "
+            + "; ".join(" / ".join(row["names"]) for row in rows)
+            + f"\nConfirm within five minutes with /confirm {code}"
+        )
+    if name in {"link", "configs", "config"}:
+        if len(words) != (2 if name == "config" else 1):
+            raise ValueError(
+                f"Usage: /{name} SELECTOR" + (" CONFIG_ID" if name == "config" else "")
+            )
+        link_args = {"customer": words[0]}
+        if name == "config":
+            link_args["profile"] = words[1]
+        result = dispatch(name, link_args)
+        if name == "configs":
+            return json.dumps(redact(result), ensure_ascii=False, indent=2)
+        value = result["subscription_url"] if name == "link" else result["config_uri"]
+        if not isinstance(value, str) or any(c in value for c in "\r\n"):
+            raise ValueError("Invalid private link response")
+        if len(value) > MAX_MESSAGE:
+            raise ValueError("Link exceeds Telegram message size; use the SSH CLI --save-link.")
+        return value
     simple = {
         "metrics": "system-metrics",
         "backends": "backends",
@@ -210,7 +349,6 @@ def command(text: str, state: dict[str, Any]) -> str:
         "runmonitor": "monitor-run",
         "alerts": "alerts-status",
         "users": "users",
-        "inbounds": "inbounds",
         "sync": "sync",
         "backup": "backup",
     }
@@ -253,13 +391,41 @@ def command(text: str, state: dict[str, Any]) -> str:
             state["pending"] = {"code": code, **planned("monitor-control", args)}
             return f"Confirm within five minutes with /confirm {code}"
         result = dispatch("monitor-control", args)
-    elif name in {"customers", "history"}:
-        if len(words) > 1 or (words and (not words[0].isdigit() or int(words[0]) < 1)):
-            raise ValueError(f"Usage: /{name} [PAGE]")
-        page = int(words[0]) if words else 1
+    elif name == "directory":
+        if words and re.fullmatch(r"-\d+", words[0]):
+            raise ValueError("Page must be positive")
+        page = int(words.pop(0)) if words and words[0].isdigit() else 1
+        if page < 1:
+            raise ValueError("Usage: /directory [PAGE] [SEARCH]")
         result = dispatch(
-            "list", {"limit": 10, "offset": (page - 1) * 10, "history": name == "history"}
+            "list",
+            {
+                "limit": 30,
+                "offset": (page - 1) * 30,
+                "brief": True,
+                "search": " ".join(words),
+            },
         )
+        return (
+            "\n".join(f"{row['username']} | {row['name']}" for row in result)
+            or "No matching customers."
+        )
+    elif name in {"customers", "history"}:
+        if words and re.fullmatch(r"-\d+", words[0]):
+            raise ValueError("Page must be positive")
+        if name == "history" and (len(words) > 1 or (words and not words[0].isdigit())):
+            raise ValueError(f"Usage: /{name} [PAGE]")
+        page = int(words.pop(0)) if words and words[0].isdigit() else 1
+        if page < 1:
+            raise ValueError(f"Usage: /{name} [PAGE]")
+        filters: dict[str, Any] = {
+            "limit": 10,
+            "offset": (page - 1) * 10,
+            "history": name == "history",
+        }
+        if words:
+            filters["search"] = " ".join(words)
+        result = dispatch("list", filters)
     elif name in {"show", "check", "enable", "disable"}:
         if len(words) != 1:
             raise ValueError(f"Usage: /{name} SELECTOR")
@@ -286,15 +452,19 @@ def command(text: str, state: dict[str, Any]) -> str:
         ):
             raise ValueError("Name must contain 1–200 characters")
         if name == "create":
-            required = {"quota", "days", "protocols"}
+            required = {"quota", "days"}
             if not required <= options.keys():
-                raise ValueError("Create requires quota, days and protocols")
-            allowed = required | {"name", "telegram", "phone"}
+                raise ValueError("Create requires quota and days; inbounds defaults to default")
+            allowed = required | {"name", "telegram", "phone", "protocols", "inbounds"}
             if options.keys() - allowed:
                 raise ValueError("Unknown create option")
-            protocols = [item for item in options["protocols"].split(",") if item]
-            if not protocols or not set(protocols) <= {"vless", "vmess", "trojan", "shadowsocks"}:
+            protocols = [item for item in options.get("protocols", "").split(",") if item]
+            if "protocols" in options and (
+                not protocols or not set(protocols) <= {"vless", "vmess", "trojan", "shadowsocks"}
+            ):
                 raise ValueError("Choose supported protocols: vless, vmess, trojan, shadowsocks")
+            if "protocols" in options and "inbounds" in options:
+                raise ValueError("Choose inbounds or legacy protocols, not both")
             result = dispatch(
                 "user-create",
                 {
@@ -304,7 +474,11 @@ def command(text: str, state: dict[str, Any]) -> str:
                     "phone": options.get("phone"),
                     "quota_gb": number(options["quota"], "quota"),
                     "days": days(options["days"]),
-                    "protocols": protocols,
+                    **(
+                        {"protocols": protocols}
+                        if "protocols" in options
+                        else {"inbounds": options.get("inbounds", "default")}
+                    ),
                 },
             )
         elif name == "attach":
@@ -393,6 +567,7 @@ def command(text: str, state: dict[str, Any]) -> str:
         if words:
             raise ValueError("This command takes no arguments")
         existed = state.pop("pending", None) is not None
+        existed = state.pop("picker", None) is not None or existed
         return "Pending operation cancelled." if existed else "No operation is pending."
     elif name == "confirm":
         pending = state.pop("pending", None)
@@ -404,6 +579,8 @@ def command(text: str, state: dict[str, Any]) -> str:
         ):
             raise ValueError("Confirmation is invalid or expired")
         result = dispatch(str(pending["operation"]), dict(pending["args"]))
+        if pending["operation"] == "user-inbounds":
+            state.pop("picker", None)
     else:
         raise ValueError("Unknown command; use /help")
     output = json.dumps(redact(result), ensure_ascii=False, indent=2)
@@ -457,7 +634,7 @@ def main() -> None:
             text, created_at = work.get()
             started = time.monotonic()
             with state_lock:
-                local = {"pending": state["pending"]} if "pending" in state else {}
+                local = {key: state[key] for key in ("pending", "picker") if key in state}
             try:
                 if time.time() - created_at > 300:
                     raise ValueError("Queued command expired; send it again")
@@ -468,9 +645,10 @@ def main() -> None:
                 logging.warning("Command execution failed: %s", type(error).__name__)
                 reply = "Operation failed or timed out. Check state before retrying a change."
             with state_lock:
-                state.pop("pending", None)
-                if "pending" in local:
-                    state["pending"] = local["pending"]
+                for key in ("pending", "picker"):
+                    state.pop(key, None)
+                    if key in local:
+                        state[key] = local[key]
                 save_state(path, state)
             logging.info("Command completed in %.2fs", time.monotonic() - started)
             try:

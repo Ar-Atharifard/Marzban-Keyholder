@@ -39,6 +39,8 @@ All `/admin` routes require the bearer key.
 | GET `/s/{token}` | `format=uri` (default), `xray`, or `info`; details below |
 | GET `/admin/backends` | → 200 list of `id`, `provider`, `config_ref`, `registered` |
 | POST `/admin/backends/register` | No body → 200 same list; idempotently registers configured metadata |
+| GET `/admin/backends/{id}/inbound-defaults` | → 200 `backend_id`, `inbound_tags`, `source` (`database` or `environment`) |
+| PUT `/admin/backends/{id}/inbound-defaults` | `{"inbound_tags":["TAG",...]}` → 200 same view; Marzban backends only |
 | POST `/admin/customers` | MappingInput + required `name` (1–200), optional contacts/policy → 201 TokenResult |
 | GET `/admin/customers` | `offset` ≥0 (default 0), `limit` 1–100 (default 50) → 200 CustomerView array |
 | GET `/admin/customers/{id}` | → 200 CustomerView |
@@ -52,6 +54,12 @@ not provision panel users. It atomically returns the same canonical identity/tok
 for repeated backend/account registration (201 retained for compatibility); it does
 not update metadata on repeated calls. Listing is ordered by creation/ID, contains
 no total count and never exposes URLs. Provisioning/inventory is in the CLI.
+
+Inbound defaults apply only to future CLI/bot provisioning. Tags must be unique,
+nonempty, at most 200 characters each (1–128 tags). The CLI validates them against
+the live catalog; raw API callers must choose available tags. Saved defaults override
+environment defaults and are backed up in the existing application-data table.
+Unknown/non-Marzban backend returns 404; a concurrent first write can return 409.
 
 PATCH omission leaves fields unchanged; explicit null clears contacts, not name.
 A supplied policy replaces the entire policy (`{}` restores compatibility defaults).

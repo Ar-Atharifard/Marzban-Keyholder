@@ -1,0 +1,17 @@
+[Unit]
+Description=Domestic entry control-plane lease check
+After=marzban-node.service
+OnFailure=keyholder-domestic-close.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-admin/domestic_guard.py
+TimeoutStartSec=45
+MemoryMax=64M
+CPUQuota=10%
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/keyholder-domestic

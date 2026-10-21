@@ -10,7 +10,7 @@ all:
         # Explicitly opt in only for a disposable Ubuntu 22.04 VM / empty new VPS.
         recovery_target_is_disposable: false
         recovery_environment: rehearsal
-        recovery_bundle: /var/lib/keyholder-recovery/downloaded/bundle
+        recovery_bundle: /var/lib/keyholder-recovery/downloaded/var/lib/keyholder-recovery/bundle
         recovery_stage: /var/lib/keyholder-recovery/staged
         # Reviewed original Compose files must be included in the capture inventory.
         recovery_compose_projects: []
@@ -21,6 +21,10 @@ all:
         # Explicitly list only application paths. Never copy /etc as a whole.
         recovery_rootfs_paths:
           - etc/keyholder
+          - etc/keyholder-rathole
+          - etc/keyholder-foreign-exit
+          - usr/local/bin/rathole
+          - usr/local/bin/lego
           - opt/marzban
           - opt/braavos-gateway
           - srv/keyholder
@@ -35,3 +39,13 @@ all:
           - var/lib/keyholder-management-bot
         recovery_public_http_checks: []
         recovery_start_applications: false
+        # Production only: review SSH/firewall externally before setting these.
+        recovery_security_validated: false
+        recovery_addresses_reviewed: false
+        recovery_address_map: {}  # old public IP: replacement public IP, including IPv6
+        # Owner-only transport is never activated as a customer service.
+        recovery_enable_personal_dnstt: false
+        recovery_activate_jobs: false
+        recovery_old_writers_stopped: false
+        recovery_cutover_validated: false
+        recovery_domestic_peers_reviewed: false

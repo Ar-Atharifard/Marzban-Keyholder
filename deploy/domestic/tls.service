@@ -1,0 +1,16 @@
+[Unit]
+Description=Issue or renew the public subscription certificate
+Wants=network-online.target
+After=network-online.target docker.service
+ConditionPathExists=/etc/keyholder/acme/settings.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-admin/tls.py issue
+UMask=0077
+MemoryMax=128M
+CPUQuota=20%
+TimeoutStartSec=12min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

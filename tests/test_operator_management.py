@@ -141,9 +141,7 @@ def test_panel_selection_preserves_credentials_and_accepts_empty_selection(
             },
         )
     )
-    assert submitted == [
-        {"proxies": user["proxies"], "inbounds": {"vless": ["OLD"], "trojan": tags}}
-    ]
+    assert submitted == [{"inbounds": {"vless": ["OLD"], "trojan": tags}}]
     assert result["data_limit"] == 123 and result["expire"] == 456
     assert "synthetic-password" not in str(result)
 

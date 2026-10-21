@@ -1,0 +1,84 @@
+---
+- name: Configure the optional restricted domestic observer
+  hosts: domestic_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require console readiness and reviewed public credentials
+      ansible.builtin.assert:
+        that:
+          - domestic_console_ready | default(false) | bool
+          - domestic_security_validated | default(false) | bool
+          - domestic_foreign_ipv4 is match('^[0-9.]+$')
+          - domestic_observer_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+( .*)?$')
+        fail_msg: Verify console access and supply the foreign IPv4 and observer PUBLIC key.
+    - name: Create the key-only restricted account
+      ansible.builtin.user:
+        name: kh-observer
+        system: true
+        password_lock: true
+        home: /var/lib/keyholder-observer
+        create_home: false
+        shell: /bin/sh
+    - name: Create root-owned observer directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [/var/lib/keyholder-observer, /var/lib/keyholder-observer/.ssh, /usr/local/libexec]
+    - name: Restrict the public key to fixed commands and the foreign source IP
+      ansible.builtin.copy:
+        dest: /var/lib/keyholder-observer/.ssh/authorized_keys
+        owner: root
+        group: root
+        mode: '0644'
+        content: >-
+          restrict,from="{{ domestic_foreign_ipv4 }}",command="/usr/local/libexec/keyholder-gate-readonly" {{ domestic_observer_public_key }}
+    - name: Install the fixed observer commands
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ item.dest }}'
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - {source: '{{ playbook_dir }}/../../../scripts/gate_backup.py', dest: /usr/local/libexec/keyholder-gate-backup}
+        - {source: '{{ playbook_dir }}/../../domestic/readonly.sh', dest: /usr/local/libexec/keyholder-gate-readonly}
+    - name: Permit only two zero-argument sudo commands
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/keyholder-observer
+        mode: '0440'
+        validate: /usr/sbin/visudo -cf %s
+        content: |
+          kh-observer ALL=(root) NOPASSWD: /usr/local/lib/keyholder-admin/gate_status.py "", /usr/local/libexec/keyholder-gate-backup ""
+    - name: Add observer SSH access without replacing existing AllowUsers
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/01-keyholder-observer.conf
+        owner: root
+        group: root
+        mode: '0644'
+        validate: /usr/sbin/sshd -t -f %s
+        content: 'AllowUsers kh-observer@{{ domestic_foreign_ipv4 }}'
+      register: observer_ssh
+    - name: Validate the complete SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+    - name: Reload SSH after validation
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+      when: observer_ssh.changed
+    - name: Close the old Ansible connection
+      ansible.builtin.meta: reset_connection
+    - name: Verify fresh administrator access
+      ansible.builtin.wait_for_connection:
+        timeout: 30
+    - name: Explain host-key validation boundary
+      ansible.builtin.debug:
+        msg: >-
+          Restricted observer installed; fresh administrator access passed. Verify
+          the new host key through this authenticated SSH connection or console,
+          update the pinned key and target in the foreign monitoring SSH config,
+          then test status and backup. Never trust an unauthenticated keyscan alone.

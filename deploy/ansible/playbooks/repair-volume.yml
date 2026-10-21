@@ -1,0 +1,46 @@
+---
+- name: Repair restored volume directory permissions on a rehearsal VM
+  hosts: recovery_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require an isolated rehearsal
+      ansible.builtin.assert:
+        that:
+          - recovery_target_is_disposable | bool
+          - recovery_environment == 'rehearsal'
+          - ansible_facts.virtualization_role == 'guest'
+    - name: Read original directory metadata
+      ansible.builtin.slurp:
+        src: '{{ recovery_bundle }}/manifest.json'
+      register: bundle_manifest
+      no_log: true
+    - name: Parse directory metadata
+      ansible.builtin.set_fact:
+        recovery_manifest: '{{ bundle_manifest.content | b64decode | from_json }}'
+      no_log: true
+    - name: Locate existing volumes
+      ansible.builtin.command:
+        argv: [docker, volume, inspect, '{{ item.name }}']
+      loop: '{{ recovery_volumes }}'
+      register: volumes
+      changed_when: false
+    - name: Restore only captured directory metadata
+      ansible.builtin.file:
+        path: '{{ (item.0.stdout | from_json)[0].Mountpoint }}{{ item.1.path | replace("volumes/" + item.0.item.name, "", 1) }}'
+        state: directory
+        owner: '{{ item.1.uid }}'
+        group: '{{ item.1.gid }}'
+        mode: '{{ "%04o" | format(item.1.mode) }}'
+      loop: '{{ volumes.results | product(recovery_manifest.directories) | list }}'
+      when: item.1.path == 'volumes/' + item.0.item.name or item.1.path.startswith('volumes/' + item.0.item.name + '/')
+      no_log: true
+    - name: Recheck API database health without restarting
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        status_code: 200
+        use_proxy: false
+      register: api_health
+      retries: 6
+      delay: 3
+      until: api_health.status == 200

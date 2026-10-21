@@ -1,0 +1,19 @@
+[Unit]
+Description=Authenticated proxy delivery checks
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/keyholder-admin/proxy_probe.py
+User=root
+UMask=0077
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/keyholder-monitor
+MemoryMax=96M
+CPUQuota=30%
+TimeoutStartSec=90
+SuccessExitStatus=1

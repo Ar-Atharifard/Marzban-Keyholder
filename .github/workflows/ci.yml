@@ -27,9 +27,13 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r deploy/ansible/requirements.txt
-      - run: ansible-playbook -i deploy/ansible/inventory/example.yml deploy/ansible/playbooks/bootstrap.yml --syntax-check
-      - run: ansible-playbook -i deploy/ansible/inventory/example.yml deploy/ansible/playbooks/restore.yml --syntax-check
-      - run: ansible-playbook -i deploy/ansible/inventory/example.yml deploy/ansible/playbooks/backup.yml --syntax-check
+      - name: Check recovery playbooks
+        run: |
+          sh -n deploy/ansible/recover
+          for playbook in deploy/ansible/playbooks/*.yml; do
+            case "$playbook" in */restore-volume.yml) continue ;; esac
+            ansible-playbook -i deploy/ansible/inventory/example.yml "$playbook" --syntax-check
+          done
   checks:
     runs-on: ubuntu-latest
     env:

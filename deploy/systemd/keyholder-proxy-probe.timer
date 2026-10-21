@@ -1,0 +1,11 @@
+[Unit]
+Description=Check authenticated proxy delivery every two minutes
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=2min
+AccuracySec=10
+Unit=keyholder-proxy-probe.service
+
+[Install]
+WantedBy=timers.target

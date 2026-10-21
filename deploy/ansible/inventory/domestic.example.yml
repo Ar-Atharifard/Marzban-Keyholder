@@ -1,0 +1,19 @@
+all:
+  children:
+    domestic_targets:
+      hosts:
+        replacement-gate:
+          ansible_host: 192.0.2.20
+          ansible_user: khadmin
+          ansible_port: 2222
+      vars:
+        domestic_target_is_empty: false
+        domestic_security_validated: false
+        domestic_activate: false
+        domestic_old_node_stopped: false
+        domestic_peers_reviewed: false
+        # Only used by the separate observer playbook; never enter a private key.
+        domestic_console_ready: false
+        domestic_foreign_ipv4: 192.0.2.10
+        domestic_observer_public_key: ''
+        domestic_archive: /var/lib/keyholder-recovery/downloaded/var/lib/keyholder-recovery/bundle/nodes/domestic.tar

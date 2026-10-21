@@ -1,0 +1,4 @@
+# Reviewed historical false positives: architecture prose and Docker image labels.
+26e78c301d41b72ada62ba425da58ed3805db774:deploy/Dockerfile.dependency-update:generic-api-key:2
+4fc187ff98db0162602cc2e58bdf548dbf2e13f5:ARCHITECTURE.md:generic-api-key:39
+8be97bd4155aad45dc5b4025ef553db5e96eddcb:deploy/Dockerfile.code-update:generic-api-key:4

@@ -63,7 +63,7 @@ class CustomerMapping(Base):
 
 
 class ApplicationData(Base):
-    """Dormant legacy data and policy rollback archives; no runtime settings API."""
+    """Small backend defaults and legacy policy rollback archives."""
 
     __tablename__ = "application_data"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)

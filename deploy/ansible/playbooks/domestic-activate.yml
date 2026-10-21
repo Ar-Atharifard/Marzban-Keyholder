@@ -1,0 +1,37 @@
+---
+- name: Activate an already restored domestic replacement
+  hosts: domestic_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit peer and identity handover
+      ansible.builtin.assert:
+        that:
+          - domestic_security_validated | default(false) | bool
+          - domestic_activate | default(false) | bool
+          - domestic_old_node_stopped | default(false) | bool
+          - domestic_peers_reviewed | default(false) | bool
+        fail_msg: Stop the old node identity and review peer addresses/firewall before activation.
+    - name: Validate restored gateway configuration
+      ansible.builtin.command:
+        argv: [/usr/sbin/haproxy, -c, -f, /etc/haproxy/haproxy.cfg]
+      changed_when: false
+    - name: Enable node and reverse listener under the prepared firewall
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop: [marzban-node, keyholder-rathole-server, keyholder-domestic-guard.timer]
+    - name: Wait for the heartbeat guard to open the customer listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 443
+        timeout: 360
+    - name: Explain final traffic validation
+      ansible.builtin.debug:
+        msg: >-
+          Gateway opened after a valid panel heartbeat. Before DNS cutover, verify
+          public TLS, a real subscription, domestic/foreign proxy traffic, shared
+          quota and monitoring through the new IP. Foreign emergency profiles remain
+          rollback. This playbook does not change DNS, SSH or firewall rules.

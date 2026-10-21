@@ -51,6 +51,33 @@ def test_attach_preflight_duplicate_and_link_preserving_management(
     assert worker.execute("show", {"customer": "replacement"})["id"] == cid
 
 
+def test_customer_name_lookup_and_compact_search(operator: None) -> None:
+    worker.execute("create", {"username": "alice", "name": "Alice Example"})
+    worker.execute("create", {"username": "bobby", "name": "Other Person"})
+    assert (
+        worker.execute("show", {"customer": "alice example"})["mapping"]["upstream_username"]
+        == "alice"
+    )
+    args = {"limit": 100, "offset": 0, "brief": True}
+    assert worker.execute("list", {**args, "search": "EXAMPLE"}) == [
+        {"username": "alice", "name": "Alice Example"}
+    ]
+    assert worker.execute("list", {**args, "search": "bobb"}) == [
+        {"username": "bobby", "name": "Other Person"}
+    ]
+    worker.execute("rename", {"customer": "bobby", "name": "Alice Example"})
+    with pytest.raises(worker.OperatorError, match="ambiguous"):
+        worker.execute("show", {"customer": "Alice Example"})
+    assert worker.execute("show", {"customer": "alice"})["mapping"]["upstream_username"] == "alice"
+
+
+def test_compact_list_output_only_has_username_and_name(capsys: pytest.CaptureFixture[str]) -> None:
+    args = cli.parser().parse_args(["customer", "list", "--brief", "--search", "Alice"])
+    assert args.brief and args.search == "Alice"
+    cli.display([{"username": "alice", "name": "Alice Example"}], as_json=False)
+    assert capsys.readouterr().out == "alice\tAlice Example\n"
+
+
 def test_customer_identity_cli_update_and_contact_lookup(operator: None) -> None:
     result = worker.execute(
         "create",
@@ -327,3 +354,84 @@ def test_monitor_control_cli_payload(
     for key, value in expected.items():
         assert args[key] == value
     assert "action" not in args and "resource" not in args
+
+
+def test_config_listing_and_exact_uri_follow_subscription_output(
+    operator: None, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+    original = worker.api
+
+    def api(method: str, path: str, body: Any = None, *, raw: bool = False) -> Any:
+        if raw:
+            response = client.request(method, path)
+            if response.status_code != 200:
+                raise worker.OperatorError("Subscription unavailable")
+            return response.content
+        return original(method, path, body)
+
+    monkeypatch.setattr(worker, "api", api)
+    created = worker.execute("create", {"username": "alice", "name": "Alice"})
+    listing = worker.execute("configs", {"customer": "alice"})
+    assert len(listing["configs"]) == 1
+    entry = listing["configs"][0]
+    assert entry["kind"] == "xhttp_reality"
+    assert "config_uri" not in json.dumps(listing)
+    selected = worker.execute("config", {"customer": "alice", "profile": entry["id"]})
+    actual = base64.b64decode(client.get("/s/" + created["token"]).content).decode().strip()
+    assert selected["config_uri"] == actual
+    assert worker.execute("config", {"customer": "alice", "profile": "xhttp_reality"}) == selected
+    with pytest.raises(worker.OperatorError):
+        worker.execute("config", {"customer": "alice", "profile": "missing"})
+    worker.execute("disable", {"customer": "alice"})
+    with pytest.raises(worker.OperatorError):
+        worker.execute("configs", {"customer": "alice"})
+
+
+def test_config_export_uses_private_file_and_never_prints_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = {"customer_id": "fixture", "name": "REALITY", "config_uri": "vless://SECRET"}
+    monkeypatch.setattr(cli, "request", lambda *a, **kw: {"ok": True, "result": payload})
+    with pytest.raises(SystemExit):
+        cli.main(["customer", "config", "alice", "tcp_reality"])
+    path = tmp_path / "config.json"
+    assert cli.main(["customer", "config", "alice", "tcp_reality", "--save-link", str(path)]) == 0
+    assert json.loads(path.read_text()) == payload
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert "vless://SECRET" not in capsys.readouterr().out
+    assert cli.main(["customer", "config", "alice", "tcp_reality", "--save-link", str(path)]) == 1
+
+
+def test_profile_exports_exclude_info_and_require_unambiguous_selection(
+    operator: None, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+
+    from tests.conftest import TCP
+
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+    original = worker.api
+    first = TCP
+    second = TCP.replace(":8443?", ":9443?")
+    info = TCP.replace("192.0.2.1:8443", "127.0.0.1:1")
+    contents = base64.b64encode("\n".join([info, first, second, first]).encode())
+
+    def api(method: str, path: str, body: Any = None, *, raw: bool = False) -> Any:
+        return contents if raw else original(method, path, body)
+
+    monkeypatch.setattr(worker, "api", api)
+    worker.execute("create", {"username": "alice", "name": "Alice"})
+    listing = worker.execute("configs", {"customer": "alice"})["configs"]
+    assert len(listing) == 2
+    assert len({item["id"] for item in listing}) == 2
+    with pytest.raises(worker.OperatorError, match="exact configuration ID"):
+        worker.execute("config", {"customer": "alice", "profile": "tcp_reality"})
+    for entry in listing:
+        selected = worker.execute("config", {"customer": "alice", "profile": entry["id"]})
+        assert selected["config_uri"] in {first, second}
+    contents = b"invalid private output!"
+    with pytest.raises(worker.OperatorError, match="Subscription output is invalid"):
+        worker.execute("configs", {"customer": "alice"})

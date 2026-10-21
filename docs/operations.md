@@ -50,6 +50,14 @@ replacing an inode can leave the container using the old configuration.
 
 ## Lightweight monitoring and bots
 
+Host and container DNS are separate. If the host resolves names but proxy traffic
+fails, inspect `docker exec CONTAINER cat /etc/resolv.conf` and test a lookup inside
+that container. A stale `127.0.0.53` entry fails when the host DNS stub is disabled.
+For host-network containers, configure reachable resolvers explicitly with Compose
+`dns`; validate with `docker compose config --quiet`. A running-container repair
+alone does not configure future replacements. Confirm real HTTPS through profiles
+after repair. Do not restart Docker or change firewall rules to fix a DNS mismatch.
+
 `scripts/monitor.py` runs briefly every two minutes: containers/systemd, HTTP/TCP,
 disk/inodes, RAM/swap/load, backup age, Marzban status/quota/expiry and traffic growth.
 It stores root-only counters/state, not destinations, tokens or customer contacts.
@@ -79,8 +87,9 @@ suppress infrastructure heartbeat health.
 Bot `/help` lists commands; `/metrics`, `/monitor`, `/alerts` and `/ping` are read-only.
 Mutations use a bounded serial queue and expire after five minutes. Lost replies
 are not replayed: inspect state before retrying. Destructive commands require
-single-use confirmation. Only the configured private admin is admitted; retrieve
-subscription links through SSH, not Telegram.
+single-use confirmation. Only the configured private admin is admitted. Explicit
+`/link USER` and `/config USER CONFIG_ID` return bearer links there; `/configs USER`
+lists choices without credentials. Protect the admin Telegram account and chat history.
 
 For thresholds, deduplication and mute/repair commands, use the single
 [alert policy](alerts.md). Runtime paths and personal deployment instructions

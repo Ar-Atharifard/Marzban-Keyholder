@@ -1,4 +1,5 @@
 {
+  "certificate_checks": [],
   "state_file": "/var/lib/keyholder-monitor/state.json",
   "secrets_file": "/etc/keyholder/monitor.env",
   "marzban_db": "/var/lib/marzban/db.sqlite3",
@@ -8,6 +9,7 @@
     {"name": "braavos-gateway", "require_health": true},
     {"name": "marzban-marzban-1", "require_health": false}
   ],
+  "systemd_failed_units": ["keyholder-recovery.service", "keyholder-recovery-maintenance.service"],
   "systemd_units": [
     "docker.service",
     "ssh.service",
@@ -19,13 +21,15 @@
   "http_checks": [
     {"name": "keyholder", "url": "http://127.0.0.1:18000/health", "status": 200},
     {"name": "marzban", "url": "http://127.0.0.1:8000/", "status": 200},
-    {"name": "public-site", "url": "https://javatechpack.ir/", "status": 200}
+    {"name": "public-site", "url": "https://example.com/", "status": 200}
   ],
   "tcp_checks": [
     {"name": "gateway-tls", "host": "127.0.0.1", "port": 443},
     {"name": "xray", "host": "127.0.0.1", "port": 8443}
   ],
   "required_user_count": 1,
+  "proxy_status_file": "",
+  "proxy_status_max_age_seconds": 420,
   "disk_warning_percent": 80,
   "disk_critical_percent": 90,
   "inode_warning_percent": 85,

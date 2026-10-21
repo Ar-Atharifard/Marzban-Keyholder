@@ -67,6 +67,9 @@ class KeyholderParser(argparse.ArgumentParser):
 
 
 COMMAND_HELP = {
+    "tls-configure": "Configure automatic public HTTPS certificates with a private DNS token.",
+    "tls-status": "Show public certificate readiness and renewal service state.",
+    "tls-issue": "Start certificate issuance or retry automatic renewal.",
     "init-config": "Create a new mode-0600 environment template without overwriting files.",
     "status": "Show container state and the deployed API revision.",
     "health": "Check Keyholder's authenticated application health endpoint.",
@@ -92,16 +95,20 @@ COMMAND_HELP = {
     "reconcile": "Rotate legacy canonical links and revoke duplicate registrations.",
     "user-create": "Provision a Marzban user and create one stable Keyholder subscription.",
     "user-update": "Change an upstream user's quota, expiry or enabled state.",
-    "user-inbounds": "Replace one protocol's selected Marzban inbound tags.",
+    "user-inbounds": "Show a numbered inbound picker or replace an explicit protocol selection.",
+    "user-defaults": "View or change the inbound selection for future users.",
     "user-usage": "Read an upstream user's current traffic and plan state.",
     "user-reset-usage": "Reset an upstream user's traffic counter after confirmation.",
-    "user-dnstt": "Export a selected DNSTT user's private desktop profile and helper settings.",
+    "personal-dnstt": "Export the owner-only DNSTT desktop profile privately.",
+    "personal-masque": "Run a local administrator-only MASQUE/HTTP2 recovery proxy.",
     "panel": "Open the private Marzban panel through a local SSH tunnel.",
     "panel-url": "Show or privately save the legacy prepared panel bookmark.",
     "list": "List canonical Keyholder customers without subscription tokens.",
     "create": "Attach an existing active upstream user to one stable subscription.",
     "customer-update": "Update private identity metadata stored only by Keyholder.",
     "link": "Retrieve a customer's existing stable URL without creating a new one.",
+    "configs": "List a customer's current connection configurations without credentials.",
+    "config": "Retrieve one current configuration URI by its listed ID or unique family.",
     "show": "Show one canonical customer and its upstream mapping.",
     "check": "Check one customer's upstream profiles and rendered subscription.",
     "enable": "Resume Keyholder subscription delivery for a customer.",
@@ -114,6 +121,7 @@ COMMAND_HELP = {
 }
 
 GROUP_HELP = {
+    "tls": "Manage public HTTPS certificate issuance and renewal.",
     "config": "Initialize local configuration files.",
     "system": "Inspect and protect the Keyholder deployment.",
     "backend": "Manage subscription backend registrations.",
@@ -125,6 +133,7 @@ GROUP_HELP = {
     "user": "Provision and manage upstream user accounts.",
     "customer": "Manage stable Keyholder customer registrations.",
     "panel": "Access the private upstream administration panel.",
+    "personal": "Access owner-only tools outside customer subscriptions.",
 }
 
 LEGACY_COMMANDS = {
@@ -215,7 +224,7 @@ def parser() -> KeyholderParser:
             "'keyholder RESOURCE ACTION --help' for details.\n"
             "Examples:\n"
             "  keyholder system doctor\n"
-            "  keyholder user create customer_001 --quota-gb 20 --days 30 --protocols vless\n"
+            "  keyholder user create customer_001 --quota-gb 20 --days 30 --inbounds default\n"
             "  keyholder customer link customer_001 --save-link ./customer_001.json\n"
             "  keyholder panel open"
         ),
@@ -266,6 +275,13 @@ def parser() -> KeyholderParser:
         leaf("system", system, action, action)
 
     leaf("system", system, "metrics", "system-metrics")
+
+    _, tls = group("tls")
+    tls_configure = leaf("tls", tls, "configure", "tls-configure")
+    tls_configure.add_argument("domain", help="Existing public subscription hostname")
+    tls_configure.add_argument("--email", required=True, help="Certificate renewal contact email")
+    leaf("tls", tls, "status", "tls-status")
+    leaf("tls", tls, "issue", "tls-issue")
 
     _, backend = group("backend")
     leaf("backend", backend, "list", "backends")
@@ -318,8 +334,24 @@ def parser() -> KeyholderParser:
     reconcile.add_argument("--confirm", action="store_true", dest="confirmed", help="Apply changes")
 
     _, user = group("user")
-    dnstt = leaf("user", user, "dnstt", "user-dnstt")
-    dnstt.add_argument("username", help="Marzban username with DNSTT selected")
+    _, personal = group("personal")
+    masque = leaf("personal", personal, "masque", "personal-masque")
+    masque.add_argument(
+        "--binary",
+        type=Path,
+        default=operator_config().get("aether_binary"),
+        help="Verified Aether executable (or configure aether_binary)",
+    )
+    masque.add_argument(
+        "--state",
+        type=Path,
+        default=operator_config().get("masque_state"),
+        help="Private identity directory (default: user data directory)",
+    )
+    masque.add_argument("--port", type=int, default=1819, help="Loopback SOCKS port")
+    masque.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
+    masque.add_argument("--no-fragment", action="store_true", help="Try ordinary HTTP2 TLS")
+    dnstt = leaf("personal", personal, "dnstt", "personal-dnstt")
     dnstt.add_argument(
         "--save-link", type=Path, required=True, help="New private profile JSON file"
     )
@@ -335,9 +367,16 @@ def parser() -> KeyholderParser:
     )
     user_create.add_argument("--days", type=int, required=True, help="0 explicitly means no expiry")
     user_create.add_argument(
-        "--protocols", nargs="+", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
+        "--protocols",
+        nargs="+",
+        choices=["vless", "vmess", "trojan", "shadowsocks"],
+        help=argparse.SUPPRESS,
+    )
+    user_create.add_argument(
+        "--inbounds", help="Comma-separated inbound numbers, all, or default (omitted: default)"
     )
     user_create.add_argument("--save-link", type=Path, help="New private JSON file for the URL")
+    user_create.add_argument("--inbound-tags", nargs="+", help=argparse.SUPPRESS)
 
     attach = leaf("user", user, "attach", "create")
     attach.add_argument("username", help="Existing Marzban username")
@@ -355,12 +394,19 @@ def parser() -> KeyholderParser:
     user_update.add_argument("--days", type=int, help="Expiry from now; 0 means no expiry")
     user_update.add_argument("--status", choices=["active", "disabled"], help="Panel status")
     inbound = leaf("user", user, "inbounds", "user-inbounds")
-    inbound.add_argument("username", help="Marzban username")
+    inbound.add_argument("username", nargs="?", help="Omit to list available inbounds")
+    inbound.add_argument("--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"])
+    inbound.add_argument("--tags", nargs="*", help="Advanced: selected tags for --protocol")
     inbound.add_argument(
-        "--protocol", choices=["vless", "vmess", "trojan", "shadowsocks"], required=True
+        "--select", help="Replace selection: comma-separated numbers, all, or default"
     )
     inbound.add_argument(
-        "--tags", nargs="*", required=True, help="Empty selection disables this protocol's inbounds"
+        "--confirm", action="store_true", dest="confirmed", help="Apply --select without prompting"
+    )
+    defaults = leaf("user", user, "defaults", "user-defaults")
+    defaults.add_argument("--select", help="New defaults: comma-separated numbers or all")
+    defaults.add_argument(
+        "--confirm", action="store_true", dest="confirmed", help="Apply without prompting"
     )
     usage = leaf("user", user, "usage", "user-usage")
     usage.add_argument("username", help="Marzban username")
@@ -382,8 +428,12 @@ def parser() -> KeyholderParser:
     listing.add_argument("--limit", type=int, default=100, help="Rows, 1-100")
     listing.add_argument("--offset", type=int, default=0, help="Rows to skip")
     listing.add_argument("--history", action="store_true", help="Include revoked registrations")
+    listing.add_argument("--brief", action="store_true", help="Only usernames and private names")
+    listing.add_argument("--search", help="Filter username or private name (case-insensitive)")
     customer_update = leaf("customer", customer, "update", "customer-update")
-    customer_update.add_argument("customer", help="Customer ID, username, Telegram or phone")
+    customer_update.add_argument(
+        "customer", help="Customer ID, username, exact private name, Telegram or phone"
+    )
     customer_update.add_argument("--name")
     customer_update.add_argument("--telegram")
     customer_update.add_argument("--phone")
@@ -391,6 +441,8 @@ def parser() -> KeyholderParser:
     customer_update.add_argument("--clear-phone", action="store_true")
     for op in [
         "link",
+        "configs",
+        "config",
         "show",
         "check",
         "enable",
@@ -403,8 +455,10 @@ def parser() -> KeyholderParser:
     ]:
         command = leaf("customer", customer, op, op)
         command.add_argument(
-            "customer", help="Customer ID, exact username, Telegram handle/ID or phone"
+            "customer", help="Customer ID, exact username/private name, Telegram handle/ID or phone"
         )
+        if op == "config":
+            command.add_argument("profile", help="Configuration ID or uniquely matching family")
         if op == "rename":
             command.add_argument("name", help="New private display name")
         if op == "remap":
@@ -417,7 +471,7 @@ def parser() -> KeyholderParser:
             )
         if op == "link":
             command.add_argument("--info", action="store_true", help="Show the usage-page URL")
-        if op in {"rotate-token", "link"}:
+        if op in {"rotate-token", "link", "config"}:
             command.add_argument("--save-link", type=Path, help="New private JSON file")
     help_command = resources.add_parser(
         "help", help="Show complete help, or help for one resource/action path"
@@ -466,7 +520,9 @@ def display(result: Any, as_json: bool) -> None:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
     for item in result:
-        if "mapping" in item:
+        if set(item) == {"username", "name"}:
+            print(safe(item["username"]), safe(item["name"]), sep="\t")
+        elif "mapping" in item:
             print(
                 safe(item["mapping"]["upstream_username"]),
                 "\t".join(
@@ -476,6 +532,54 @@ def display(result: Any, as_json: bool) -> None:
             )
         else:
             print(json.dumps(item, ensure_ascii=False))
+
+
+def pick_inbounds(args: argparse.Namespace) -> int:
+    from keyholder.inbounds import select_tags
+
+    base = {"username": getattr(args, "username", None), "backend_id": args.backend_id}
+
+    def call(fields: dict[str, Any]) -> Any:
+        return request(
+            args.host, {"operation": args.operation, "args": {**base, **fields}}, local=args.local
+        )["result"]
+
+    catalog = call({})
+    if args.json and args.select is None:
+        display(catalog, True)
+        return 0
+    if not args.json:
+        print("Available inbounds ([x] selected; default plan for an omitted username):")
+        for row in catalog["entries"]:
+            print(
+                f"{row['number']:2}. [{'x' if row['selected'] else ' '}] "
+                + "; ".join(row["names"])
+                + f" ({row['protocol']})"
+            )
+    selection = args.select
+    if selection is None:
+        if not sys.stdin.isatty() or not base["username"]:
+            return 0
+        selection = input("Select numbers separated by commas (Enter cancels): ").strip()
+        if not selection:
+            return 0
+    try:
+        selected = select_tags(catalog["entries"], selection, catalog.get("default_tags", []))
+    except ValueError as error:
+        raise CLIError(str(error)) from None
+    chosen = [row for tag in selected for row in catalog["entries"] if row["tag"] == tag]
+    if not args.json:
+        print("New selection: " + "; ".join(" / ".join(row["names"]) for row in chosen))
+    if not args.confirmed:
+        if not sys.stdin.isatty():
+            raise CLIError("Use --confirm to apply a noninteractive selection.")
+        if input("Apply this selection? [y/N] ").strip().lower() != "y":
+            return 0
+    display(
+        call({"selected_tags": selected, "revision": catalog["revision"], "confirmed": True}),
+        args.json,
+    )
+    return 0
 
 
 def run_panel(args: argparse.Namespace) -> int:
@@ -531,6 +635,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             p.print_help()
         return 0
+    if args.operation == "personal-masque":
+        from keyholder.personal import run_masque
+
+        if args.local or args.json:
+            p.error("MASQUE runs interactively on your workstation, without --local/--json.")
+        try:
+            return run_masque(args.binary, args.state, args.port, args.ipv6, args.no_fragment)
+        except (OSError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
     if args.operation == "init-config":
         contents = (
             "KEYHOLDER_ADMIN_KEY=" + secrets.token_urlsafe(48) + "\n"
@@ -560,16 +674,20 @@ def main(argv: list[str] | None = None) -> int:
         p.error("Invalid backend ID.")
     if args.operation == "list" and (not 1 <= args.limit <= 100 or args.offset < 0):
         p.error("Limit must be 1–100 and offset must be nonnegative.")
-    if args.operation in {
-        "create",
-        "remap",
-        "user-create",
-        "user-update",
-        "user-inbounds",
-        "user-usage",
-        "user-reset-usage",
-        "user-dnstt",
-    } and not re.fullmatch(r"[A-Za-z0-9_]{3,32}", args.username):
+    if (
+        args.operation
+        in {
+            "create",
+            "remap",
+            "user-create",
+            "user-update",
+            "user-inbounds",
+            "user-usage",
+            "user-reset-usage",
+        }
+        and not (args.operation == "user-inbounds" and args.username is None)
+        and not re.fullmatch(r"[A-Za-z0-9_]{3,32}", args.username)
+    ):
         p.error("Marzban usernames must be 3–32 ASCII letters, digits or underscores.")
     if (
         args.operation in {"revoke", "rotate-token", "reconcile", "user-reset-usage"}
@@ -616,15 +734,29 @@ def main(argv: list[str] | None = None) -> int:
         "create",
         "user-create",
         "link",
+        "config",
         "rotate-token",
         "panel-url",
-        "user-dnstt",
+        "personal-dnstt",
     }
     destination = getattr(args, "save_link", None)
     if secret and not destination and (not sys.stdout.isatty() or args.json):
         p.error("Links require an interactive terminal or explicit --save-link private file.")
     fd = None
     try:
+        if args.operation == "user-defaults":
+            return pick_inbounds(args)
+        if args.operation == "user-inbounds":
+            if not args.username and (args.select or args.protocol or args.tags is not None):
+                raise CLIError(
+                    "Specify a username to edit, or use 'user defaults' for future users."
+                )
+            if bool(args.protocol) != (args.tags is not None) or (
+                args.protocol and args.select is not None
+            ):
+                raise CLIError("Use --protocol with --tags, or the numbered picker.")
+            if not args.protocol:
+                return pick_inbounds(args)
         if args.operation == "panel":
             return run_panel(args)
         if destination:
@@ -648,6 +780,10 @@ def main(argv: list[str] | None = None) -> int:
                 }
             },
         }
+        if args.operation == "tls-configure":
+            if not sys.stdin.isatty():
+                p.error("TLS configuration requires an interactive terminal.")
+            payload["args"]["token"] = getpass.getpass("Scoped Cloudflare DNS API token: ")
         if args.operation == "alerts-configure":
             if not sys.stdin.isatty():
                 p.error("Telegram configuration requires an interactive terminal.")
@@ -668,7 +804,9 @@ def main(argv: list[str] | None = None) -> int:
             request(args.host, payload, local=True) if args.local else request(args.host, payload)
         )["result"]
         if secret:
-            if args.operation == "user-dnstt":
+            if args.operation == "config":
+                credentials = result
+            elif args.operation == "personal-dnstt":
                 credentials = result
             elif args.operation == "panel-url":
                 credentials = {"panel_url": result["panel_url"], "active": result["active"]}
@@ -686,6 +824,9 @@ def main(argv: list[str] | None = None) -> int:
                     file.flush()
                     os.fsync(file.fileno())
                 print("Private link file saved. Keep it in secure storage.")
+            elif args.operation == "config":
+                print("Configuration:", result["name"])
+                print("URI:", result["config_uri"])
             elif args.operation == "panel-url":
                 print("Panel URL:", result["panel_url"])
                 if not result["active"]:

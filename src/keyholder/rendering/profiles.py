@@ -37,6 +37,37 @@ class Profile:
     protocol: str = "vless"
     cipher: str = "auto"
     ech_config_list: str = ""
+    fragment: bool = False
+
+
+def fragment_mask(profile: Profile) -> dict[str, object]:
+    """Split REALITY's TCP stream without changing the TLS records used by SNI routing."""
+    return {
+        "tcp": [
+            {
+                "type": "fragment",
+                "settings": {
+                    "packets": "1-1" if profile.security == "reality" else "tlshello",
+                    "lengths": ["100-200"],
+                    "delays": ["1-3"],
+                    "maxSplit": "16",
+                },
+            }
+        ]
+    }
+
+
+def apply_fragmentation(profiles: list[Profile], kinds: tuple[str, ...]) -> list[Profile]:
+    """Append an opt-in pilot; keep originals and ECH fallbacks unchanged."""
+    return profiles + [
+        replace(p, fragment=True, name=p.name[:185] + " | FRAG", fingerprint="chrome")
+        for p in profiles
+        if p.kind in kinds
+        and p.protocol == "vless"
+        and not p.ech_config_list
+        and not p.fragment
+        and p.security in {"tls", "reality"}
+    ]
 
 
 def decode_base64(value: str) -> bytes:
@@ -144,6 +175,8 @@ def normalize(link: str, networks: tuple[str, ...] = ()) -> Profile | None:
             kind: ProfileKind = "tcp_reality_ipv6" if ipv6 else "tcp_reality"
         elif security == "reality" and transport == "xhttp":
             kind = "xhttp_reality"
+        elif security == "reality" and transport == "grpc":
+            kind = "grpc_reality"
         elif security == "tls" and transport == "grpc":
             try:
                 ipaddress.ip_address(u.hostname)
@@ -276,6 +309,7 @@ def apply_cdn_ech(
     config: str,
     allowed_hosts: tuple[str, ...],
     include_plain_tls: bool = False,
+    kinds: tuple[str, ...] | None = None,
 ) -> list[Profile]:
     """Prefer plain TLS when enabled; retain labelled ECH CDN fallbacks."""
     if not config:
@@ -283,7 +317,12 @@ def apply_cdn_ech(
     delivered: list[Profile] = []
     fallbacks: list[Profile] = []
     for p in profiles:
-        eligible = p.security == "tls" and p.address in allowed_hosts and p.sni in allowed_hosts
+        eligible = (
+            p.security == "tls"
+            and p.address in allowed_hosts
+            and p.sni in allowed_hosts
+            and (kinds is None or p.kind in kinds)
+        )
         if eligible:
             ech = replace(p, ech_config_list=config, fingerprint="chrome")
             if include_plain_tls:
