@@ -3,7 +3,7 @@ import json
 from typing import Any, Protocol
 from urllib.parse import quote, urlencode
 
-from keyholder.rendering.profiles import Profile, fragment_mask
+from keyholder.rendering.profiles import FF_CIPHERS, Profile, ff_mask, fragment_mask
 
 
 class Renderer(Protocol):
@@ -60,7 +60,10 @@ class URIRenderer:
             }
             if p.ech_config_list:
                 q["ech"] = p.ech_config_list
-            if p.fragment:
+            if p.ff:
+                q["cs"] = FF_CIPHERS
+                q["fm"] = json.dumps(ff_mask(), separators=(",", ":"))
+            elif p.fragment:
                 q["fm"] = json.dumps(fragment_mask(p), separators=(",", ":"))
             if p.protocol == "vmess":
                 q["encryption"] = p.cipher
@@ -119,7 +122,9 @@ class XrayRenderer:
                     "network": "tcp" if p.transport == "raw" else p.transport,
                     "security": p.security,
                 }
-                if p.fragment:
+                if p.ff:
+                    stream["finalmask"] = ff_mask()
+                elif p.fragment:
                     stream["finalmask"] = fragment_mask(p)
                 tls: dict[str, Any] = {"serverName": p.sni, "fingerprint": p.fingerprint}
                 if p.alpn:
@@ -131,6 +136,9 @@ class XrayRenderer:
                     stream["realitySettings"] = tls
                 else:
                     tls["allowInsecure"] = False
+                    if p.ff:
+                        tls["cipherSuites"] = FF_CIPHERS
+                        tls["minVersion"] = "1.2"
                     if p.ech_config_list:
                         tls["echConfigList"] = p.ech_config_list
                     stream["tlsSettings"] = tls

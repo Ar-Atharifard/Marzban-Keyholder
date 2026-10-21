@@ -351,6 +351,17 @@ def parser() -> KeyholderParser:
     masque.add_argument("--port", type=int, default=1819, help="Loopback SOCKS port")
     masque.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
     masque.add_argument("--no-fragment", action="store_true", help="Try ordinary HTTP2 TLS")
+    masque.add_argument(
+        "--scan",
+        choices=["turbo", "balanced", "thorough", "stealth", "ironclad"],
+        default="balanced",
+        help="Endpoint scan strategy (default: balanced)",
+    )
+    masque.add_argument(
+        "--fresh", action="store_true", help="Scan instead of reusing a saved endpoint"
+    )
+    masque.add_argument("--register", action="store_true", help="Register WARP keys and exit")
+    masque.add_argument("--register-proxy", help="Use a working loopback proxy only for --register")
     dnstt = leaf("personal", personal, "dnstt", "personal-dnstt")
     dnstt.add_argument(
         "--save-link", type=Path, required=True, help="New private profile JSON file"
@@ -643,7 +654,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.local or args.json:
             p.error("MASQUE runs interactively on your workstation, without --local/--json.")
         try:
-            return run_masque(args.binary, args.state, args.port, args.ipv6, args.no_fragment)
+            return run_masque(
+                args.binary,
+                args.state,
+                args.port,
+                args.ipv6,
+                args.no_fragment,
+                scan=args.scan,
+                fresh=args.fresh,
+                register=args.register,
+                register_proxy=args.register_proxy,
+            )
         except (OSError, ValueError) as error:
             print(str(error), file=sys.stderr)
             return 1

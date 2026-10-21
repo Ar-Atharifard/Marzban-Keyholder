@@ -110,11 +110,16 @@ Read plan and traffic state, or explicitly reset used traffic.
 Export the owner-only DNSTT profile and helper metadata from a private host file.
 Independent of Marzban users; the desktop helper must run separately.
 .TP
-.B personal masque [--binary PATH] [--state DIRECTORY] [--port 1819] [--ipv6] [--no-fragment]
+.B personal masque [--binary PATH] [--state DIRECTORY] [--port 1819] [--ipv6] [--no-fragment] [--scan MODE] [--fresh] [--register] [--register-proxy URL]
 Run a verified Aether binary on this workstation as a loopback-only SOCKS proxy.
 Uses MASQUE over HTTP/2 with fragmentation; Ctrl+C stops it. Does not set the system
 proxy or TUN. Identity keys stay in the private state directory. Independent of
 Marzban accounting, destination restrictions and customer subscriptions.
+Scan modes: turbo, balanced (default), thorough, stealth, ironclad.
+--fresh scans instead of reusing a saved endpoint. --register registers keys and
+exits without a tunnel; --register-proxy accepts a credential-free loopback proxy
+for that registration only. Subsequent tunnel runs do not use that proxy.
+
 .TP
 .B customer list [--limit N] [--offset N] [--history] [--brief] [--search TEXT]
 List canonical customers without bearer tokens. History includes revoked registrations.

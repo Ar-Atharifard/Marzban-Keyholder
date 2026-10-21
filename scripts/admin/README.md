@@ -190,7 +190,33 @@ configuration can set `aether_binary` and `masque_state` to avoid repeating path
 
 This starts HTTP/2 with fragmentation on SOCKS `127.0.0.1:1819`; it does not change
 system proxy settings. Point your administrator client at that local SOCKS proxy.
-Ctrl+C stops it. Try `--no-fragment` or `--ipv6` when appropriate. Identity keys stay
+Ctrl+C stops it. `--scan balanced` chooses verified endpoints; `--fresh` ignores a
+saved endpoint. Try `--scan ironclad` for end-to-end scanning, `--no-fragment` for
+ordinary HTTP/2 TLS, or `--ipv6` when appropriate. Register keys separately through
+an already working local proxy, then start the tunnel directly:
+
+```sh
+keyholder personal masque --register --register-proxy socks5://127.0.0.1:10808
+keyholder personal masque --fresh --scan balanced
+```
+
+The registration proxy is used only by the first command. Identity keys stay
 in the private state directory. First registration and subsequent startup checks
 need Cloudflare's WARP API; a filtered API can cause long retries or failure.
 It uses Cloudflare's exit, independently of your VPS, Marzban quotas and routing.
+
+
+## Experimental F&F delivery
+
+`KEYHOLDER_FF_ACCOUNTS` enables explicit `backend-id/username` pilots only.
+Set `KEYHOLDER_FF_ADDRESS` to a verified public CDN edge inside the configured
+`KEYHOLDER_ALLOWED_CDN_NETWORKS`; SNI and HTTP identity remain the upstream host.
+`KEYHOLDER_FF_KINDS` defaults to VLESS gRPC and XHTTP. Originals remain; extra `FF`
+entries use PattNG's exact `tlshello-0-len` and semi-python presets, fingerprint
+`unsafe`, no ECH, gRPC ALPN `h2` and XHTTP ALPN `h2,http/1.1`. They require compatible
+PattN/PattNG builds. Certificate verification stays enabled; no REALITY zero-length
+mask is generated. Clear the account list to stop publishing the pilot.
+
+This preset is copied from [PattNG's arrays](https://github.com/patterniha/PattNG/blob/89c760cee27051ac7b6c391d376e528adfdc8a0c/V2rayNG/app/src/main/res/values/arrays.xml),
+not a promise of reachability on any ISP. The ordinary FRAG address scope is
+`KEYHOLDER_FRAGMENTATION_HOSTS`; empty preserves its existing all-address behavior.

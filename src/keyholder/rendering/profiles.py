@@ -42,6 +42,7 @@ class Profile:
     cipher: str = "auto"
     ech_config_list: str = ""
     fragment: bool = False
+    ff: bool = False
 
 
 def fragment_mask(profile: Profile) -> dict[str, object]:
@@ -61,12 +62,15 @@ def fragment_mask(profile: Profile) -> dict[str, object]:
     }
 
 
-def apply_fragmentation(profiles: list[Profile], kinds: tuple[str, ...]) -> list[Profile]:
+def apply_fragmentation(
+    profiles: list[Profile], kinds: tuple[str, ...], hosts: tuple[str, ...] = ()
+) -> list[Profile]:
     """Append an opt-in pilot; keep originals and ECH fallbacks unchanged."""
     return profiles + [
         replace(p, fragment=True, name=p.name[:185] + " | FRAG", fingerprint="chrome")
         for p in profiles
         if p.kind in kinds
+        and (not hosts or p.address in hosts)
         and p.protocol == "vless"
         and not p.ech_config_list
         and not p.fragment
@@ -459,5 +463,71 @@ def delivery_profiles(
         None if account_key in settings.cdn_ech_full_catalog else settings.cdn_ech_kinds,
     )
     if account_key in settings.fragmentation_accounts:
-        profiles = apply_fragmentation(profiles, settings.fragmentation_kinds)
+        profiles = apply_fragmentation(
+            profiles, settings.fragmentation_kinds, settings.fragmentation_hosts
+        )
+    if account_key in settings.ff_accounts:
+        profiles += [
+            replace(
+                p,
+                ff=True,
+                name=p.name[:187] + " | FF",
+                address=settings.ff_address,
+                fingerprint="unsafe",
+                ech_config_list="",
+                alpn=("h2",) if p.transport == "grpc" else ("h2", "http/1.1"),
+            )
+            for p in profiles
+            if p.kind in settings.ff_kinds
+            and p.protocol == "vless"
+            and p.security == "tls"
+            and p.address in settings.allowed_cdn_hosts
+            and p.sni in settings.allowed_cdn_hosts
+            and not p.fragment
+            and not p.ech_config_list
+            and not p.ff
+        ]
     return profiles
+
+
+# PattNG's semi-python and tlshello-0-len presets, not ordinary Xray defaults.
+# Source: patterniha/PattNG 89c760c, res/values/arrays.xml.
+FF_CIPHERS = ":".join(
+    (
+        "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+        "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+        "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+        "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+        "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+        "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+        "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+        "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+        "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
+        "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+    )
+)
+
+
+def ff_mask() -> dict[str, object]:
+    return {
+        "tcp": [
+            {
+                "type": "fragment",
+                "settings": {
+                    "packets": "tlshello",
+                    "lengths": ["0", "104", "1"],
+                    "delays": ["0"],
+                    "maxSplit": "0",
+                },
+            },
+            {
+                "type": "fragment",
+                "settings": {
+                    "packets": "1-1",
+                    "lengths": ["114", "1"],
+                    "delays": ["1"],
+                    "maxSplit": "11",
+                },
+            },
+        ]
+    }
