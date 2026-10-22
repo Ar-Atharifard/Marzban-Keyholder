@@ -5,6 +5,7 @@ import argparse
 import re
 import shlex
 import subprocess
+from pathlib import Path
 
 ARCHIVE = (
     "/var/lib/keyholder-recovery/downloaded/var/lib/keyholder-recovery/bundle/nodes/domestic.tar"
@@ -43,6 +44,10 @@ def transfer(source: str, target: str, config: str) -> None:
         "ClearAllForwardings=yes",
         "-o",
         "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=10",
+        "-o",
+        "ServerAliveCountMax=3",
     ]
     digest = subprocess.check_output(
         [*ssh, source, "sudo -n sha256sum " + ARCHIVE], text=True, timeout=30
@@ -59,6 +64,10 @@ def transfer(source: str, target: str, config: str) -> None:
                 stdin=reader.stdout,
                 timeout=180,
             )
+        except BaseException:
+            reader.kill()
+            reader.wait()
+            raise
         finally:
             reader.stdout.close()
         if reader.wait(timeout=15) or result.returncode:
@@ -69,8 +78,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("foreign_alias")
     parser.add_argument("domestic_alias")
-    parser.add_argument(
-        "--ssh-config", default=str(__import__("pathlib").Path.home() / ".ssh/config")
-    )
+    parser.add_argument("--ssh-config", default=str(Path.home() / ".ssh/config"))
     args = parser.parse_args()
     transfer(args.foreign_alias, args.domestic_alias, args.ssh_config)
