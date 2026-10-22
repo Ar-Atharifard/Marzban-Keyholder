@@ -10,3 +10,10 @@ condition = "AND"
 paths = ['''scripts/admin/(host\.py|README\.md)$''']
 regexTarget = "line"
 regexes = ['''^\s*"api_container":\s*"keyholder-api-1",?\s*$''']
+
+[[rules.allowlists]]
+description = "Synthetic B2 key used by credential permission tests"
+condition = "AND"
+paths = ['''tests/test_recovery\.py$''']
+regexTarget = "line"
+regexes = ['''^\s*"key":\s*"syntheticApplicationKey123456",?\s*$''']
