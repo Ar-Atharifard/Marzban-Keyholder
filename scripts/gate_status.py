@@ -29,7 +29,8 @@ def backhaul_status() -> dict[str, str]:
     return {
         row["svname"]: row["status"]
         for row in rows
-        if row.get("pxname") == "foreign_backhaul_paths" and row.get("svname") in {"rathole", "frp"}
+        if row.get("pxname") == "foreign_backhaul_paths"
+        and row.get("svname") in {"rathole", "frp", "forward"}
     }
 
 
@@ -44,6 +45,8 @@ def main() -> None:
     ]
     if Path("/etc/systemd/system/keyholder-frp-server.service").exists():
         units.extend(["keyholder-frp-server", "keyholder-backhaul-guard.timer"])
+    if Path("/etc/systemd/system/keyholder-forward-client.service").exists():
+        units.append("keyholder-forward-client")
     services = {}
     for unit in units:
         response = subprocess.run(

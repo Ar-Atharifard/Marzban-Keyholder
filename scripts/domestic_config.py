@@ -16,11 +16,11 @@ def add_transport(
     if (
         inbound.get("listen") != "127.0.0.1"
         or stream.get("security") != "reality"
-        or stream.get("network") not in {"xhttp", "grpc"}
+        or stream.get("network") not in {"tcp", "xhttp", "grpc"}
         or not stream.get("realitySettings", {}).get("publicKey")
         or not stream.get("sockopt", {}).get("acceptProxyProtocol")
     ):
-        raise ValueError("Expected loopback XHTTP/gRPC REALITY behind the gateway")
+        raise ValueError("Expected loopback REALITY behind the gateway")
     rules = [
         rule for rule in result["routing"]["rules"] if existing_tag in rule.get("inboundTag", [])
     ]
@@ -89,4 +89,34 @@ def add_entry(
     }
     result["outbounds"].insert(0, tunnel)
     result["inbounds"].append(deepcopy(inbound))
+    return result
+
+
+def add_backhaul_entry(
+    core: dict[str, Any], inbound: dict[str, Any], existing_tag: str, exit_proxy: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep domestic classification before selecting a different foreign backhaul."""
+    tag = exit_proxy.get("tag")
+    servers = exit_proxy.get("settings", {}).get("servers", [])
+    if (
+        not tag
+        or tag in {item["tag"] for item in core["outbounds"]}
+        or exit_proxy.get("protocol") != "socks"
+        or len(servers) != 1
+        or servers[0].get("address") != "127.0.0.1"
+        or not servers[0].get("users")
+        or core.get("routing", {}).get("domainStrategy") not in {"IPIfNonMatch", "IPOnDemand"}
+    ):
+        raise ValueError("Unique authenticated loopback exit and IP classification required")
+    result = add_transport(core, inbound, existing_tag)
+    result["outbounds"].append(deepcopy(exit_proxy))
+    # Resolve at the earlier IP rules before the per-entry fallback can match.
+    result["routing"]["domainStrategy"] = "IPOnDemand"
+    result["routing"]["rules"].append(
+        {
+            "type": "field",
+            "inboundTag": [inbound["tag"]],
+            "outboundTag": tag,
+        }
+    )
     return result

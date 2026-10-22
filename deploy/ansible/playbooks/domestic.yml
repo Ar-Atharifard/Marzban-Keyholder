@@ -155,6 +155,43 @@
             remote_src: true
             mode: '0644'
           loop: [keyholder-frp-server.service, keyholder-backhaul-guard.service, keyholder-backhaul-guard.timer]
+    - name: Detect optional REALITY forward connector
+      ansible.builtin.stat:
+        path: '{{ domestic_stage }}/etc/keyholder-forward/client.json'
+      register: domestic_forward
+    - name: Restore optional REALITY forward connector
+      when: domestic_forward.stat.exists
+      block:
+        - name: Restore forward connector credentials
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/etc/keyholder-forward/'
+            dest: /etc/keyholder-forward/
+            remote_src: true
+            owner: root
+            group: keyholder-tunnel
+            mode: 'u=rwX,g=rX,o='
+          no_log: true
+        - name: Restore forward connector unit
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/etc/systemd/system/keyholder-forward-client.service'
+            dest: /etc/systemd/system/keyholder-forward-client.service
+            remote_src: true
+            mode: '0644'
+        - name: Restore gateway probe credentials
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/etc/keyholder-backhaul/'
+            dest: /etc/keyholder-backhaul/
+            remote_src: true
+            owner: root
+            group: haproxy
+            mode: 'u=rwX,g=rX,o='
+          no_log: true
+    - name: Install current guard and telemetry helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-admin/{{ item }}'
+        mode: '0755'
+      loop: [domestic_guard.py, backhaul_guard.py, backhaul_probe.py, gate_status.py, monitor.py]
     - name: Restore and validate gateway routing
       ansible.builtin.copy:
         src: '{{ domestic_stage }}/etc/haproxy/haproxy.cfg'
@@ -163,12 +200,6 @@
         mode: '0644'
         validate: /usr/sbin/haproxy -c -f %s
       no_log: true
-    - name: Install current guard and telemetry helpers
-      ansible.builtin.copy:
-        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
-        dest: '/usr/local/lib/keyholder-admin/{{ item }}'
-        mode: '0755'
-      loop: [domestic_guard.py, backhaul_guard.py, gate_status.py, monitor.py]
     - name: Install guard arm file
       ansible.builtin.copy:
         content: ''
@@ -191,7 +222,7 @@
         name: '{{ item }}'
         state: started
         enabled: true
-      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) }}'
+      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) + (["keyholder-forward-client"] if domestic_forward.stat.exists else []) }}'
       when:
         - domestic_activate | default(false) | bool
         - domestic_old_node_stopped | default(false) | bool

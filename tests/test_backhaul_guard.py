@@ -23,3 +23,13 @@ def test_never_restarts_during_total_outage_or_admin_closure() -> None:
             {"rathole": "DOWN", "frp": alternate}, {"failures": 3}, 2000, permitted
         )
         assert not restart
+
+
+def test_forward_can_authorize_recovery_when_frp_is_down() -> None:
+    _, restart = advance(
+        {"rathole": "DOWN", "frp": "DOWN", "forward": "UP"},
+        {"failures": 2},
+        2000,
+        True,
+    )
+    assert restart

@@ -23,6 +23,7 @@ all:
           - etc/keyholder
           - etc/keyholder-rathole
           - etc/keyholder-frp
+          - etc/keyholder-forward
           - usr/local/bin/frpc
           - etc/keyholder-foreign-exit
           - usr/local/bin/rathole

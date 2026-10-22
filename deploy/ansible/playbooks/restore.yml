@@ -66,7 +66,7 @@
     - name: Validate explicitly permitted application roots
       ansible.builtin.assert:
         that:
-          - item is match('^(etc/keyholder|etc/keyholder-rathole|etc/keyholder-foreign-exit|etc/keyholder-frp|opt/marzban|opt/braavos-gateway|srv/keyholder|srv/keyholder-releases|usr/local/bin/rathole|usr/local/bin/frpc|usr/local/bin/lego|usr/local/lib/keyholder-admin|usr/local/lib/keyholder-recovery|usr/local/libexec/keyholder|usr/local/sbin/keyholder-recovery|var/lib/marzban|var/lib/keyholder-monitor|var/lib/keyholder-management-bot)$')
+          - item is match('^(etc/keyholder|etc/keyholder-rathole|etc/keyholder-foreign-exit|etc/keyholder-frp|etc/keyholder-forward|opt/marzban|opt/braavos-gateway|srv/keyholder|srv/keyholder-releases|usr/local/bin/rathole|usr/local/bin/frpc|usr/local/bin/lego|usr/local/lib/keyholder-admin|usr/local/lib/keyholder-recovery|usr/local/libexec/keyholder|usr/local/sbin/keyholder-recovery|var/lib/marzban|var/lib/keyholder-monitor|var/lib/keyholder-management-bot)$')
       loop: '{{ recovery_rootfs_paths }}'
     - name: Create destination application directories
       ansible.builtin.file:

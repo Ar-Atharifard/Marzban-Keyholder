@@ -158,6 +158,28 @@
             name: keyholder-frp-client
             enabled: true
             state: started
+    - name: Detect optional REALITY forward server
+      ansible.builtin.stat:
+        path: /etc/keyholder-forward/server.json
+      register: foreign_forward
+    - name: Restore optional REALITY server ownership and startup
+      when: foreign_forward.stat.exists and domestic_connector.stat.exists
+      block:
+        - name: Restore REALITY server credential ownership
+          ansible.builtin.file:
+            path: '{{ item.path }}'
+            owner: root
+            group: keyholder-exit
+            mode: '{{ item.mode }}'
+          loop:
+            - {path: /etc/keyholder-forward, mode: '0750'}
+            - {path: /etc/keyholder-forward/server.json, mode: '0640'}
+          no_log: true
+        - name: Start restored REALITY server after peer review
+          ansible.builtin.systemd_service:
+            name: keyholder-forward-server
+            enabled: true
+            state: started
     - name: Restore the optional domestic backup preflight
       ansible.builtin.stat:
         path: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-recovery.service.d/domestic.conf'

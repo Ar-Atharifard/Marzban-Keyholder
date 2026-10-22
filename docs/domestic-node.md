@@ -11,18 +11,34 @@ on one connection does not stall unrelated TCP connections. Keep certificate
 verification enabled and restrict exported ports to the required loopback endpoints.
 Templates are in `deploy/domestic/frp/`; pin the binary and verify its release digest.
 
-HAProxy can keep the same authenticated SOCKS endpoint while checking both paths
-using the SOCKS authentication greeting. This verifies the remote exit is reachable,
-not merely that a local port is open. Existing profiles then use the selected
-backhaul without duplicated credentials, accounting or customer configuration.
-Failover applies to new connections; established streams cannot migrate between
-TCP tunnels. Profile probes must still check real HTTP traffic.
+Keep customer data paths separate when comparing tunnels. The original domestic
+entries can use Rathole directly; dedicated OWNER pilot entries can select FRP or
+an Xray REALITY forward connector. Set a distinct authenticated loopback SOCKS
+outbound per path. Resolve destinations with `IPOnDemand` before the Iranian IP
+rule and the per-entry foreign fallback; an unconditional rule with `IPIfNonMatch`
+would prevent DNS classification. Private destinations remain blocked.
 
-The optional backhaul guard restarts a running Rathole listener only after three
-failed minute checks, with the alternate healthy and the panel lease valid. It
-allows at most one restart per 30 minutes and respects intentional service stops.
-Backhaul telemetry distinguishes total failure from lost redundancy. The backup
-and restore flows include the optional FRP binaries, credentials and units.
+The forward connector initiates from domestic to foreign, unlike the reverse
+connectors. Its server uses REALITY TCP Vision and forwards to the existing foreign
+SOCKS exit. The domestic client exposes authenticated loopback port 19987. It can
+use an IPv6 underlay while customers enter over IPv4. Restrict the foreign listener
+to the domestic source address. Config builders and hardened units are in
+`scripts/forward_config.py` and `deploy/domestic/forward/`.
+
+Only the shared DNS resolver needs the checked loopback endpoint when customer
+paths are pinned. HAProxy external checks run the root-owned `backhaul_probe.py`
+as its unprivileged service user, with credentials from root-owned
+`/etc/keyholder-backhaul/probe.json` (root:haproxy 0640). The probe verifies real TLS
+through each path, uses a second target if the first fails, and sends credentials
+through stdin. Enable `external-check` and `insecure-fork-wanted` in HAProxy global;
+never grant the probe root execution. Checks run every 10 seconds, requiring two
+failures/recoveries. A local SOCKS greeting alone cannot validate a forward client.
+
+The optional guard restarts a running Rathole listener only after three failed
+minute checks, another path healthy and the panel lease valid, with a 30-minute
+cooldown. Monitoring reports path failure and loss of redundancy. Backups and
+optional Ansible restore tasks include both connector types, credentials and units;
+review peer IPv6 addresses, source pinning and firewall rules on migration.
 
 Enable XUDP on the internal SOCKS outbound (`mux.enabled: true`, `concurrency: -1`,
 `xudpConcurrency: 8`). This carries application UDP inside the existing TCP tunnel;
@@ -35,7 +51,7 @@ older Marzban live Vision account updates.
 
 Use trusted DNS for split routing: ISP DNS may resolve filtered foreign names to
 private filtering addresses. The shared core sends tagged DNS-over-HTTPS through
-the authenticated SOCKS exit. Gate reaches that exit through Rathole; the foreign
+the authenticated SOCKS exit. Gate reaches the resolver through the checked backhauls; the foreign
 host has a matching loopback SOCKS listener on 19980. Its tunnel target remains
 19981. No public DNS listener is needed. Set matching REALITY private/public keys
 explicitly and test the exported subscription, not just a hand-built client.

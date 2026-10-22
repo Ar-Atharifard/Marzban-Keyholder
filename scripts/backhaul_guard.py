@@ -22,7 +22,7 @@ def advance(
     restart = (
         permitted
         and failures >= 3
-        and paths.get("frp", "").startswith("UP")
+        and any(paths.get(name, "").startswith("UP") for name in ["frp", "forward"])
         and now - state.get("last_restart", 0) >= 1800
     )
     return {

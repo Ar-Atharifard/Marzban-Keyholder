@@ -20,13 +20,17 @@
       ansible.builtin.stat:
         path: /etc/systemd/system/keyholder-frp-server.service
       register: domestic_frp
+    - name: Detect optional restored REALITY forward connector
+      ansible.builtin.stat:
+        path: /etc/systemd/system/keyholder-forward-client.service
+      register: domestic_forward
     - name: Enable node and reverse listener under the prepared firewall
       ansible.builtin.systemd_service:
         name: '{{ item }}'
         enabled: true
         state: started
         daemon_reload: true
-      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) }}'
+      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) + (["keyholder-forward-client"] if domestic_forward.stat.exists else []) }}'
     - name: Wait for the heartbeat guard to open the customer listener
       ansible.builtin.wait_for:
         host: 127.0.0.1
