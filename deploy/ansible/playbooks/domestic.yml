@@ -31,7 +31,7 @@
         that: not domestic_existing.stat.exists
     - name: Install missing prerequisites without upgrading the OS
       ansible.builtin.apt:
-        name: [python3-venv, haproxy, ca-certificates]
+        name: [python3-venv, haproxy, ca-certificates, curl]
         state: present
         update_cache: false
         policy_rc_d: 101
