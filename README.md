@@ -11,6 +11,10 @@ The backend lives in `src/keyholder/`; `migrations/` holds its database history.
 `scripts/` and `deploy/` contain optional administration, monitoring and recovery
 tools. You can run the backend without installing those tools or a domestic node.
 
+Keyholder was developed with substantial direct assistance from **OpenAI Codex**
+in implementation, testing, documentation and infrastructure tooling. Human
+maintainers remain responsible for reviewing changes and deciding what ships.
+
 ## Supported integrations
 
 - **Marzban:** account status and current links from its HTTP API; separate explicit
@@ -72,6 +76,16 @@ checks migrations, packaging and secrets; it never deploys.
 Multi-worker rate limits, PostgreSQL and automatic failover are unsupported.
 `/health` checks the database, not upstream connectivity.
 
-Licensed under [MIT](LICENSE). See [contribution guidance](CONTRIBUTING.md) and
-[security reporting](SECURITY.md). Personal deployment notes belong in ignored
-`.private/` storage and are excluded from public artifacts.
+## License and acknowledgements
+
+Keyholder is licensed under [MIT](LICENSE). It integrates with
+[Marzban](https://github.com/Gozargah/Marzban), developed by Gozargah and its
+contributors. Marzban and optional
+[Marzban Node](https://github.com/Gozargah/Marzban-node) have their own
+[AGPL-3.0 license](https://github.com/Gozargah/Marzban/blob/master/LICENSE).
+Keyholder's MIT license does not relicense those projects or other dependencies.
+See the [integration and redistribution guidance](docs/development.md#upstream-licensing).
+
+See [contribution guidance](CONTRIBUTING.md) and [security reporting](SECURITY.md).
+Personal deployment notes belong in ignored `.private/` storage and are excluded
+from public artifacts.

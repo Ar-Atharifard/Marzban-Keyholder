@@ -99,3 +99,30 @@ The experimental FF/FRAG delivery presets and their settings have been retired.
 Remove `KEYHOLDER_FF_*` and `KEYHOLDER_FRAGMENTATION_*` entries from deployment
 configuration when upgrading. Native protocols and personal MASQUE are unaffected;
 Keyholder still ignores arbitrary upstream masks and cipher overrides.
+
+## Upstream licensing
+
+Keyholder's adapter communicates with a separately running Marzban HTTP API.
+The public source and Keyholder image do not vendor Marzban or Marzban Node.
+Their current upstream licenses are AGPLv3:
+[Marzban](https://github.com/Gozargah/Marzban/blob/master/LICENSE) and
+[Marzban Node](https://github.com/Gozargah/Marzban-node/blob/master/LICENSE).
+Check the exact version you deploy or redistribute.
+
+API integration alone does not automatically require relicensing Keyholder.
+Separate programs can retain separate licenses, but HTTP or separate containers
+alone do not establish independence: code reuse and the nature of the combination
+matter. See the [GNU FAQ](https://www.gnu.org/licenses/gpl-faq.en.html#MereAggregation).
+Keep the service boundary; review licensing before importing or adapting upstream code.
+
+Preserve upstream copyright and license notices when distributing upstream copies.
+For images/binaries, satisfy the applicable corresponding-source requirements;
+a generic link to the latest repository is not necessarily sufficient. Modified
+AGPL services must offer their corresponding source to remote users as required
+by section 13. These obligations concern the covered upstream work, not an
+automatic license change for every service that calls it.
+
+Recovery bundles can contain upstream source and images as well as secrets. Keep
+them private; Keyholder's MIT license does not cover their third-party contents.
+The source exporter filters private files, not license compatibility. Review any
+redistribution separately; attribution alone does not fulfill every AGPL obligation.

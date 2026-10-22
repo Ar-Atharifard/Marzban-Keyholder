@@ -11,4 +11,10 @@ new transports additionally need installed-core and real-network validation.
 
 Do not mix application changes with unreviewed infrastructure deployment. New
 services, databases or background jobs require a demonstrated requirement.
-Contributions are distributed under the project's MIT license.
+Contributions are distributed under the project's MIT license. Preserve attribution
+and compatible licensing for any reused code; see
+[upstream licensing](docs/development.md#upstream-licensing).
+
+AI-assisted contributions are welcome. Describe substantial AI assistance in the
+pull request, review the result, and be able to explain and maintain it. The same
+testing, security and licensing requirements apply.
