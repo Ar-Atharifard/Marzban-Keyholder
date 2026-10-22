@@ -30,6 +30,19 @@ closed. TLS verification stays enabled, XHTTP `extra` is omitted, and arbitrary
 upstream ECH/MUX/mask settings are not imported. Supported families and trusted
 CDN hosts/networks are configurable; unfamiliar protocols require parser/tests.
 
+## Deployment portability
+
+Application settings, provider URLs, domains and credentials come from configuration;
+no personal inventory or secrets are required from the maintainer. SQLite is the
+supported application database. Object storage holds encrypted backup archives,
+not the live application database.
+
+The optional two-command recovery workflow targets the documented Ubuntu 22.04
+Marzban/two-server topology and an existing compatible backup. It is not an installer
+for arbitrary panels, operating systems or tunnel stacks. Backblaze B2 has a guided
+credential setup; other S3-compatible repositories use a private restic environment
+prepared on the target. See [deployment scope](deploy/ansible/README.md#portability).
+
 ## Start here
 
 Use Python 3.12+ and `uv`:

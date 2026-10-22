@@ -57,3 +57,37 @@ commands above. The old `ansible/recover` still supports an isolated foreign VM
 rehearsal and its `--finish` / `--check` modes.
 
 [Recovery reference](../../docs/disaster-recovery.md) covers backups and cutover.
+
+## Portability
+
+Use your own private plan: addresses, previous addresses, domain, initial SSH
+account and administrator key are deployment inputs. The supported security
+policy deliberately standardizes final access on `khadmin`, key-only SSH on 2222.
+The paired workflow requires both IP families and the documented Marzban,
+Marzban Node, Rathole, FRP and Xray layout. It restores an existing bundle; it
+does not invent an initial service configuration or translate arbitrary stacks.
+Lower-level inventories expose additional paths and service settings. Changes to
+tunnel ports must also match the restored configurations, not just firewall rules.
+
+B2 is the guided storage option. For another S3-compatible service, provision
+`/etc/keyholder/recovery.env` on the foreign target before the foreign command:
+root-owned, mode `0600`, with these values (one literal `KEY=value` per line,
+without shell quotes or substitutions):
+
+```text
+RESTIC_REPOSITORY=s3:https://s3.example.org/bucket/keyholder
+RESTIC_PASSWORD_FILE=/etc/keyholder/recovery-password
+AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
+AWS_DEFAULT_REGION=YOUR_REGION
+RESTIC_CACHE_DIR=/var/cache/keyholder-recovery
+GOGC=50
+```
+
+Store the existing repository password separately in the root-owned `0600`
+password file; keep `/etc/keyholder` mode `0700`. Use an existing repository
+containing a compatible `keyholder-recovery-v1` snapshot. The workflow detects
+this environment and skips B2 setup. Do not run `prepare-s3` for another provider:
+that helper specifically resolves B2 endpoints. Provider compatibility still needs
+a restore rehearsal; only B2 has been exercised for this deployment. Credentials
+never belong in the public inventory, Git, or shell command arguments.
