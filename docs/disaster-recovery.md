@@ -163,11 +163,18 @@ Sources: [restic](https://restic.readthedocs.io/en/stable/030_preparing_a_new_re
 
 ## Two-server replacement
 
-Use the [shared deployment commands](../deploy/ansible/README.md): fresh-host security
-on each replacement → foreign recovery → verified domestic archive stream → domestic
-restore → reviewed peer/observer identity handover → activation → customer checks → DNS
-cutover → single-writer jobs. The peer map is separate from the foreign local-address
-map; include the changed domestic/foreign IPs, including forward IPv6 source pins.
-No tunnel keys or customer identities are regenerated. Re-establish monitoring SSH
-trust from authenticated host keys; never disable host-key checking. Keep the old
-servers and the final consistent backup until cutover is accepted.
+The normal operator interface is two commands, from the laptop:
+
+```sh
+./deploy/restore-foreign
+./deploy/restore-domestic
+```
+
+Use the same private plan, foreign first. The commands aggregate fresh-host security,
+restore, peer mapping, archive transfer, observer trust, activation and job handover.
+They prompt for console/identity verification, existing storage credentials, old
+writer/node handover and DNS cutover. See the [short deployment guide](../deploy/ansible/README.md).
+No old server is stopped and no public DNS record changed without your action.
+Preserve old hosts until acceptance; after new writes, rollback must account for
+changed data. Stage-specific commands above remain for contributors and incident
+recovery, not the normal paired procedure. A fresh paired rehearsal is still required.

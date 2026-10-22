@@ -109,6 +109,12 @@ a reverse tunnel guarantees service during a complete international shutdown.
 
 ## Restore a replacement entry
 
+For a normal paired recovery, use `deploy/restore-foreign` followed by
+`deploy/restore-domestic` with one private plan. The latter performs archive
+transfer, observer setup and activation automatically. The individual commands
+below are the lower-level recovery reference.
+
+
 The normal backup includes `nodes/domestic.tar`: exact node source, Xray assets,
 Rathole binary, configuration, certificates and pinned dependency wheels. Virtual
 environments and build caches are excluded. Restore the archive privately to an empty Ubuntu 22.04 amd64

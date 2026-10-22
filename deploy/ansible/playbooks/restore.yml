@@ -92,6 +92,7 @@
       when:
         - item.path.startswith('rootfs/')
         - (item.path | regex_replace('^rootfs/', '')) is match('^(' + (recovery_rootfs_paths | join('|')) + ')(/|$)')
+        - not (recovery_keep_repository_credentials | default(false) | bool) or item.path not in ['rootfs/etc/keyholder/recovery.env', 'rootfs/etc/keyholder/recovery-password']
       no_log: true
     - name: Create application data volume
       ansible.builtin.command:

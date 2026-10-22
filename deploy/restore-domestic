@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+[ "$#" -gt 0 ] || set -- "$(dirname -- "$0")/../.private/replacement.yml"
+exec "$(dirname -- "$0")/ansible/run" deploy-domestic "$@"

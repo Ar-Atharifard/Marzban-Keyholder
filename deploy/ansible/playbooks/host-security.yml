@@ -1,6 +1,6 @@
 ---
 - name: Bootstrap SSH and firewall on an empty replacement only
-  hosts: host_targets
+  hosts: "{{ bootstrap_targets | default('host_targets') }}"
   become: true
   gather_facts: true
   tasks:

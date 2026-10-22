@@ -1,59 +1,58 @@
-# Deploy and recover
+# Restore both servers
 
-Run on the **laptop**, from the repository root. Targets are empty Ubuntu 22.04
-amd64 servers. This restores an existing captured deployment; public source alone
-cannot restore customer state. No OS upgrade or automatic public DNS change runs.
+On the laptop, from the project root:
 
 ```sh
-./deploy/ansible/run host .private/host.yml
-./deploy/ansible/run foreign .private/foreign.yml
-python3 scripts/transfer_node.py replacement-foreign replacement-gate
-./deploy/ansible/run domestic .private/domestic.yml
-./deploy/ansible/run observer .private/domestic.yml
-./deploy/ansible/run activate-domestic .private/domestic.yml
+./deploy/restore-foreign
+./deploy/restore-domestic
 ```
 
-Copy the matching templates from `inventory/` privately. Prepare each fresh host
-with `host` first; verify its initial SSH fingerprint through its console. Set the
-console/empty-host/rule-review flags only when true. Review TCP service ports and
-source networks. Host preparation adds `khadmin`, its public key and passwordless
-sudo, pins the host identity for port 2222, checks a fresh key/sudo connection,
-then closes the old SSH port and disables password/root login. A ten-minute rollback
-is armed until the final fresh connection succeeds. Do not close the console.
-The command refuses existing application data, containers, firewall rules or an
-unfinished host checkpoint. It does not reset an existing server's security.
-For a Cloudflare-only foreign origin, set `host_cloudflare_origin_ports: [80, 443, 2053]`;
-the play fetches the official IPv4/IPv6 networks and validates them before activation.
-Do not also allow those ports from `any`. Keep this setting empty on the domestic host.
+Run **foreign first**, then **domestic**. Both read `.private/replacement.yml`;
+a different private plan can be supplied as an argument. Start from
+empty Ubuntu 22.04 amd64 servers with IPv4/IPv6 and initial SSH key access. Keep
+their provider consoles available. No whole-system upgrade runs.
 
-After host preparation, update that inventory's SSH user/port to `khadmin`/2222.
-Use the same private key. `foreign` installs missing prerequisites, pauses for B2
-credentials **on the target**, downloads/verifies the encrypted bundle and restores
-exact images, databases and configuration. Rehearsal mode isolates services and
-checks reboot persistence; bots/timers remain off. `recover INVENTORY` remains a
-compatibility alias. `foreign INVENTORY --finish` resumes completed VM restores;
-`--check` checks a running restored VM without reboot or configuration changes.
-Do not rerun full restore over partially populated application data.
+Copy `replacement.example.yml` privately once. Enter the new and previous server
+IPs, administrator key path and existing subscription hostname. No passwords or
+API tokens belong in that file. `--plan-only` validates/renders without connecting:
 
-For a real replacement, review the local address map and peer address map before
-activation. Endpoint mapping updates tunnel endpoints, forward source pins,
-domestic HAProxy peer ACLs and literal panel-node addresses, preserving keys and
-users. It does not assign IPs, rewrite DNS names, change host networking or trust
-new monitoring host keys automatically. Foreign production activation requires
-the old panel/writers stopped, reviewed security/peers and assigned replacement IPs.
-Keep jobs disabled until customer traffic and cutover are verified.
+```sh
+./deploy/restore-foreign .private/replacement.yml --plan-only
+```
 
-Restore the foreign host first. Add verified SSH aliases for both replacements.
-`transfer_node.py` streams its captured domestic archive directly to the domestic
-host, verifies SHA-256 and refuses overwrite; no laptop secret file or B2 key on
-the domestic server is needed. `domestic` restores the node and all captured
-backhauls from that archive, with activation disabled initially. Install the
-restricted observer using the foreign observer **public** key, and update the
-foreign SSH host pin using the new domestic host's verified public key. Stop the
-old node identity before `activate-domestic`; its guard waits for an authenticated
-panel heartbeat before opening customer 443. Preserve the independent foreign path.
+The commands guide the remaining steps:
 
-See [the recovery procedure](../../docs/disaster-recovery.md) for backup configuration,
-cutover and acceptance checks. Neither a fresh-host bootstrap nor a complete domestic
-restore has been accepted on a new VM yet; local tests and syntax checks do not
-replace that rehearsal. The existing foreign restore/reboot rehearsal passed earlier.
+- **Foreign:** verify host identity, secure SSH/firewall, download the existing
+  encrypted backup, restore databases/configuration/exact images, then confirm the
+  old writers are stopped before starting the replacement. Bots/timers wait for
+  the paired domestic command.
+- **Domestic:** secure the new host, stream its archive from the recovered foreign
+  host, restore all backhauls/node/gateway, configure monitoring trust, confirm old
+  node handover, activate and test real dual-stack profiles. After the prompted DNS
+  cutover and acceptance, enable foreign bots/alerts/renewal/backup jobs.
+
+Enter B2 credentials and the **existing repository password on the target** when
+prompted. Never initialize a new repository during recovery. Compare new SSH host
+fingerprints with the provider console; discovery alone is not authentication.
+The firewall uses reviewed TCP roles and official Cloudflare origin networks;
+public UDP and personal DNSTT are not activated by this production workflow.
+
+URLs, tokens, databases and tunnel keys are restored, not regenerated. No secret
+archive is saved on the laptop. The workflow does not stop old production servers
+or change DNS silently: confirm handover and perform the DNS changes when prompted.
+Update laptop SSH aliases after accepting the new hosts. Generated replacement
+aliases are in `.private/replacement-*/ssh.config`.
+
+These are fresh-host restores, not live upgrades. Existing data/checkpoints cause
+refusal. If interrupted, preserve the target and inspect the failed task; do not
+wipe/retry blindly. Local tests and syntax checks passed; the complete paired
+workflow still needs a fresh-host rehearsal. The 20-minute target is unproven.
+
+## Internal commands
+
+The files under `playbooks/` and `ansible/run` expose individual stages for
+contributors and incident recovery. Normal paired deployment needs only the two
+commands above. The old `ansible/recover` still supports an isolated foreign VM
+rehearsal and its `--finish` / `--check` modes.
+
+[Recovery reference](../../docs/disaster-recovery.md) covers backups and cutover.

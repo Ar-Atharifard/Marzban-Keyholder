@@ -4,7 +4,8 @@ set -eu
 umask 077
 base=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 {host|foreign|domestic|activate-domestic|observer} PRIVATE_INVENTORY [ansible options]" >&2
+    echo "Use deploy/restore-foreign or deploy/restore-domestic with one private replacement plan." >&2
+    echo "Advanced: $0 {host|foreign|domestic|activate-domestic|observer} PRIVATE_INVENTORY [ansible options]" >&2
     exit 2
 fi
 action=$1; inventory=$2; shift 2
@@ -14,6 +15,7 @@ case "$action" in
     domestic) playbook=domestic ;;
     activate-domestic) playbook=domestic-activate ;;
     observer) playbook=domestic-observer ;;
+    deploy-foreign|deploy-domestic) playbook=$action ;;
     *) echo 'Unknown deployment action' >&2; exit 2 ;;
 esac
 finish=false; check=false
@@ -30,5 +32,10 @@ if [ ! -x "$runner" ]; then
 fi
 export ANSIBLE_CONFIG="$base/deploy/ansible/ansible.cfg"
 export ANSIBLE_LOCAL_TEMP="$base/.private/ansible-tmp"
+case "$action" in
+    deploy-foreign|deploy-domestic)
+        exec "$base/.private/ansible-venv/bin/python" "$base/scripts/deploy_pair.py" \
+            "${action#deploy-}" "$inventory" "$@" ;;
+esac
 exec "$runner" -i "$inventory" "$base/deploy/ansible/playbooks/$playbook.yml" \
     --ask-become-pass -e "recovery_finish_only=$finish" -e "recovery_check_only=$check" "$@"

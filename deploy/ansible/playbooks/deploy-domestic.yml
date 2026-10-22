@@ -1,0 +1,150 @@
+---
+- name: Connect to the already restored foreign administrator
+  hosts: recovery_targets
+  gather_facts: false
+  tasks:
+    - name: Select verified final SSH access
+      ansible.builtin.set_fact:
+        ansible_user: khadmin
+        ansible_port: 2222
+    - name: Verify the foreign replacement API is ready
+      become: true
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18000/health
+        use_proxy: false
+        status_code: 200
+    - name: Read only the observer public key
+      become: true
+      ansible.builtin.slurp:
+        src: /etc/keyholder/domestic-monitor.key.pub
+      register: observer_key
+- import_playbook: host-security.yml
+  vars:
+    bootstrap_targets: domestic_targets
+- name: Transfer the domestic archive without a laptop file
+  hosts: domestic_targets
+  gather_facts: false
+  tasks:
+    - name: Stream and verify the captured domestic archive
+      ansible.builtin.command:
+        argv: ['{{ ansible_playbook_python }}', '{{ playbook_dir }}/../../../scripts/transfer_node.py',
+               replacement-foreign, replacement-domestic, --ssh-config, '{{ replacement_ssh_config }}']
+      delegate_to: localhost
+      become: false
+      changed_when: true
+    - name: Supply the authenticated observer public key
+      ansible.builtin.set_fact:
+        domestic_observer_public_key: '{{ hostvars["replacement-foreign"].observer_key.content | b64decode | trim }}'
+- import_playbook: domestic.yml
+- import_playbook: domestic-observer.yml
+- name: Establish replacement observer trust and validate domestic source pinning
+  hosts: domestic_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Read the domestic public host key over authenticated SSH
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: gate_host_key
+    - name: Verify the configured domestic IPv6 belongs to this machine
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-c', 'import json,subprocess,sys; assigned={a["local"] for n in json.loads(subprocess.check_output(["ip","-j","address"])) for a in n.get("addr_info",[])}; assert sys.argv[1] in assigned', '{{ replacement_domestic_ipv6 }}']
+      changed_when: false
+    - name: Pin the new observer identity on the foreign replacement
+      ansible.builtin.copy:
+        dest: /etc/keyholder/domestic-monitor.known_hosts
+        content: "[{{ replacement_domestic_ipv4 }}]:2222 {{ (gate_host_key.content | b64decode).split()[0:2] | join(' ') }}\n"
+        mode: '0600'
+      delegate_to: replacement-foreign
+    - name: Confirm the old domestic identity is stopped
+      ansible.builtin.pause:
+        prompt: >-
+          The node and backhauls are restored. Confirm the old domestic node is stopped
+          or permanently unavailable. Type STOPPED to activate this replacement.
+      register: node_handover
+    - name: Require explicit domestic identity handover
+      ansible.builtin.assert:
+        that: node_handover.user_input == 'STOPPED'
+    - name: Enable the reviewed activation gates for this run
+      ansible.builtin.set_fact:
+        domestic_activate: true
+        domestic_old_node_stopped: true
+        domestic_peers_reviewed: true
+- import_playbook: domestic-activate.yml
+- name: Accept the replacement pair before enabling operational jobs
+  hosts: recovery_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check the restricted domestic observer
+      ansible.builtin.command:
+        argv: [ssh, '-F', /etc/keyholder/domestic-monitor.ssh, domestic, status]
+      changed_when: false
+      no_log: true
+    - name: Verify trusted subscription TLS before moving DNS
+      ansible.builtin.command:
+        argv: [curl, --noproxy, '*', --silent, --show-error, --output, /dev/null,
+               --write-out, '%{http_code}', --connect-timeout, '5', --max-time, '15',
+               --resolve, '{{ replacement_subscription_host }}:443:{{ replacement_domestic_ipv4 }}',
+               'https://{{ replacement_subscription_host }}/s/invalid']
+      register: replacement_tls
+      changed_when: false
+      failed_when: replacement_tls.rc != 0 or replacement_tls.stdout != '404'
+    - name: Test exported domestic profiles through both public address families
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-']
+        stdin: |
+          import importlib.util,json,pathlib,subprocess
+          spec=importlib.util.spec_from_file_location('probe','/usr/local/lib/keyholder-admin/proxy_probe.py')
+          probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
+          raw=subprocess.check_output(['docker','exec','keyholder-api-1','/app/.venv/bin/python','-c',probe.EXPORT,'kh_monitor'],timeout=30)
+          profiles=[p for p in json.loads(raw) if p.get('remarks','').startswith('IR | ')]
+          assert profiles, 'No domestic monitoring profiles'
+          report={}
+          for address in [{{ replacement_domestic_ipv4 | to_json }},{{ replacement_domestic_ipv6 | to_json }}]:
+              for p in profiles:p['outbounds'][0]['settings']['vnext'][0]['address']=address
+              report[address]=[probe.probe(profiles,pathlib.Path('/var/lib/marzban/xray-core/xray'),'IR | ') for _ in range(3)]
+          path=pathlib.Path('/var/lib/keyholder-recovery/replacement-probes.json')
+          path.write_text(json.dumps(report));path.chmod(0o600)
+          assert all(p['healthy'] for rounds in report.values() for result in rounds for p in result.values()), 'Replacement profile validation failed'
+      changed_when: false
+      no_log: true
+    - name: Wait for DNS cutover and final operator acceptance
+      ansible.builtin.pause:
+        prompt: >-
+          Server-side TLS and domestic profiles passed. Update the canonical subscription
+          A/AAAA to the new domestic IPv4/IPv6 and existing foreign CDN/origin A/AAAA
+          records to the new foreign IPs in Cloudflare. Preserve names, paths and tokens.
+          Check the panel, subscriptions and a real customer profile. Old bots/writers
+          must remain stopped. Type CUTOVER to enable bots, alerts, renewal and backups here.
+      register: pair_cutover
+    - name: Require cutover acceptance
+      ansible.builtin.assert:
+        that: pair_cutover.user_input == 'CUTOVER'
+    - name: Verify public subscription DNS points at this domestic replacement
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-c', 'import socket,sys; actual={r[4][0] for r in socket.getaddrinfo(sys.argv[1],443)}; assert actual == set(sys.argv[2:])', '{{ replacement_subscription_host }}', '{{ replacement_domestic_ipv4 }}', '{{ replacement_domestic_ipv6 }}']
+      register: replacement_dns
+      retries: 60
+      delay: 5
+      until: replacement_dns.rc == 0
+      changed_when: false
+    - name: Record accepted operational handover
+      ansible.builtin.set_fact:
+        recovery_activate_jobs: true
+        recovery_old_writers_stopped: true
+        recovery_cutover_validated: true
+    - name: Enable the existing production jobs without another deployment command
+      ansible.builtin.include_tasks: activate-jobs.yml
+    - name: Request the first encrypted paired backup
+      ansible.builtin.systemd_service:
+        name: keyholder-recovery.service
+        state: started
+        no_block: true
+    - name: Report paired deployment completion
+      ansible.builtin.debug:
+        msg: >-
+          Both hosts deployed. Canonical DNS, trusted TLS, dual-stack domestic proxy
+          traffic and restricted observer passed. Bots, alerts, probes, certificate
+          renewal and backup timers are enabled on the foreign host. First offsite
+          backup is queued; check its success in monitoring. No customer URLs rotated.

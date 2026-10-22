@@ -1,0 +1,19 @@
+# Copy privately. Fill both new servers before running the two restore commands.
+admin_key_file: /home/YOUR_USER/.ssh/id_ed25519
+subscription_hostname: sub.example.org
+foreign:
+  ipv4: 192.0.2.10
+  ipv6: '2001:db8:1::10'
+  previous_ipv4: 192.0.2.11
+  previous_ipv6: '2001:db8:1::11'
+  ssh_user: root
+  ssh_port: 22
+  cloudflare_origin_ports: [80, 443, 2053]
+  emergency_ports: [8443, 9443, 10443, 11443]
+domestic:
+  ipv4: 192.0.2.20
+  ipv6: '2001:db8:2::20'
+  previous_ipv4: 192.0.2.21
+  previous_ipv6: '2001:db8:2::21'
+  ssh_user: root
+  ssh_port: 22

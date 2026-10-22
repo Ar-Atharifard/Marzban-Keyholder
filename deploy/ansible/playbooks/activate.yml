@@ -246,48 +246,9 @@
         enabled: true
         state: started
       when: dnstt_unit.stat.exists and recovery_enable_personal_dnstt | default(false) | bool
-    - name: Guard operational handover after cutover
-      ansible.builtin.assert:
-        that:
-          - recovery_old_writers_stopped | default(false) | bool
-          - recovery_cutover_validated | default(false) | bool
-        fail_msg: Stop old bots/timers and validate cutover before activating new jobs.
+    - name: Activate jobs only after handover
+      ansible.builtin.include_tasks: activate-jobs.yml
       when: recovery_activate_jobs | default(false) | bool
-    - name: Check for restored authenticated proxy monitoring
-      ansible.builtin.stat:
-        path: /etc/systemd/system/keyholder-proxy-probe.timer
-      register: recovery_proxy_probe
-    - name: Enable restored proxy probes on the selected production host
-      ansible.builtin.systemd_service:
-        name: keyholder-proxy-probe.timer
-        enabled: true
-        state: started
-      when:
-        - recovery_activate_jobs | default(false) | bool
-        - recovery_proxy_probe.stat.exists
-    - name: Enable jobs only on the selected production host
-      ansible.builtin.systemd_service:
-        name: '{{ item }}'
-        enabled: true
-        state: started
-      loop:
-        - keyholder-management-bot.service
-        - keyholder-monitor.timer
-        - keyholder-recovery.timer
-        - keyholder-recovery-maintenance.timer
-      when: recovery_activate_jobs | default(false) | bool
-    - name: Detect restored public certificate renewal
-      ansible.builtin.stat:
-        path: /etc/systemd/system/keyholder-tls.timer
-      register: recovery_tls_timer
-    - name: Enable certificate renewal on the selected production host
-      ansible.builtin.systemd_service:
-        name: keyholder-tls.timer
-        enabled: true
-        state: started
-      when:
-        - recovery_activate_jobs | default(false) | bool
-        - recovery_tls_timer.stat.exists
     - name: Explain the public cutover boundary
       ansible.builtin.debug:
         msg: >-

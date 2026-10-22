@@ -1,0 +1,37 @@
+---
+- import_playbook: host-security.yml
+  vars:
+    bootstrap_targets: recovery_targets
+- import_playbook: bootstrap.yml
+- import_playbook: download.yml
+- import_playbook: restore.yml
+  vars:
+    recovery_start_applications: false
+- name: Confirm single-writer handover before starting the replacement
+  hosts: recovery_targets
+  gather_facts: false
+  tasks:
+    - name: Wait for old foreign writer handover
+      ansible.builtin.pause:
+        prompt: >-
+          Data is restored. Before starting this replacement, confirm the old foreign
+          panel, API writers and bots are stopped or permanently unavailable, and
+          the selected backup is the intended final state. Type STOPPED to continue.
+      register: writer_handover
+    - name: Require explicit handover
+      ansible.builtin.assert:
+        that: writer_handover.user_input == 'STOPPED'
+    - name: Record handover for this run only
+      ansible.builtin.set_fact:
+        recovery_old_writers_stopped: true
+- import_playbook: activate.yml
+- name: Finish foreign preparation
+  hosts: recovery_targets
+  gather_facts: false
+  tasks:
+    - name: Explain the remaining paired step
+      ansible.builtin.debug:
+        msg: >-
+          Foreign applications restored and local API healthy. Run deploy/restore-domestic
+          with the same plan next. It handles archive transfer, observer trust, domestic
+          activation and final job handover. Bots/timers remain off until that step.
