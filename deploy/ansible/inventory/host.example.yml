@@ -17,3 +17,6 @@ all:
         # Domestic: 443 public; node/control ports from the foreign peer only.
         # Foreign: review CDN origin ranges, emergency ports and forward peer IPv6.
         host_tcp_rules: []
+        # Foreign origin only: [80, 443, 2053]. Fetches official IPv4/IPv6 lists.
+        # Keep empty on the domestic entry; its 443 is public in host_tcp_rules.
+        host_cloudflare_origin_ports: []

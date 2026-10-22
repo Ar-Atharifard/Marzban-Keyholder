@@ -31,6 +31,9 @@ def validate(plan: dict[str, Any]) -> None:
             raise ValueError("Do not retain the initial SSH port in service rules")
         if rule["source"] != "any":
             ipaddress.ip_network(rule["source"], strict=False)
+        if rule["port"] in plan.get("origin_ports", []):
+            if rule["source"] == "any" or not ipaddress.ip_network(rule["source"]).prefixlen:
+                raise ValueError("Cloudflare origin ports require restricted source networks")
 
 
 def ssh_config(final: bool, old_port: int) -> None:

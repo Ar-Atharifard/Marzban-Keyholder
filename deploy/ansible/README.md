@@ -22,6 +22,9 @@ then closes the old SSH port and disables password/root login. A ten-minute roll
 is armed until the final fresh connection succeeds. Do not close the console.
 The command refuses existing application data, containers, firewall rules or an
 unfinished host checkpoint. It does not reset an existing server's security.
+For a Cloudflare-only foreign origin, set `host_cloudflare_origin_ports: [80, 443, 2053]`;
+the play fetches the official IPv4/IPv6 networks and validates them before activation.
+Do not also allow those ports from `any`. Keep this setting empty on the domestic host.
 
 After host preparation, update that inventory's SSH user/port to `khadmin`/2222.
 Use the same private key. `foreign` installs missing prerequisites, pauses for B2

@@ -81,11 +81,33 @@
         src: '{{ playbook_dir }}/../../../scripts/bootstrap_host.py'
         dest: /usr/local/lib/keyholder-recovery/bootstrap_host.py
         mode: '0700'
-    - name: Write the reviewed transition plan
+    - name: Start with the reviewed service rules
+      ansible.builtin.set_fact:
+        host_resolved_rules: '{{ host_tcp_rules }}'
+    - name: Read current Cloudflare origin source networks when explicitly requested
+      ansible.builtin.uri:
+        url: 'https://www.cloudflare.com/ips-{{ item }}'
+        return_content: true
+        use_proxy: false
+        timeout: 20
+      loop: [v4, v6]
+      register: cloudflare_networks
+      when: host_cloudflare_origin_ports | default([]) | length > 0
+    - name: Reject empty or oversized origin network lists
+      ansible.builtin.assert:
+        that:
+          - item.content | regex_findall('[0-9a-fA-F:.]+/[0-9]+') | length > 0
+          - item.content | regex_findall('[0-9a-fA-F:.]+/[0-9]+') | length <= 128
+      loop: '{{ cloudflare_networks.results | default([]) | selectattr("content", "defined") | list }}'
+    - name: Add source-restricted origin ports from the official lists
+      ansible.builtin.set_fact:
+        host_resolved_rules: '{{ host_resolved_rules + [{"port": item.0, "source": item.1}] }}'
+      loop: '{{ (host_cloudflare_origin_ports | default([])) | product(cloudflare_networks.results | default([]) | selectattr("content", "defined") | map(attribute="content") | join(" ") | regex_findall("[0-9a-fA-F:.]+/[0-9]+")) | list }}'
+    - name: Write the resolved transition plan
       ansible.builtin.copy:
         dest: /root/keyholder-bootstrap-plan.json
         mode: '0600'
-        content: '{{ {"old_port": ansible_port | default(22) | int, "rules": host_tcp_rules} | to_nice_json }}'
+        content: '{{ {"old_port": ansible_port | default(22) | int, "rules": host_resolved_rules, "origin_ports": host_cloudflare_origin_ports | default([])} | to_nice_json }}'
     - name: Read the host public key over the already authenticated connection
       ansible.builtin.slurp:
         src: /etc/ssh/ssh_host_ed25519_key.pub

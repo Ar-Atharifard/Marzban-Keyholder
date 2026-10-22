@@ -27,6 +27,15 @@ def test_bootstrap_rejects_udp_old_ssh_and_invalid_peer() -> None:
             ],
         }
     )
+    for source in ["any", "0.0.0.0/0", "::/0"]:
+        with pytest.raises(ValueError, match="restricted"):
+            bootstrap_host.validate(
+                {
+                    "old_port": 22,
+                    "origin_ports": [443],
+                    "rules": [{"port": 443, "source": source}],
+                }
+            )
 
 
 def test_ssh_transition_retains_access_then_enforces_keys(tmp_path: Path) -> None:
