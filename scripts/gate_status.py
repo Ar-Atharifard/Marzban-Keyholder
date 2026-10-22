@@ -43,7 +43,7 @@ def main() -> None:
         "haproxy",
     ]
     if Path("/etc/systemd/system/keyholder-frp-server.service").exists():
-        units.append("keyholder-frp-server")
+        units.extend(["keyholder-frp-server", "keyholder-backhaul-guard.timer"])
     services = {}
     for unit in units:
         response = subprocess.run(
