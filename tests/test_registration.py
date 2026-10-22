@@ -8,7 +8,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 
 from keyholder.models import Customer, Registration
-from tests.test_api import HEADERS, create
+from tests.support import HEADERS, create
 
 
 def test_registration_is_idempotent_encrypted_and_retrievable(client: TestClient) -> None:

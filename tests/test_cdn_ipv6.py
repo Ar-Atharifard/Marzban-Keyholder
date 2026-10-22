@@ -12,10 +12,8 @@ from fastapi.testclient import TestClient
 
 from keyholder.rendering.profiles import allowed_cdn, apply_cdn_ech, normalize
 from keyholder.rendering.renderers import URIRenderer, XrayRenderer
-from tests.conftest import GRPC, UUID
-from tests.test_api import create
-from tests.test_native_ech import ECH, HOSTS
-from tests.test_protocol_expansion import vmess
+from tests.support import CDN_HOSTS as HOSTS
+from tests.support import ECH, GRPC, UUID, create, vmess
 
 EDGE = "2a06:98c1:3121::7"
 

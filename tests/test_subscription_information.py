@@ -12,8 +12,7 @@ from keyholder.backends.base import SubscriptionData, SubscriptionInfo, Upstream
 from keyholder.backends.marzban import MarzbanBackend
 from keyholder.config import Settings
 from keyholder.rendering.information import information_profile, render_information
-from tests.conftest import ADMIN_KEY, LINK, UUID
-from tests.test_api import create
+from tests.support import ADMIN_KEY, LINK, UUID, create
 
 
 @pytest.mark.parametrize("format", ["uri", "xray", "info", "xray-agent"])

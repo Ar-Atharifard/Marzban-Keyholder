@@ -7,23 +7,7 @@ from keyholder.policies import SUPPORTED_KINDS
 from keyholder.rendering.profiles import generate_profiles, normalize
 from keyholder.rendering.renderers import URIRenderer, XrayRenderer
 from keyholder.schemas import Policy
-from tests.conftest import GRPC, TCP6, UUID
-
-
-def vmess(address: str = "titan.example") -> str:
-    data = {
-        "add": address,
-        "port": "443",
-        "id": UUID,
-        "aid": "0",
-        "scy": "auto",
-        "net": "httpupgrade",
-        "tls": "tls",
-        "host": "titan.example",
-        "path": "/upgrade",
-        "sni": "titan.example",
-    }
-    return "vmess://" + base64.b64encode(json.dumps(data).encode()).decode()
+from tests.support import GRPC, TCP6, UUID, vmess
 
 
 @pytest.mark.parametrize(

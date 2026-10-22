@@ -14,7 +14,7 @@ from keyholder.config import BackendConfig, Settings
 from keyholder.main import create_app
 from keyholder.models import Backend, Base
 from keyholder.rendering.profiles import allowed_cdn, normalize
-from tests.conftest import ADMIN_KEY, LINK, UUID
+from tests.support import ADMIN_KEY, LINK, UUID
 
 
 def test_multiple_panels_keep_credentials_and_urls_separate() -> None:
@@ -221,7 +221,7 @@ def test_empty_deployment_profile_set_disables_subscription(client: TestClient) 
 
     from fastapi import FastAPI
 
-    from tests.test_api import create
+    from tests.support import create
 
     app = cast(FastAPI, client.app)
     token = str(create(client)["token"])

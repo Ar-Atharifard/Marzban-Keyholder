@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from keyholder import cli
 from scripts.admin import worker
-from tests.conftest import ADMIN_KEY
+from tests.support import ADMIN_KEY
 
 
 @pytest.fixture
@@ -410,7 +410,7 @@ def test_profile_exports_exclude_info_and_require_unambiguous_selection(
 ) -> None:
     import base64
 
-    from tests.conftest import TCP
+    from tests.support import TCP
 
     monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
     original = worker.api

@@ -79,69 +79,57 @@ def configure_alerts(config: dict[str, Any], args: dict[str, Any]) -> dict[str, 
         chat_id = discover_chat_id(token)
     if not re.fullmatch(r"-?[0-9]{5,20}", chat_id):
         raise ValueError("Invalid Telegram chat ID")
-    monitor_config = Path(config["monitor_config"])
-    settings = json.loads(monitor_config.read_text())
-    destination = Path(settings["secrets_file"])
-    heartbeat = ""
-    if destination.exists():
-        for line in destination.read_text().splitlines():
-            if line.startswith("KEYHOLDER_HEARTBEAT_URL="):
-                heartbeat = line.split("=", 1)[1]
+    write_monitor_env(
+        config, {"KEYHOLDER_ALERT_BOT_TOKEN": token, "KEYHOLDER_ALERT_CHAT_ID": chat_id}
+    )
+    return {"configured": True, "chat_id": chat_id}
+
+
+def read_env(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+
+
+def write_env(destination: Path, values: dict[str, str]) -> None:
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".monitor-env-", dir=destination.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=".env-", dir=destination.parent)
     try:
         with os.fdopen(descriptor, "w") as file:
-            file.write(f"KEYHOLDER_ALERT_BOT_TOKEN={token}\n")
-            file.write(f"KEYHOLDER_ALERT_CHAT_ID={chat_id}\n")
-            file.write(f"KEYHOLDER_HEARTBEAT_URL={heartbeat}\n")
+            for key, value in values.items():
+                file.write(f"{key}={value}\n")
             file.flush()
             os.fsync(file.fileno())
         os.chmod(temporary, 0o600)
         os.replace(temporary, destination)
     finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    return {"configured": True, "chat_id": chat_id}
+        Path(temporary).unlink(missing_ok=True)
+
+
+def monitor_env_path(config: dict[str, Any]) -> Path:
+    settings = json.loads(Path(config["monitor_config"]).read_text())
+    return Path(settings["secrets_file"])
 
 
 def write_monitor_env(config: dict[str, Any], changes: dict[str, str]) -> None:
-    monitor_config = Path(config["monitor_config"])
-    settings = json.loads(monitor_config.read_text())
-    destination = Path(settings["secrets_file"])
-    current: dict[str, str] = {}
-    if destination.exists():
-        for line in destination.read_text().splitlines():
-            if "=" in line:
-                key, value = line.split("=", 1)
-                current[key] = value
+    destination = monitor_env_path(config)
+    current = read_env(destination)
     current.update(changes)
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".monitor-env-", dir=destination.parent)
-    try:
-        with os.fdopen(descriptor, "w") as file:
+    write_env(
+        destination,
+        {
+            key: current.get(key, "")
             for key in (
                 "KEYHOLDER_ALERT_BOT_TOKEN",
                 "KEYHOLDER_ALERT_CHAT_ID",
                 "KEYHOLDER_HEARTBEAT_URL",
-            ):
-                file.write(f"{key}={current.get(key, '')}\n")
-            file.flush()
-            os.fsync(file.fileno())
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, destination)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+            )
+        },
+    )
 
 
 def heartbeat_url(config: dict[str, Any]) -> str:
-    settings = json.loads(Path(config["monitor_config"]).read_text())
-    destination = Path(settings["secrets_file"])
-    if destination.exists():
-        for line in destination.read_text().splitlines():
-            if line.startswith("KEYHOLDER_HEARTBEAT_URL="):
-                return line.split("=", 1)[1]
-    return ""
+    return read_env(monitor_env_path(config)).get("KEYHOLDER_HEARTBEAT_URL", "")
 
 
 def validate_heartbeat_url(value: str) -> str:
@@ -167,20 +155,13 @@ def configure_management_bot(config: dict[str, Any], args: dict[str, Any]) -> di
         chat_id = discover_chat_id(token)
     if not re.fullmatch(r"[0-9]{5,20}", chat_id):
         raise ValueError("Management bot requires one private Telegram account")
-    destination = Path(config["management_bot_env"])
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=".management-bot-env-", dir=destination.parent)
-    try:
-        with os.fdopen(descriptor, "w") as file:
-            file.write(f"KEYHOLDER_MANAGEMENT_BOT_TOKEN={token}\n")
-            file.write(f"KEYHOLDER_MANAGEMENT_ADMIN_ID={chat_id}\n")
-            file.flush()
-            os.fsync(file.fileno())
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, destination)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    write_env(
+        Path(config["management_bot_env"]),
+        {
+            "KEYHOLDER_MANAGEMENT_BOT_TOKEN": token,
+            "KEYHOLDER_MANAGEMENT_ADMIN_ID": chat_id,
+        },
+    )
     subprocess.run(
         ["systemctl", "enable", "--now", config["management_bot_service"]],
         capture_output=True,
@@ -272,13 +253,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "result": configure_alerts(config, payload.get("args", {}))}
     if operation == "alerts-status":
         settings = json.loads(Path(config["monitor_config"]).read_text())
-        secrets_file = Path(settings["secrets_file"])
-        alert_env = {}
-        if secrets_file.exists():
-            for line in secrets_file.read_text().splitlines():
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    alert_env[key] = value
+        alert_env = read_env(Path(settings["secrets_file"]))
         state = {}
         state_file = Path(settings["state_file"])
         if state_file.exists():
@@ -352,11 +327,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             },
         }
     if operation == "management-bot-test":
-        env: dict[str, str] = {}
-        for line in Path(config["management_bot_env"]).read_text().splitlines():
-            if "=" in line:
-                key, value = line.split("=", 1)
-                env[key] = value
+        env = read_env(Path(config["management_bot_env"]))
         body = urllib.parse.urlencode(
             {
                 "chat_id": env["KEYHOLDER_MANAGEMENT_ADMIN_ID"],

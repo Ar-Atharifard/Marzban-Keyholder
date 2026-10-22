@@ -35,30 +35,27 @@ Marzban. Changing a private customer name does not rename the upstream account.
 
 ## Work locally
 
-Use Python 3.12+, a development branch, synthetic accounts and a disposable DB:
-
-```sh
-uv sync --frozen --extra dev --python 3.12
-uv run keyholder config init
-mkdir -p data
-uv run alembic upgrade head
-uv run pytest -q
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src tests scripts
-git diff --check
-```
-
-Use a disposable database. Reuse existing validation and keep changes focused;
-add abstractions only when they simplify a real requirement.
+Use Python 3.12+, a development branch, synthetic accounts and a disposable SQLite
+DB. Follow the setup and verification commands in the [README](../README.md).
+Do not use production credentials or databases in tests.
 
 | Change | Edit and validate |
 |---|---|
-| API feature | `api/`, schemas, contract tests, API guide and CLI if needed |
-| Existing transport | Configure it in the provider; verify both output formats |
-| New family | `profile_types.py`, parser/renderers, regression tests and real core/network tests |
-| Database | New Alembic revision; test historical upgrades and recovery |
-| Provider | Adapter and factory/config registration; mocked provider contract tests |
+| API feature | `api/`, schemas, contract tests and API guide |
+| Existing transport | Configure in the provider; verify both output formats |
+| New family | `profile_types.py`, parser/renderers, real core/network checks |
+| Database | New migration; test historical upgrades and recovery |
+| Provider | Adapter, registry and mocked provider contract tests |
+| Operator tool | Relevant script, CLI/bot flow and its documented deployment |
+
+Tests use shared synthetic data in `tests/support.py` and the isolated API fixture
+in `tests/conftest.py`. Test files should not import each other. Keep regressions
+for stable URLs, token/credential protection, XHTTP `extra`, account selection,
+migrations, recovery and alert deduplication. Use parametrized cases for distinct
+input boundaries; avoid testing third-party behavior or copying implementation
+constants into assertions. Frozen fixtures already cover exact legacy wire output.
+Add a regression for a behavior change, not a separate test for every helper.
+For a focused edit, run its test module first, then the full checks before review.
 
 ## Provider boundary
 
@@ -97,3 +94,8 @@ The exporter excludes private files/Git metadata but is not a full secret scanne
 Scan export and original history privately with Gitleaks; verify installation,
 packaging, migrations, license and author metadata before publishing. CI uses
 synthetic data and never deploys production.
+
+The experimental FF/FRAG delivery presets and their settings have been retired.
+Remove `KEYHOLDER_FF_*` and `KEYHOLDER_FRAGMENTATION_*` entries from deployment
+configuration when upgrading. Native protocols and personal MASQUE are unaffected;
+Keyholder still ignores arbitrary upstream masks and cipher overrides.

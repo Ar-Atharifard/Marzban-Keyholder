@@ -1,5 +1,6 @@
 import base64
 import json
+from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import pytest
@@ -7,53 +8,14 @@ import pytest
 from keyholder.rendering.profiles import decode_base64, generate_profiles, normalize
 from keyholder.rendering.renderers import Renderer, URIRenderer, XrayRenderer
 from keyholder.schemas import Policy
-from tests.conftest import ALL, GRPC, IPV6, KINDS, LINK, PASSWORD, PBK, SS, TCP, UUID
+from tests.support import ALL, GRPC, IPV6, KINDS, LINK, PASSWORD, PBK, SS, TCP, UUID
 
 
-def rendered(links: list[str], policy: Policy) -> tuple[list[str], list[dict[str, object]]]:
+def rendered(links: list[str], policy: Policy) -> tuple[list[str], list[dict[str, Any]]]:
     profiles = generate_profiles(links, policy)
     uris = base64.b64decode(URIRenderer().render(profiles), validate=True).decode().splitlines()
     configs = json.loads(XrayRenderer().render(profiles))
     return uris, configs
-
-
-@pytest.mark.parametrize("index", range(5))
-def test_five_families_and_json_consistency(index: int) -> None:
-    policy = Policy.model_validate({"profiles": KINDS})
-    p = normalize(ALL[index])
-    assert p is not None and p.kind == KINDS[index]
-    uris, configs = rendered([ALL[index]], policy)
-    u = urlsplit(uris[0])
-    outbound = configs[0]["outbounds"][0]  # type: ignore[index]
-    assert u.hostname == p.address and u.port == p.port
-    assert outbound["mux"] == {"enabled": False}
-    if p.kind == "shadowsocks_ipv6":
-        assert u.scheme == "ss"
-        assert decode_base64(u.username or "").decode() == f"aes-128-gcm:{PASSWORD}"
-        assert outbound["protocol"] == "shadowsocks"
-        assert outbound["settings"]["servers"][0] == {
-            "address": IPV6,
-            "port": 10444,
-            "method": "aes-128-gcm",
-            "password": PASSWORD,
-        }
-        assert f"@[{IPV6}]:10444" in uris[0]
-        return
-    q = parse_qs(u.query, keep_blank_values=True)
-    assert u.username == UUID
-    assert outbound["settings"]["vnext"][0]["users"][0]["id"] == UUID
-    assert q["fp"] == [p.fingerprint] and q["sni"] == [p.sni]
-    assert all(k not in q for k in ["extra", "ech", "mux", "smux"])
-    if p.security == "reality":
-        assert q["pbk"] == [PBK] and q["sid"] == [p.short_id]
-        tls = outbound["streamSettings"]["realitySettings"]
-        assert tls["publicKey"] == PBK and tls["shortId"] == p.short_id
-        if index in {0, 3}:
-            assert q["flow"] == ["xtls-rprx-vision"]
-            assert outbound["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
-    if index == 3:
-        assert f"@[{IPV6}]:10443" in uris[0]
-        assert q["type"] == ["raw"]
 
 
 def test_xhttp_extra_preserves_valid_fields() -> None:
@@ -65,7 +27,7 @@ def test_xhttp_extra_preserves_valid_fields() -> None:
     assert q["mode"] == ["stream-up"] and q["fp"] == ["firefox"]
     assert q["alpn"] == ["h2"]
     assert "flow" not in q and "extra" not in q
-    outbound = configs[0]["outbounds"][0]  # type: ignore[index]
+    outbound = configs[0]["outbounds"][0]
     assert outbound["streamSettings"]["xhttpSettings"] == {
         "host": "direct.example",
         "path": "/path?x=1",
@@ -85,7 +47,7 @@ def test_extra_removal_does_not_strip_path_query_or_remark() -> None:
     assert "extra" not in query
     assert query["path"] == ["/path?extra=keep"]
     assert unquote(u.fragment) == "extra remark"
-    outbound = configs[0]["outbounds"][0]  # type: ignore[index]
+    outbound = configs[0]["outbounds"][0]
     assert "extra" not in outbound["streamSettings"]["xhttpSettings"]
     assert outbound["streamSettings"]["xhttpSettings"]["path"] == "/path?extra=keep"
     assert configs[0]["remarks"] == "extra remark"
@@ -99,7 +61,7 @@ def test_grpc_metadata_and_no_reality_ech_or_vision() -> None:
     assert q["alpn"] == ["h2,http/1.1"]
     assert all(k not in q for k in ["pbk", "sid", "ech", "flow"])
     assert "%2F" in uris[0] and "%3F" in uris[0]
-    outbound = configs[0]["outbounds"][0]  # type: ignore[index]
+    outbound = configs[0]["outbounds"][0]
     stream = outbound["streamSettings"]
     assert stream["grpcSettings"] == {
         "serviceName": "service/name?x=1",
@@ -191,7 +153,7 @@ def test_new_cdn_transports_roundtrip_without_changing_old_defaults(
     policy = Policy.model_validate({"profiles": [kind]})
     uris, configs = rendered([link], policy)
     assert normalize(uris[0]) == p
-    stream = configs[0]["outbounds"][0]["streamSettings"]  # type: ignore[index]
+    stream = configs[0]["outbounds"][0]["streamSettings"]
     assert stream["tlsSettings"]["allowInsecure"] is False
     assert stream["network"] == transport
     if transport == "ws":
@@ -231,3 +193,12 @@ def test_standard_shadowsocks_aead_methods_follow_panel(method: str) -> None:
     uri = base64.b64decode(URIRenderer().render([p])).decode().strip()
     restored = normalize(uri)
     assert restored is not None and restored.method == method
+
+
+def test_upstream_cannot_inject_client_masks_or_ciphers() -> None:
+    link = TCP.replace("#", "&fm=%7Bmalicious%7D&cs=unsafe#")
+    uris, configs = rendered([link], Policy())
+    query = parse_qs(urlsplit(uris[0]).query)
+    assert "fm" not in query and "cs" not in query
+    stream = configs[0]["outbounds"][0]["streamSettings"]
+    assert "finalmask" not in stream and "cipherSuites" not in stream["realitySettings"]

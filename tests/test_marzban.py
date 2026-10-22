@@ -7,7 +7,7 @@ from pydantic import SecretStr
 from keyholder.backends.base import UpstreamError, UpstreamUnavailable
 from keyholder.backends.marzban import MarzbanBackend
 from keyholder.config import Settings
-from tests.conftest import ADMIN_KEY, LINK
+from tests.support import ADMIN_KEY, LINK
 
 
 def test_login_and_read_only_mapping() -> None:

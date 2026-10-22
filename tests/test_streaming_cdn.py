@@ -11,9 +11,8 @@ from keyholder.policies import SUPPORTED_KINDS
 from keyholder.rendering.profiles import apply_cdn_ech, generate_profiles, normalize
 from keyholder.rendering.renderers import URIRenderer, XrayRenderer
 from keyholder.schemas import Policy
-from tests.conftest import UUID
-from tests.test_api import create
-from tests.test_native_ech import ECH, HOSTS
+from tests.support import CDN_HOSTS as HOSTS
+from tests.support import ECH, UUID, create
 
 LINK = (
     "trojan://synthetic-password@titan.example:443?type=xhttp&security=tls"

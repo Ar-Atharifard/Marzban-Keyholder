@@ -7,6 +7,10 @@ Attach an upstream account once, then retrieve the same URL whenever needed.
 Tokens have no scheduled expiry. Delivery still depends on account status, quota,
 expiry and service availability; administrators can explicitly revoke or rotate a URL.
 
+The backend lives in `src/keyholder/`; `migrations/` holds its database history.
+`scripts/` and `deploy/` contain optional administration, monitoring and recovery
+tools. You can run the backend without installing those tools or a domestic node.
+
 ## Supported integrations
 
 - **Marzban:** account status and current links from its HTTP API; separate explicit

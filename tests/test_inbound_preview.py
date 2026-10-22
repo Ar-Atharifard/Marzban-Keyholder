@@ -21,18 +21,17 @@ def settings() -> Settings:
         cdn_tls_compatibility=True,
         cdn_ech_kinds=("grpc_cdn",),
         cdn_ech_full_catalog=("marzban-default/OWNER",),
-        fragmentation_accounts=("marzban-default/OWNER",),
     )
 
 
 @pytest.mark.parametrize(
     "protocol,network,security,address,expected",
     [
-        ("vless", "tcp", "reality", "{SERVER_IP}", ["Base", "Base | FRAG"]),
+        ("vless", "tcp", "reality", "{SERVER_IP}", ["Base"]),
         ("vless", "tcp", "reality", "[2001:db8::1]", ["Base"]),
         ("vless", "grpc", "reality", "gate.example", ["Base"]),
         ("vless", "xhttp", "reality", "gate.example", ["Base"]),
-        ("vless", "grpc", "tls", "cdn.example", ["Base", "Base | ECH FALLBACK", "Base | FRAG"]),
+        ("vless", "grpc", "tls", "cdn.example", ["Base", "Base | ECH FALLBACK"]),
         ("vless", "xhttp", "tls", "cdn.example", ["Base", "Base | ECH FALLBACK"]),
         ("trojan", "grpc", "tls", "cdn.example", ["Base", "Base | ECH FALLBACK"]),
         ("trojan", "xhttp", "tls", "cdn.example", ["Base", "Base | ECH FALLBACK"]),
@@ -151,21 +150,3 @@ def test_ipv6_host_identity_is_preserved(settings: Settings) -> None:
     assert host_profiles(inbound, host, settings, "marzban-default/OWNER") == ["Stream | IPv6"]
     host["allowinsecure"] = True
     assert host_profiles(inbound, host, settings, "marzban-default/OWNER") == []
-
-
-def test_address_scoped_fragmentation_uses_actual_selected_upstream_profile(
-    settings: Settings,
-) -> None:
-    from keyholder.rendering.profiles import normalize
-    from tests.conftest import TCP
-
-    profile = normalize(TCP)
-    assert profile is not None
-    settings.fragmentation_hosts = (profile.address,)
-    host = {"remark": profile.name, "address": "{SERVER_IP}"}
-    inbound = {"protocol": "vless", "network": "tcp", "tls": "reality"}
-    assert host_profiles(inbound, host, settings, "marzban-default/OWNER", profile) == [
-        profile.name,
-        profile.name + " | FRAG",
-    ]
-    assert host_profiles(inbound, host, settings, "marzban-default/OWNER") is None

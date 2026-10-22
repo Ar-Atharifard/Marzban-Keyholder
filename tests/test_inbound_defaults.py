@@ -12,8 +12,8 @@ from keyholder.backends.marzban import MarzbanBackend
 from keyholder.inbounds import select_tags
 from scripts import management_bot
 from scripts.admin import worker
-from tests.test_api import HEADERS, create
-from tests.test_inbound_picker import AVAILABLE, HOSTS
+from tests.support import AVAILABLE, HEADERS, create
+from tests.support import INBOUND_HOSTS as HOSTS
 
 
 @pytest.fixture(autouse=True)

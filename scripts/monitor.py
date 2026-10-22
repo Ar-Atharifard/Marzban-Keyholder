@@ -606,7 +606,7 @@ def heartbeat(env: dict[str, str]) -> None:
 
 
 def summarize(prefix: str, alerts: dict[str, str]) -> str:
-    lines = [f"{prefix} on Braavos"]
+    lines = [f"{prefix} on {socket.gethostname()}"]
     lines.extend(
         f"• [{severity_for_key(key).upper()}] {key}: {message}"
         for key, message in sorted(alerts.items())
@@ -997,7 +997,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.test_alert:
             env_path = Path(config["secrets_file"])
             private_file(env_path)
-            if not telegram(parse_env(env_path), "TEST ALERT from Braavos monitoring"):
+            if not telegram(
+                parse_env(env_path), f"TEST ALERT from {socket.gethostname()} monitoring"
+            ):
                 raise ValueError("Telegram alerting is not configured")
             print(json.dumps({"healthy": True, "telegram": "delivered"}))
             return 0

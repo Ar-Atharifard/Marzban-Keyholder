@@ -16,13 +16,6 @@ def host_profiles(
 ) -> list[str] | None:
     if actual is not None:
         return [p.name for p in delivery_profiles([actual], settings, account_key)]
-    # An address-scoped rule needs the real address, not a classification placeholder.
-    if (
-        "{SERVER_IP}" in str(host.get("address"))
-        and settings.fragmentation_hosts
-        and account_key in settings.fragmentation_accounts
-    ):
-        return None
     # Only static templates can be predicted without Marzban's runtime variables.
     address = str(host.get("address") or "")
     address = (

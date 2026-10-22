@@ -11,7 +11,8 @@ from keyholder.rendering.profiles import apply_cdn_ech, normalize
 from keyholder.rendering.renderers import URIRenderer, XrayRenderer
 from scripts import management_bot
 from scripts.admin import worker
-from tests.conftest import GRPC, PBK
+from tests.support import AVAILABLE, GRPC, PBK
+from tests.support import INBOUND_HOSTS as HOSTS
 
 
 @pytest.fixture(autouse=True)
@@ -26,8 +27,6 @@ USER: dict[str, Any] = {
     "data_limit": 123,
     "expire": 456,
 }
-AVAILABLE = {"vless": [{"tag": "A"}, {"tag": "C"}], "trojan": [{"tag": "B"}]}
-HOSTS = {tag: [{"remark": tag}] for tag in "ABC"}
 
 
 def test_catalog_has_no_secrets_and_detects_concurrent_selection_change() -> None:

@@ -12,7 +12,7 @@ verification enabled and restrict exported ports to the required loopback endpoi
 Templates are in `deploy/domestic/frp/`; pin the binary and verify its release digest.
 
 Keep customer data paths separate when comparing tunnels. The original domestic
-entries can use Rathole directly; dedicated OWNER pilot entries can select FRP or
+entries can use Rathole directly; dedicated pilot entries can select FRP or
 an Xray REALITY forward connector. Set a distinct authenticated loopback SOCKS
 outbound per path. Resolve destinations with `IPOnDemand` before the Iranian IP
 rule and the per-entry foreign fallback; an unconditional rule with `IPIfNonMatch`
@@ -72,14 +72,6 @@ REALITY supports TCP/RAW, XHTTP and gRPC, not HTTPUpgrade. Check targets with th
 installed `xray tls ping HOST`; validate TLS 1.3, HTTP/2 when required, and actual
 authenticated browsing. A domestic SNI is not a guarantee against filtering.
 Changing a target/SNI may require customers to refresh their existing subscription.
-
-An optional fragmentation pilot is controlled by `KEYHOLDER_FRAGMENTATION_ACCOUNTS`
-(backend/username identities) and `KEYHOLDER_FRAGMENTATION_KINDS`. It appends `FRAG`
-variants of selected VLESS profiles, preserving originals. REALITY
-uses TCP-stream slicing to preserve SNI routing; TLS uses ClientHello record splitting.
-Both remain encrypted. URI clients must import `fm`; Xray JSON includes `finalmask`.
-These presets avoid empty TLS records and `unsafe` fingerprints. Test on the actual
-ISP before broadening access; fragmentation is not a reachability guarantee.
 
 For dual-stack delivery, use the same hostname with A and AAAA records, bind
 HAProxy on both families (`bind [::]:443 v6only` in addition to IPv4), and allow

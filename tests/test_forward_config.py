@@ -6,10 +6,10 @@ import pytest
 from scripts.backhaul_probe import healthy
 from scripts.domestic_config import add_backhaul_entry, add_entry
 from scripts.forward_config import configurations
-from tests.test_domestic_config import inputs
+from tests.support import domestic_inputs as inputs
 
 
-def test_forward_peers_use_vision_and_separate_public_private_keys():
+def test_forward_peers_use_vision_and_separate_public_private_keys() -> None:
     server, client = configurations(
         "2001:db8::1",
         "example.org",
@@ -31,7 +31,7 @@ def test_forward_peers_use_vision_and_separate_public_private_keys():
     assert server["outbounds"][0]["settings"]["servers"][0]["address"] == "127.0.0.1"
 
 
-def test_forward_profile_keeps_domestic_and_private_rules_before_foreign_ip_catchall():
+def test_forward_profile_keeps_domestic_and_private_rules_before_foreign_ip_catchall() -> None:
     core, inbound, proxy = inputs()
     core = add_entry(core, inbound, proxy)
     second = deepcopy(inbound)
@@ -54,7 +54,7 @@ def test_forward_profile_keeps_domestic_and_private_rules_before_foreign_ip_catc
     assert rules[-1]["outboundTag"] == "FORWARD"
 
 
-def test_probe_uses_certificate_verification_and_keeps_secrets_off_argv():
+def test_probe_uses_certificate_verification_and_keeps_secrets_off_argv() -> None:
     with patch("scripts.backhaul_probe.subprocess.run") as run:
         run.return_value.returncode = 0
         assert healthy(19987, {"user": "infra", "pass": "private-password"})
@@ -64,7 +64,7 @@ def test_probe_uses_certificate_verification_and_keeps_secrets_off_argv():
         assert run.call_args.kwargs["input"] == 'proxy-user = "infra:private-password"\n'
 
 
-def test_probe_falls_back_and_rejects_unknown_port():
+def test_probe_falls_back_and_rejects_unknown_port() -> None:
     with patch("scripts.backhaul_probe.subprocess.run") as run:
         run.return_value.returncode = 28
         assert not healthy(19987, {"user": "a", "pass": "b"})

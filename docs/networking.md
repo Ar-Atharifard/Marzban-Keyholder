@@ -80,3 +80,27 @@ customer delivery. Standard Xray clients cannot start DNSTT from a subscription 
 Keep keys, owner config and binaries in encrypted recovery backups; personal service
 activation after recovery is opt-in. Test browsing, not only idle delay. Throughput
 and availability depend on the resolver. [DNSTT protocol](https://www.bamsoftware.com/software/dnstt/protocol.html).
+
+## Personal MASQUE recovery
+
+Install a Linux release from [Aether](https://github.com/CluvexStudio/Aether/releases)
+and verify its archive against the release checksum. Run
+`keyholder personal masque --binary /absolute/path/to/aether`. The private operator
+configuration can set `aether_binary` and `masque_state` to avoid repeating paths.
+
+This starts HTTP/2 with fragmentation on SOCKS `127.0.0.1:1819`; it does not change
+system proxy settings. Point your administrator client at that local SOCKS proxy.
+Ctrl+C stops it. `--scan balanced` chooses verified endpoints; `--fresh` ignores a
+saved endpoint. Try `--scan ironclad` for end-to-end scanning, `--no-fragment` for
+ordinary HTTP/2 TLS, or `--ipv6` when appropriate. Register keys separately through
+an already working local proxy, then start the tunnel directly:
+
+```sh
+keyholder personal masque --register --register-proxy socks5://127.0.0.1:10808
+keyholder personal masque --fresh --scan balanced
+```
+
+The registration proxy is used only by the first command. Identity keys stay
+in the private state directory. First registration and subsequent startup checks
+need Cloudflare's WARP API; a filtered API can cause long retries or failure.
+It uses Cloudflare's exit, independently of your VPS, Marzban quotas and routing.

@@ -7,7 +7,7 @@ from alembic import command
 from alembic.config import Config
 
 from scripts.backup_database import backup_database
-from tests.conftest import ADMIN_KEY, KINDS
+from tests.support import ADMIN_KEY, KINDS
 
 LEGACY = {
     "profiles": ["xhttp_reality", "tcp_reality", "xhttp_cdn", "ws_cdn"],

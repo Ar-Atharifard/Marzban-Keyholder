@@ -6,8 +6,7 @@ from typing import cast
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.conftest import GRPC, LINK
-from tests.test_api import HEADERS, create
+from tests.support import GRPC, HEADERS, LINK, create
 
 
 def test_marzban_authority_tracks_upstream_and_preserves_url(client: TestClient) -> None:

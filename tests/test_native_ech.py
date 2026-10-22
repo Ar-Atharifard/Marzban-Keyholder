@@ -14,12 +14,8 @@ from pydantic import SecretStr, ValidationError
 from keyholder.config import Settings
 from keyholder.rendering.profiles import apply_cdn_ech, normalize
 from keyholder.rendering.renderers import URIRenderer, XrayRenderer
-from tests.conftest import ADMIN_KEY, GRPC, LINK, TCP, TCP6, UUID
-from tests.test_api import create
-from tests.test_protocol_expansion import vmess
-
-ECH = "cloudflare-ech.com+https://8.8.8.8/dns-query"
-HOSTS = ("titan.example",)
+from tests.support import ADMIN_KEY, ECH, GRPC, LINK, TCP, TCP6, UUID, create, vmess
+from tests.support import CDN_HOSTS as HOSTS
 
 
 def test_ech_covers_five_cdn_transports_without_weakening_direct_profiles() -> None:

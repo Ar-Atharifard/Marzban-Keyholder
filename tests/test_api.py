@@ -13,9 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from keyholder.backends.base import UpstreamError
 from keyholder.models import Customer
-from tests.conftest import ADMIN_KEY, ALL, KINDS
-
-HEADERS = {"Authorization": f"Bearer {ADMIN_KEY}"}
+from tests.support import ADMIN_KEY, ALL, HEADERS, KINDS, create
 
 
 def test_slow_upstream_does_not_exhaust_database_pool(client: TestClient) -> None:
@@ -63,14 +61,6 @@ def test_slow_upstream_does_not_exhaust_database_pool(client: TestClient) -> Non
     finally:
         app.state.sessions = original_sessions
         engine.dispose()
-
-
-def create(client: TestClient) -> dict[str, object]:
-    response = client.post(
-        "/admin/customers", headers=HEADERS, json={"name": "Customer", "upstream_username": "alice"}
-    )
-    assert response.status_code == 201
-    return response.json()  # type: ignore[no-any-return]
 
 
 def test_customer_lifecycle(client: TestClient) -> None:

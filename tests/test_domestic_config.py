@@ -4,38 +4,7 @@ from typing import Any
 import pytest
 
 from scripts.domestic_config import add_entry, add_transport
-
-
-def inputs() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    return (
-        {
-            "inbounds": [{"tag": "foreign"}],
-            "outbounds": [
-                {"tag": "DIRECT", "protocol": "freedom"},
-                {"tag": "BLOCK", "protocol": "blackhole"},
-            ],
-            "routing": {
-                "domainStrategy": "IPIfNonMatch",
-                "rules": [{"ip": ["geoip:ir"], "outboundTag": "BLOCK"}],
-            },
-        },
-        {
-            "tag": "domestic",
-            "listen": "127.0.0.1",
-            "streamSettings": {
-                "security": "reality",
-                "network": "tcp",
-                "realitySettings": {"publicKey": "test-public-key"},
-            },
-        },
-        {
-            "tag": "TUNNEL",
-            "protocol": "socks",
-            "settings": {
-                "servers": [{"address": "127.0.0.1", "users": [{"user": "infra", "pass": "test"}]}]
-            },
-        },
-    )
+from tests.support import domestic_inputs as inputs
 
 
 def test_domestic_routing_keeps_foreign_policy_and_resolves_before_default() -> None:

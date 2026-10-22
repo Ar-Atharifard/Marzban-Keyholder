@@ -65,8 +65,7 @@ def test_doctor_verifies_registry_and_vault(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.admin import worker
-    from tests.conftest import ADMIN_KEY
-    from tests.test_api import create
+    from tests.support import ADMIN_KEY, create
 
     create(client)
     app = cast(FastAPI, client.app)
@@ -103,7 +102,7 @@ def test_panel_selection_preserves_credentials_and_accepts_empty_selection(
 
     from keyholder.backends.marzban import MarzbanBackend
     from scripts.admin import worker
-    from tests.conftest import ADMIN_KEY
+    from tests.support import ADMIN_KEY
 
     monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
     user: dict[str, Any] = {
@@ -158,7 +157,7 @@ def test_reset_usage_requires_confirmation_inside_worker(monkeypatch: pytest.Mon
 
     from keyholder.backends.marzban import MarzbanBackend
     from scripts.admin import worker
-    from tests.conftest import ADMIN_KEY
+    from tests.support import ADMIN_KEY
 
     monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
 

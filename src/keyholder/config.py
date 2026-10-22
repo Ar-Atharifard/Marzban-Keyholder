@@ -64,12 +64,6 @@ class Settings(BaseSettings):
     cdn_tls_compatibility: bool = False
     cdn_ech_kinds: tuple[str, ...] = SUPPORTED_KINDS
     cdn_ech_full_catalog: tuple[str, ...] = ()
-    fragmentation_accounts: tuple[str, ...] = ()
-    fragmentation_kinds: tuple[str, ...] = ("tcp_reality", "grpc_cdn")
-    fragmentation_hosts: tuple[str, ...] = ()
-    ff_accounts: tuple[str, ...] = ()
-    ff_address: str = ""
-    ff_kinds: tuple[str, ...] = ("grpc_cdn", "xhttp_tls_cdn")
     default_inbound_tags: tuple[str, ...] = ()
     profile_source: Literal["policy", "marzban", "upstream"] = "policy"
     backends: list[BackendConfig] = Field(default_factory=list, repr=False)
@@ -86,22 +80,6 @@ class Settings(BaseSettings):
             raise ValueError("Backend IDs must be unique")
         return value
 
-    @model_validator(mode="after")
-    def validate_ff_address(self) -> "Settings":
-        if self.ff_accounts:
-            import ipaddress
-
-            try:
-                address = ipaddress.ip_address(self.ff_address)
-                trusted = address.is_global and any(
-                    address in ipaddress.ip_network(n) for n in self.allowed_cdn_networks
-                )
-            except ValueError:
-                trusted = False
-            if not trusted:
-                raise ValueError("F&F requires a public edge IP inside allowed_cdn_networks")
-        return self
-
     @field_validator("allowed_cdn_networks")
     @classmethod
     def validate_networks(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -109,7 +87,7 @@ class Settings(BaseSettings):
 
         return tuple(str(ipaddress.ip_network(v, strict=True)) for v in value)
 
-    @field_validator("enabled_profiles", "cdn_ech_kinds", "fragmentation_kinds", "ff_kinds")
+    @field_validator("enabled_profiles", "cdn_ech_kinds")
     @classmethod
     def validate_profiles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         from keyholder.policies import SUPPORTED_KINDS

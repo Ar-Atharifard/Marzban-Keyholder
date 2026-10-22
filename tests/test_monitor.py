@@ -167,6 +167,7 @@ def test_alert_configuration_writes_private_file_without_returning_token(
     destination = tmp_path / "monitor.env"
     monitor_config = tmp_path / "monitor.json"
     monitor_config.write_text(json.dumps({"secrets_file": str(destination)}))
+    destination.write_text("KEYHOLDER_HEARTBEAT_URL=https://heartbeat.example/original\n")
     monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
     result = host.configure_alerts(
         {"monitor_config": str(monitor_config)},
@@ -176,6 +177,16 @@ def test_alert_configuration_writes_private_file_without_returning_token(
     assert destination.stat().st_mode & 0o777 == 0o600
     assert "a" * 40 in destination.read_text()
     assert "a" * 40 not in json.dumps(result)
+    assert host.heartbeat_url({"monitor_config": str(monitor_config)}) == (
+        "https://heartbeat.example/original"
+    )
+    host.write_monitor_env(
+        {"monitor_config": str(monitor_config)},
+        {"KEYHOLDER_HEARTBEAT_URL": "https://heartbeat.example/replacement"},
+    )
+    saved = host.read_env(destination)
+    assert saved["KEYHOLDER_ALERT_BOT_TOKEN"] == "123456789:" + "a" * 40
+    assert saved["KEYHOLDER_HEARTBEAT_URL"] == "https://heartbeat.example/replacement"
 
 
 def test_management_bot_configuration_is_private_and_starts_service(
