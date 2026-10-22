@@ -13,6 +13,9 @@ def add_transport(
     if existing_tag not in tags or inbound["tag"] in tags:
         raise ValueError("Existing domestic entry required; new tag must be unique")
     stream = inbound.get("streamSettings", {})
+    reality = stream.get("realitySettings", {})
+    if reality.get("target") and reality.get("dest") and reality["target"] != reality["dest"]:
+        raise ValueError("REALITY target and legacy dest must not conflict")
     if (
         inbound.get("listen") != "127.0.0.1"
         or stream.get("security") != "reality"
@@ -24,7 +27,13 @@ def add_transport(
     rules = [
         rule for rule in result["routing"]["rules"] if existing_tag in rule.get("inboundTag", [])
     ]
-    if len(rules) != 3 or not all("ip" in rule or "domain" in rule for rule in rules):
+    local_rules = [rule for rule in rules if "ip" in rule or "domain" in rule]
+    pinned = [rule for rule in rules if "ip" not in rule and "domain" not in rule]
+    if (
+        len(local_rules) != 3
+        or len(pinned) > 1
+        or (pinned and core["routing"].get("domainStrategy") != "IPOnDemand")
+    ):
         raise ValueError("Review domestic split-routing rules before extending them")
     for rule in rules:
         rule["inboundTag"].append(inbound["tag"])

@@ -141,7 +141,12 @@ after peer review, then run `playbooks/domestic-activate.yml` with the same comm
 Do not rerun the empty-target restore over the staged service. Activation waits for
 the heartbeat guard to open port 443; DNS cutover still follows real traffic tests.
 
-Use one naming convention in the panel: `Route | Protocol | Transport`, with
-optional `IPv6` and `ECH FALLBACK` suffixes. Include XHTTP mode when it distinguishes
-two profiles. Keyholder preserves panel names and appends the ECH suffix itself;
-names do not control credentials, accounting or subscription identity.
+Use customer labels such as `IR | REALITY TCP | T1`, `IR | REALITY XHTTP | T2`
+and `IR | REALITY GRPC | T3`. Stable path codes distinguish backhauls without
+publishing their software names. Keep the path-to-backhaul mapping in administrator
+documentation. Names do not control credentials, accounting or subscription identity.
+They do not conceal the protocol or SNI from inspection.
+
+For a fresh replacement, use the shared [deployment entry point](../deploy/ansible/README.md).
+It includes fresh-host SSH/firewall preparation and a verified archive stream from
+the recovered foreign host; the node restore itself never replays host security files.

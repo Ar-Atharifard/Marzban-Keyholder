@@ -46,6 +46,7 @@ all:
         recovery_security_validated: false
         recovery_addresses_reviewed: false
         recovery_address_map: {}  # old public IP: replacement public IP, including IPv6
+        recovery_peer_address_map: {}  # old domestic IP: replacement domestic IP
         # Owner-only transport is never activated as a customer service.
         recovery_enable_personal_dnstt: false
         recovery_activate_jobs: false

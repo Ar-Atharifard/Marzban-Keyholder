@@ -1,0 +1,34 @@
+#!/bin/sh
+# Laptop entry point. Keep inventories and credentials outside Git.
+set -eu
+umask 077
+base=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 {host|foreign|domestic|activate-domestic|observer} PRIVATE_INVENTORY [ansible options]" >&2
+    exit 2
+fi
+action=$1; inventory=$2; shift 2
+case "$action" in
+    host) playbook=host-security ;;
+    foreign) playbook=recover ;;
+    domestic) playbook=domestic ;;
+    activate-domestic) playbook=domestic-activate ;;
+    observer) playbook=domestic-observer ;;
+    *) echo 'Unknown deployment action' >&2; exit 2 ;;
+esac
+finish=false; check=false
+if [ "$action" = foreign ]; then
+    case "${1:-}" in
+        --finish) finish=true; shift ;;
+        --check) finish=true; check=true; shift ;;
+    esac
+fi
+runner="$base/.private/ansible-venv/bin/ansible-playbook"
+if [ ! -x "$runner" ]; then
+    python3.12 -m venv "$base/.private/ansible-venv"
+    "$base/.private/ansible-venv/bin/pip" install -r "$base/deploy/ansible/requirements.txt"
+fi
+export ANSIBLE_CONFIG="$base/deploy/ansible/ansible.cfg"
+export ANSIBLE_LOCAL_TEMP="$base/.private/ansible-tmp"
+exec "$runner" -i "$inventory" "$base/deploy/ansible/playbooks/$playbook.yml" \
+    --ask-become-pass -e "recovery_finish_only=$finish" -e "recovery_check_only=$check" "$@"

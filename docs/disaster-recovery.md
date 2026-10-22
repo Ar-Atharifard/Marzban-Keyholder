@@ -124,8 +124,9 @@ For an already restored target, resume validation with:
 
 Production activation additionally requires `recovery_security_validated: true`,
 `recovery_addresses_reviewed: true` and `recovery_address_map`, mapping old public
-IPv4/IPv6 to addresses assigned to the replacement. SSH/firewall validation, DNS
-cutover and scheduled-job handover are still explicit; do not copy host networking.
+IPv4/IPv6 to addresses assigned to the replacement. Use `deploy/ansible/run host` on a fresh target for the separate transactional
+SSH/UFW bootstrap; then update the inventory user/port. DNS cutover and scheduled-job
+handover remain explicit; do not copy host networking.
 
 Restore refuses populated destinations, databases/volumes and staging. It is one-time,
 not an upgrade/convergence tool; use the finish path after a completed restore.
@@ -159,3 +160,14 @@ is not lossless: account for changes before rollback.
 Sources: [restic](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html),
 [B2 pricing](https://www.backblaze.com/cloud-storage/pricing),
 [Ubuntu lifecycle](https://ubuntu.com/about/release-cycle).
+
+## Two-server replacement
+
+Use the [shared deployment commands](../deploy/ansible/README.md): fresh-host security
+on each replacement → foreign recovery → verified domestic archive stream → domestic
+restore → reviewed peer/observer identity handover → activation → customer checks → DNS
+cutover → single-writer jobs. The peer map is separate from the foreign local-address
+map; include the changed domestic/foreign IPs, including forward IPv6 source pins.
+No tunnel keys or customer identities are regenerated. Re-establish monitoring SSH
+trust from authenticated host keys; never disable host-key checking. Keep the old
+servers and the final consistent backup until cutover is accepted.

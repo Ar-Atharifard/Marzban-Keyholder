@@ -60,6 +60,22 @@
               env.write_text('\n'.join(lines) + '\n')
       changed_when: true
       no_log: true
+    - name: Install reviewed peer mapper
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/migrate_peers.py'
+        dest: /usr/local/lib/keyholder-recovery/migrate_peers.py
+        mode: '0700'
+    - name: Write reviewed local and remote peer mappings
+      ansible.builtin.copy:
+        dest: /var/lib/keyholder-recovery/peer-map.json
+        mode: '0600'
+        content: '{{ recovery_address_map | combine(recovery_peer_address_map | default({})) | to_nice_json }}'
+    - name: Adapt restored connector endpoints before starting them
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/migrate_peers.py,
+               --role, foreign, --mapping, /var/lib/keyholder-recovery/peer-map.json]
+      changed_when: true
+      no_log: true
     - name: Start only reviewed projects with captured immutable images
       ansible.builtin.command:
         argv: >-

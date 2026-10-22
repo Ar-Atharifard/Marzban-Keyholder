@@ -1,0 +1,140 @@
+---
+- name: Bootstrap SSH and firewall on an empty replacement only
+  hosts: host_targets
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Require console, empty-host and port-policy review
+      ansible.builtin.assert:
+        that:
+          - host_target_is_empty | default(false) | bool
+          - host_console_ready | default(false) | bool
+          - host_rules_reviewed | default(false) | bool
+          - host_tcp_rules is defined
+          - host_admin_user is match('^[a-z][a-z0-9_-]{0,30}$')
+          - host_admin_user != 'root'
+          - host_admin_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+( .*)?$')
+          - host_identity_file is defined
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '22.04'
+          - ansible_facts.architecture == 'x86_64'
+          - not ansible_check_mode
+        fail_msg: Use a fresh Ubuntu 22.04 host, verified host key, open console and reviewed TCP rules.
+    - name: Refuse existing production installations
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop: [/var/lib/marzban/db.sqlite3, /opt/marzban-node/main.py, /var/lib/keyholder-bootstrap]
+      register: existing_host
+    - name: Require an unused target
+      ansible.builtin.assert:
+        that: not item.stat.exists
+      loop: '{{ existing_host.results }}'
+    - name: Refuse existing container workloads
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, '-c', "import shutil,subprocess; d=shutil.which('docker'); print(subprocess.check_output([d,'ps','-aq'],text=True) if d else '')"]
+      register: containers
+      changed_when: false
+    - name: Require no existing containers
+      ansible.builtin.assert:
+        that: containers.stdout | trim == ''
+    - name: Install missing security tools without upgrading the OS
+      ansible.builtin.apt:
+        name: [ufw, sudo, openssh-server]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Create the key-only administrator
+      ansible.builtin.user:
+        name: '{{ host_admin_user }}'
+        groups: sudo
+        append: true
+        shell: /bin/bash
+        create_home: true
+        password_lock: true
+    - name: Create administrator key directory
+      ansible.builtin.file:
+        path: '/home/{{ host_admin_user }}/.ssh'
+        state: directory
+        owner: '{{ host_admin_user }}'
+        group: '{{ host_admin_user }}'
+        mode: '0700'
+    - name: Install the administrator public key
+      ansible.builtin.copy:
+        content: "{{ host_admin_public_key }}\n"
+        dest: '/home/{{ host_admin_user }}/.ssh/authorized_keys'
+        owner: '{{ host_admin_user }}'
+        group: '{{ host_admin_user }}'
+        mode: '0600'
+    - name: Permit administrative automation with the verified key
+      ansible.builtin.copy:
+        content: "{{ host_admin_user }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+        dest: '/etc/sudoers.d/90-keyholder-admin'
+        mode: '0440'
+        validate: /usr/sbin/visudo -cf %s
+    - name: Create recovery helper directory
+      ansible.builtin.file:
+        path: /usr/local/lib/keyholder-recovery
+        state: directory
+        mode: '0700'
+    - name: Install transactional security helper
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/bootstrap_host.py'
+        dest: /usr/local/lib/keyholder-recovery/bootstrap_host.py
+        mode: '0700'
+    - name: Write the reviewed transition plan
+      ansible.builtin.copy:
+        dest: /root/keyholder-bootstrap-plan.json
+        mode: '0600'
+        content: '{{ {"old_port": ansible_port | default(22) | int, "rules": host_tcp_rules} | to_nice_json }}'
+    - name: Read the host public key over the already authenticated connection
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: pinned_host_key
+    - name: Pin the same identity for the new SSH port on the laptop
+      ansible.builtin.known_hosts:
+        name: '[{{ ansible_host }}]:2222'
+        key: '[{{ ansible_host }}]:2222 {{ (pinned_host_key.content | b64decode).split()[0:2] | join(" ") }}'
+        hash_host: true
+      delegate_to: localhost
+      become: false
+    - name: Arm rollback and enable both SSH ports with reviewed firewall rules
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/bootstrap_host.py, prepare,
+               --plan, /root/keyholder-bootstrap-plan.json]
+      changed_when: true
+    - name: Prove fresh key-only administrative access on the new port
+      ansible.builtin.command:
+        argv: [ssh, '-F', /dev/null, '-o', BatchMode=yes, '-o', StrictHostKeyChecking=yes,
+               '-o', ClearAllForwardings=yes, '-o', ConnectTimeout=15,
+               '-i', '{{ host_identity_file }}', '-p', '2222',
+               '{{ host_admin_user }}@{{ ansible_host }}', sudo, '-n', 'true']
+      delegate_to: localhost
+      become: false
+      changed_when: false
+    - name: Change the Ansible connection to the tested administrator
+      ansible.builtin.set_fact:
+        ansible_user: '{{ host_admin_user }}'
+        ansible_port: 2222
+        ansible_ssh_private_key_file: '{{ host_identity_file }}'
+    - name: Discard the old SSH connection
+      ansible.builtin.meta: reset_connection
+    - name: Close the old port and disable password and root SSH
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/bootstrap_host.py, finish]
+      changed_when: true
+    - name: Prove a fresh login after the final policy
+      ansible.builtin.command:
+        argv: [ssh, '-F', /dev/null, '-o', BatchMode=yes, '-o', StrictHostKeyChecking=yes,
+               '-o', ClearAllForwardings=yes, '-o', ConnectTimeout=15,
+               '-i', '{{ host_identity_file }}', '-p', '2222',
+               '{{ host_admin_user }}@{{ ansible_host }}', sudo, '-n', 'true']
+      delegate_to: localhost
+      become: false
+      changed_when: false
+    - name: Commit only after final fresh login succeeds
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/bootstrap_host.py, commit]
+      changed_when: true
+    - name: Report the new access contract
+      ansible.builtin.debug:
+        msg: 'Use {{ host_admin_user }}@{{ ansible_host }} port 2222, SSH keys only. Keep this VM console open during testing.'

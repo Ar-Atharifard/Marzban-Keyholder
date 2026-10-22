@@ -1,36 +1,56 @@
-# Recovery command
+# Deploy and recover
 
-From the laptop, with Python 3.12 and verified SSH access:
+Run on the **laptop**, from the repository root. Targets are empty Ubuntu 22.04
+amd64 servers. This restores an existing captured deployment; public source alone
+cannot restore customer state. No OS upgrade or automatic public DNS change runs.
 
 ```sh
-./deploy/ansible/recover .private/recovery-inventory.yml
+./deploy/ansible/run host .private/host.yml
+./deploy/ansible/run foreign .private/foreign.yml
+python3 scripts/transfer_node.py replacement-foreign replacement-gate
+./deploy/ansible/run domestic .private/domestic.yml
+./deploy/ansible/run observer .private/domestic.yml
+./deploy/ansible/run activate-domestic .private/domestic.yml
 ```
 
-Copy `inventory/example.yml` privately and set the empty Ubuntu 22.04 amd64 target,
-Compose projects and restore scope first. The command installs its laptop Ansible
-environment if missing and prompts for the target sudo password. If repository
-credentials are missing, it pauses for private setup on the target.
+Copy the matching templates from `inventory/` privately. Prepare each fresh host
+with `host` first; verify its initial SSH fingerprint through its console. Set the
+console/empty-host/rule-review flags only when true. Review TCP service ports and
+source networks. Host preparation adds `khadmin`, its public key and passwordless
+sudo, pins the host identity for port 2222, checks a fresh key/sudo connection,
+then closes the old SSH port and disables password/root login. A ten-minute rollback
+is armed until the final fresh connection succeeds. Do not close the console.
+The command refuses existing application data, containers, firewall rules or an
+unfinished host checkpoint. It does not reset an existing server's security.
 
-Flow: bootstrap → encrypted download → verification → restore → activation.
-Rehearsal mode binds services to loopback, checks restored data/subscriptions and
-REALITY traffic, then reboots the VM and checks again. Bots/timers stay disabled.
-Use `--finish` for an already restored target; it skips bootstrap/download/restore.
-Use `--check` to validate a running restored VM without reconfiguration or reboot.
-New snapshots carry Compose release paths; older ones need explicit inventory entries.
-Do not rerun the full command after a partial restore: inspect the failure first.
+After host preparation, update that inventory's SSH user/port to `khadmin`/2222.
+Use the same private key. `foreign` installs missing prerequisites, pauses for B2
+credentials **on the target**, downloads/verifies the encrypted bundle and restores
+exact images, databases and configuration. Rehearsal mode isolates services and
+checks reboot persistence; bots/timers remain off. `recover INVENTORY` remains a
+compatibility alias. `foreign INVENTORY --finish` resumes completed VM restores;
+`--check` checks a running restored VM without reboot or configuration changes.
+Do not rerun full restore over partially populated application data.
 
-Production requires reviewed SSH/firewall, `recovery_security_validated`,
-`recovery_addresses_reviewed` and `recovery_address_map` (old → new IPv4/IPv6).
-Only addresses assigned to the replacement host are accepted. This maps Xray
-listeners, literal Marzban host addresses and the optional DNSTT bind. DNS/Cloudflare,
-host security and bot/timer handover remain separate cutover steps.
+For a real replacement, review the local address map and peer address map before
+activation. Endpoint mapping updates tunnel endpoints, forward source pins,
+domestic HAProxy peer ACLs and literal panel-node addresses, preserving keys and
+users. It does not assign IPs, rewrite DNS names, change host networking or trust
+new monitoring host keys automatically. Foreign production activation requires
+the old panel/writers stopped, reviewed security/peers and assigned replacement IPs.
+Keep jobs disabled until customer traffic and cutover are verified.
 
-[Recovery runbook](../../docs/disaster-recovery.md) covers credentials, schedules,
-rollback and cutover. No playbook resets SSH/firewall or changes production DNS.
+Restore the foreign host first. Add verified SSH aliases for both replacements.
+`transfer_node.py` streams its captured domestic archive directly to the domestic
+host, verifies SHA-256 and refuses overwrite; no laptop secret file or B2 key on
+the domestic server is needed. `domestic` restores the node and all captured
+backhauls from that archive, with activation disabled initially. Install the
+restricted observer using the foreign observer **public** key, and update the
+foreign SSH host pin using the new domestic host's verified public key. Stop the
+old node identity before `activate-domestic`; its guard waits for an authenticated
+panel heartbeat before opening customer 443. Preserve the independent foreign path.
 
-For the separate domestic entry, use `inventory/domestic.example.yml` and
-`playbooks/domestic.yml` with the captured `nodes/domestic.tar` already on the target.
-See [domestic recovery](../../docs/domestic-node.md). Rehearsals disable restored
-remote nodes; production foreign recovery requires `recovery_domestic_peers_reviewed`
-and `recovery_old_writers_stopped` before starting a replacement panel when a reverse
-connector is present. Two panels must never control the same domestic node.
+See [the recovery procedure](../../docs/disaster-recovery.md) for backup configuration,
+cutover and acceptance checks. Neither a fresh-host bootstrap nor a complete domestic
+restore has been accepted on a new VM yet; local tests and syntax checks do not
+replace that rehearsal. The existing foreign restore/reboot rehearsal passed earlier.

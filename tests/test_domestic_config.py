@@ -65,6 +65,12 @@ def test_second_transport_shares_only_domestic_policy() -> None:
     second = deepcopy(inbound)
     second["tag"] = "domestic-xhttp"
     second["streamSettings"].update(network="xhttp", sockopt={"acceptProxyProtocol": True})
+    invalid = deepcopy(second)
+    invalid["streamSettings"]["realitySettings"].update(
+        target="original.example:443", dest="different.example:443"
+    )
+    with pytest.raises(ValueError, match="conflict"):
+        add_transport(original, invalid, "domestic")
     result = add_transport(original, second, "domestic")
     assert len(original["inbounds"]) == 2
     assert len(result["inbounds"]) == 3
@@ -73,3 +79,24 @@ def test_second_transport_shares_only_domestic_policy() -> None:
         assert rule["inboundTag"] == ["domestic", "domestic-xhttp"]
     with pytest.raises(ValueError):
         add_transport(result, second, "domestic")
+
+
+def test_added_transport_keeps_the_selected_backhaul_and_all_local_guards() -> None:
+    from scripts.domestic_config import add_backhaul_entry
+
+    core, inbound, proxy = inputs()
+    core = add_entry(core, inbound, proxy)
+    first = deepcopy(inbound)
+    first["tag"] = "pinned"
+    first["streamSettings"]["sockopt"] = {"acceptProxyProtocol": True}
+    proxy["tag"] = "SECOND"
+    core = add_backhaul_entry(core, first, "domestic", proxy)
+    second = deepcopy(first)
+    second["tag"] = "pinned-grpc"
+    second["streamSettings"]["network"] = "grpc"
+    result = add_transport(core, second, "pinned")
+    rules = [r for r in result["routing"]["rules"] if "pinned-grpc" in r.get("inboundTag", [])]
+    assert len(rules) == 4
+    assert [r["outboundTag"] for r in rules] == ["BLOCK", "BLOCK", "DIRECT", "SECOND"]
+    assert result["outbounds"] == core["outbounds"]
+    assert all("pinned-grpc" not in r.get("inboundTag", []) for r in core["routing"]["rules"])

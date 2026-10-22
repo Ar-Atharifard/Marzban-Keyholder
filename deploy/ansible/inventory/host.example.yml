@@ -1,0 +1,19 @@
+all:
+  children:
+    host_targets:
+      hosts:
+        fresh-vm:
+          ansible_host: 192.0.2.30
+          ansible_user: ubuntu
+          ansible_port: 22
+      vars:
+        host_target_is_empty: false
+        host_console_ready: false
+        host_rules_reviewed: false
+        host_admin_user: khadmin
+        host_admin_public_key: 'ssh-ed25519 REPLACE_WITH_YOUR_PUBLIC_KEY'
+        host_identity_file: /home/YOUR_USER/.ssh/id_ed25519
+        # TCP only. 2222 is added automatically. Never add private panel/API ports.
+        # Domestic: 443 public; node/control ports from the foreign peer only.
+        # Foreign: review CDN origin ranges, emergency ports and forward peer IPv6.
+        host_tcp_rules: []

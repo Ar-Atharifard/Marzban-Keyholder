@@ -8,7 +8,7 @@ StartLimitIntervalSec=0
 User=keyholder-tunnel
 Group=keyholder-tunnel
 ExecStart=/opt/marzban-node/assets/xray run -config /etc/keyholder-forward/client.json
-Restart=on-failure
+Restart=always
 RestartSec=5
 UMask=0077
 NoNewPrivileges=true
@@ -18,8 +18,9 @@ PrivateTmp=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LimitNOFILE=8192
-MemoryHigh=32M
-MemoryMax=64M
+Environment=GOMEMLIMIT=48MiB
+MemoryHigh=64M
+MemoryMax=128M
 
 [Install]
 WantedBy=multi-user.target

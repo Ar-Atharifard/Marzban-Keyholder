@@ -45,12 +45,24 @@
         src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
         dest: '/usr/local/lib/keyholder-recovery/{{ item }}'
         mode: '0700'
-      loop: [gate_backup.py, gate_snapshot.py, restore_domestic.py]
+      loop: [gate_backup.py, gate_snapshot.py, restore_domestic.py, migrate_peers.py]
     - name: Validate and stage the private fixed-file archive
       ansible.builtin.command:
         argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/restore_domestic.py,
                --archive, '{{ domestic_archive }}', --destination, '{{ domestic_stage }}']
         creates: '{{ domestic_stage }}'
+      no_log: true
+    - name: Write reviewed peer address mappings
+      ansible.builtin.copy:
+        dest: /var/lib/keyholder-recovery/domestic-peer-map.json
+        mode: '0600'
+        content: '{{ domestic_peer_address_map | default({}) | to_nice_json }}'
+    - name: Adapt staged peer endpoints before installing them
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-recovery/migrate_peers.py,
+               --root, '{{ domestic_stage }}', --role, domestic,
+               --mapping, /var/lib/keyholder-recovery/domestic-peer-map.json]
+      changed_when: true
       no_log: true
     - name: Create service users without login
       ansible.builtin.user:

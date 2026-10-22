@@ -34,6 +34,11 @@ def configurations(
                 "streamSettings": {
                     "network": "tcp",
                     "security": "reality",
+                    "sockopt": {
+                        "tcpKeepAliveIdle": 30,
+                        "tcpKeepAliveInterval": 10,
+                        "tcpUserTimeout": 90000,
+                    },
                     "realitySettings": {
                         "dest": server_name + ":443",
                         "serverNames": [server_name],
@@ -84,6 +89,11 @@ def configurations(
                 "streamSettings": {
                     "network": "tcp",
                     "security": "reality",
+                    "sockopt": {
+                        "tcpKeepAliveIdle": 30,
+                        "tcpKeepAliveInterval": 10,
+                        "tcpUserTimeout": 90000,
+                    },
                     "realitySettings": {
                         "serverName": server_name,
                         "fingerprint": "chrome",

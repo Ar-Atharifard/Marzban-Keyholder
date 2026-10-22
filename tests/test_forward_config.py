@@ -29,6 +29,9 @@ def test_forward_peers_use_vision_and_separate_public_private_keys() -> None:
     assert client["inbounds"][0]["listen"] == "127.0.0.1"
     assert client["inbounds"][0]["settings"]["auth"] == "password"
     assert server["outbounds"][0]["settings"]["servers"][0]["address"] == "127.0.0.1"
+    socket_policy = outbound["streamSettings"]["sockopt"]
+    assert socket_policy == server["inbounds"][0]["streamSettings"]["sockopt"]
+    assert socket_policy["tcpUserTimeout"] == 90000  # Milliseconds, not seconds.
 
 
 def test_forward_profile_keeps_domestic_and_private_rules_before_foreign_ip_catchall() -> None:

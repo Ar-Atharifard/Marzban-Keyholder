@@ -53,32 +53,10 @@
         validate: /usr/sbin/visudo -cf %s
         content: |
           kh-observer ALL=(root) NOPASSWD: /usr/local/lib/keyholder-admin/gate_status.py "", /usr/local/libexec/keyholder-gate-backup ""
-    - name: Add observer SSH access without replacing existing AllowUsers
-      ansible.builtin.copy:
-        dest: /etc/ssh/sshd_config.d/01-keyholder-observer.conf
-        owner: root
-        group: root
-        mode: '0644'
-        validate: /usr/sbin/sshd -t -f %s
-        content: 'AllowUsers kh-observer@{{ domestic_foreign_ipv4 }}'
-      register: observer_ssh
-    - name: Validate the complete SSH configuration
-      ansible.builtin.command: /usr/sbin/sshd -t
-      changed_when: false
-    - name: Reload SSH after validation
-      ansible.builtin.systemd_service:
-        name: ssh
-        state: reloaded
-      when: observer_ssh.changed
-    - name: Close the old Ansible connection
-      ansible.builtin.meta: reset_connection
-    - name: Verify fresh administrator access
-      ansible.builtin.wait_for_connection:
-        timeout: 30
     - name: Explain host-key validation boundary
       ansible.builtin.debug:
         msg: >-
-          Restricted observer installed; fresh administrator access passed. Verify
+          Restricted observer installed without changing SSH daemon configuration. Verify
           the new host key through this authenticated SSH connection or console,
           update the pinned key and target in the foreign monitoring SSH config,
           then test status and backup. Never trust an unauthenticated keyscan alone.

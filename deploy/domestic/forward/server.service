@@ -1,14 +1,14 @@
 [Unit]
 Description=REALITY forward backhaul (server)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target keyholder-foreign-exit.service
+Wants=network-online.target keyholder-foreign-exit.service
 StartLimitIntervalSec=0
 
 [Service]
 User=keyholder-exit
 Group=keyholder-exit
 ExecStart=/var/lib/marzban/xray-core/xray run -config /etc/keyholder-forward/server.json
-Restart=on-failure
+Restart=always
 RestartSec=5
 UMask=0077
 NoNewPrivileges=true
@@ -18,8 +18,9 @@ PrivateTmp=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LimitNOFILE=8192
-MemoryHigh=32M
-MemoryMax=64M
+Environment=GOMEMLIMIT=48MiB
+MemoryHigh=64M
+MemoryMax=128M
 
 [Install]
 WantedBy=multi-user.target

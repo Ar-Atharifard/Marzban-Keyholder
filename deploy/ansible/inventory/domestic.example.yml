@@ -16,4 +16,5 @@ all:
         domestic_console_ready: false
         domestic_foreign_ipv4: 192.0.2.10
         domestic_observer_public_key: ''
-        domestic_archive: /var/lib/keyholder-recovery/downloaded/var/lib/keyholder-recovery/bundle/nodes/domestic.tar
+        domestic_peer_address_map: {}  # old foreign/domestic IP: replacement IP
+        domestic_archive: /var/lib/keyholder-recovery/domestic.tar
