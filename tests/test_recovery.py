@@ -210,14 +210,29 @@ def test_private_configuration_permissions(tmp_path: Path) -> None:
     assert recovery.private_json(path) == {}
 
 
+@pytest.mark.parametrize("automated", [False, True])
 def test_b2_setup_hides_secrets_and_refuses_overwrite(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    automated: bool,
 ) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt: "synthetic-bucket")
     answers = iter(["syntheticKeyId", "syntheticApplicationKey123456", "x" * 40, "x" * 40])
     monkeypatch.setattr(getpass, "getpass", lambda prompt: next(answers))
     directory = tmp_path / "private"
-    recovery.configure_b2(directory)
+    values = (
+        {
+            "bucket": "synthetic-bucket",
+            "key_id": "syntheticKeyId",
+            "key": "syntheticApplicationKey123456",
+            "password": "x" * 40,
+            "confirmation": "x" * 40,
+        }
+        if automated
+        else None
+    )
+    recovery.configure_b2(directory, values)
     contents = (directory / "recovery.env").read_text()
     assert "b2:synthetic-bucket:keyholder" in contents
     assert (directory / "recovery.env").stat().st_mode & 0o777 == 0o600

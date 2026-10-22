@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -98,7 +99,7 @@ def prepare_s3(path: Path) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
-def configure_b2(directory: Path) -> None:
+def configure_b2(directory: Path, values: dict[str, str] | None = None) -> None:
     """Prompt privately; credentials never enter shell history or chat."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if directory.is_symlink() or directory.stat().st_mode & 0o077:
@@ -107,11 +108,22 @@ def configure_b2(directory: Path) -> None:
     password_file = directory / "recovery-password"
     if env.exists() or env.is_symlink() or password_file.exists() or password_file.is_symlink():
         raise ValueError("Existing credentials must not be overwritten")
-    bucket = input("Private B2 bucket name: ").strip()
-    key_id = getpass.getpass("Application key ID (hidden): ").strip()
-    key = getpass.getpass("Application key (hidden): ").strip()
-    password = getpass.getpass("Repository password (save in password manager first): ")
-    confirmation = getpass.getpass("Repeat repository password: ")
+    if values is None:
+        values = {
+            "bucket": input("Private B2 bucket name: "),
+            "key_id": getpass.getpass("Application key ID (hidden): "),
+            "key": getpass.getpass("Application key (hidden): "),
+            "password": getpass.getpass("Repository password (save in password manager first): "),
+            "confirmation": getpass.getpass("Repeat repository password: "),
+        }
+    if (
+        not isinstance(values, dict)
+        or set(values) != {"bucket", "key_id", "key", "password", "confirmation"}
+        or not all(isinstance(value, str) for value in values.values())
+    ):
+        raise ValueError("Complete B2 credential fields required")
+    bucket, key_id, key = (values[name].strip() for name in ["bucket", "key_id", "key"])
+    password, confirmation = values["password"], values["confirmation"]
     if not re.fullmatch(r"[A-Za-z0-9-]{6,63}", bucket):
         raise ValueError("Invalid bucket name")
     if not re.fullmatch(r"[A-Za-z0-9]{1,128}", key_id):
@@ -487,6 +499,9 @@ def main() -> None:
     commands = parser.add_subparsers(dest="action", required=True)
     configure = commands.add_parser("configure-b2", help="Privately prompt for B2 credentials")
     configure.add_argument("--directory", type=Path, default=Path("/etc/keyholder"))
+    configure.add_argument(
+        "--stdin-json", action="store_true", help="Accept hidden automation input on stdin"
+    )
     s3 = commands.add_parser("prepare-s3", help="Resolve and configure Backblaze's recommended API")
     s3.add_argument("--environment", type=Path, default=Path("/etc/keyholder/recovery.env"))
     inventory = commands.add_parser(
@@ -512,7 +527,15 @@ def main() -> None:
     os.umask(0o077)
     try:
         if args.action == "configure-b2":
-            configure_b2(args.directory)
+            values = None
+            if args.stdin_json:
+                raw = sys.stdin.read(8193)
+                if len(raw) > 8192:
+                    raise ValueError("Credential input exceeds limit")
+                values = json.loads(raw)
+                if not isinstance(values, dict):
+                    raise ValueError("Credential input must be an object")
+            configure_b2(args.directory, values)
         elif args.action == "prepare-s3":
             prepare_s3(args.environment)
         elif args.action == "maintain":

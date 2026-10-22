@@ -129,6 +129,18 @@
       delay: 5
       until: replacement_dns.rc == 0
       changed_when: false
+    - name: Run the normal exported-profile monitor after DNS cutover
+      ansible.builtin.systemd_service:
+        name: keyholder-proxy-probe.service
+        state: started
+    - name: Read the post-cutover profile check
+      ansible.builtin.slurp:
+        src: /var/lib/keyholder-monitor/proxy.json
+      register: replacement_profile_report
+    - name: Require working exported profiles before enabling operational jobs
+      ansible.builtin.assert:
+        that: (replacement_profile_report.content | b64decode | from_json).healthy
+        fail_msg: 'Profile checks failed; inspect /var/lib/keyholder-monitor/proxy.json before enabling jobs.'
     - name: Record accepted operational handover
       ansible.builtin.set_fact:
         recovery_activate_jobs: true

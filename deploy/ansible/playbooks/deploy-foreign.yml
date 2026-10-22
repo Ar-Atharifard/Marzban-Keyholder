@@ -3,6 +3,66 @@
   vars:
     bootstrap_targets: recovery_targets
 - import_playbook: bootstrap.yml
+- name: Collect existing backup credentials through this command
+  hosts: recovery_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check whether repository credentials are already present
+      ansible.builtin.stat:
+        path: /etc/keyholder/recovery.env
+      register: paired_repository
+    - name: Configure private backup access when missing
+      when: not paired_repository.stat.exists
+      block:
+        - name: Ask for the existing private B2 bucket
+          ansible.builtin.pause:
+            prompt: Existing private B2 bucket name
+          register: paired_bucket
+          no_log: true
+        - name: Ask for the bucket-restricted application key ID
+          ansible.builtin.pause:
+            prompt: Application key ID
+            echo: false
+          register: paired_key_id
+          no_log: true
+        - name: Ask for the application key
+          ansible.builtin.pause:
+            prompt: Application key
+            echo: false
+          register: paired_key
+          no_log: true
+        - name: Ask for the existing repository password
+          ansible.builtin.pause:
+            prompt: EXISTING repository encryption password, not the Backblaze login password
+            echo: false
+          register: paired_password
+          no_log: true
+        - name: Confirm the repository password
+          ansible.builtin.pause:
+            prompt: Repeat repository encryption password
+            echo: false
+          register: paired_confirmation
+          no_log: true
+        - name: Store validated credentials only on the foreign target
+          ansible.builtin.command:
+            argv: [/usr/local/sbin/keyholder-recovery, configure-b2, --stdin-json]
+            stdin: '{{ {"bucket": paired_bucket.user_input, "key_id": paired_key_id.user_input, "key": paired_key.user_input, "password": paired_password.user_input, "confirmation": paired_confirmation.user_input} | to_json }}'
+          changed_when: true
+          no_log: true
+        - name: Resolve the existing repository endpoint and verify bucket scope
+          ansible.builtin.command:
+            argv: [/usr/local/sbin/keyholder-recovery, prepare-s3]
+          changed_when: true
+          no_log: true
+        - name: Clear the temporary prompt values
+          ansible.builtin.set_fact:
+            paired_bucket: null
+            paired_key_id: null
+            paired_key: null
+            paired_password: null
+            paired_confirmation: null
+          no_log: true
 - import_playbook: download.yml
 - import_playbook: restore.yml
   vars:

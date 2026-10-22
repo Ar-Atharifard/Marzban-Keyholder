@@ -31,8 +31,9 @@ The commands guide the remaining steps:
   node handover, activate and test real dual-stack profiles. After the prompted DNS
   cutover and acceptance, enable foreign bots/alerts/renewal/backup jobs.
 
-Enter B2 credentials and the **existing repository password on the target** when
-prompted. Never initialize a new repository during recovery. Compare new SSH host
+Enter B2 credentials and the **existing repository password** at the command’s
+hidden prompts; they are sent over SSH and stored only in root-private files on
+the foreign target, never in the plan or command arguments. Never initialize a new repository during recovery. Compare new SSH host
 fingerprints with the provider console; discovery alone is not authentication.
 The firewall uses reviewed TCP roles and official Cloudflare origin networks;
 public UDP and personal DNSTT are not activated by this production workflow.
