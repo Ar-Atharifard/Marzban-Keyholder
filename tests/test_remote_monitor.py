@@ -89,3 +89,29 @@ def test_remote_timeout_does_not_expose_exception(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(subprocess, "run", fail)
     alerts, _ = monitor.remote_hosts([{"name": "gate", "ssh_config": "private", "target": "gate"}])
     assert "private" not in json.dumps(alerts)
+
+
+@pytest.mark.parametrize(
+    ("paths", "incident"),
+    [
+        ({"rathole": "UP", "frp": "UP"}, None),
+        ({"rathole": "DOWN", "frp": "UP"}, "redundancy"),
+        ({"rathole": "UP", "frp": "DOWN"}, "redundancy"),
+        ({"rathole": "DOWN", "frp": "DOWN"}, "backhaul"),
+        ({}, "backhaul"),
+    ],
+)
+def test_backhaul_health_distinguishes_outage_and_redundancy(
+    monkeypatch: pytest.MonkeyPatch, paths: dict[str, str], incident: str | None
+) -> None:
+    data = {**snapshot(), "backhauls": paths}
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess([], 0, json.dumps(data))
+    )
+    alerts, _ = monitor.remote_hosts([{"name": "gate", "ssh_config": "private", "target": "gate"}])
+    expected = set() if incident is None else {"remote:gate:" + incident}
+    assert set(alerts) == expected
+    if incident:
+        assert monitor.severity_for_key("remote:gate:" + incident) == (
+            "critical" if incident == "backhaul" else "warning"
+        )

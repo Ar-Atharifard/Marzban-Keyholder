@@ -126,6 +126,35 @@
         group: keyholder-tunnel
         mode: '0640'
       no_log: true
+    - name: Detect optional TLS backhaul in the archive
+      ansible.builtin.stat:
+        path: '{{ domestic_stage }}/etc/keyholder-frp/server.toml'
+      register: domestic_frp
+    - name: Restore optional TLS backhaul
+      when: domestic_frp.stat.exists
+      block:
+        - name: Restore private TLS backhaul credentials
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/etc/keyholder-frp/'
+            dest: /etc/keyholder-frp/
+            remote_src: true
+            owner: root
+            group: keyholder-tunnel
+            mode: 'u=rwX,g=rX,o='
+          no_log: true
+        - name: Restore the pinned TLS backhaul binary
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/usr/local/bin/frps'
+            dest: /usr/local/bin/frps
+            remote_src: true
+            mode: '0755'
+        - name: Restore the captured TLS backhaul unit
+          ansible.builtin.copy:
+            src: '{{ domestic_stage }}/etc/systemd/system/{{ item }}'
+            dest: '/etc/systemd/system/{{ item }}'
+            remote_src: true
+            mode: '0644'
+          loop: [keyholder-frp-server.service, keyholder-backhaul-guard.service, keyholder-backhaul-guard.timer]
     - name: Restore and validate gateway routing
       ansible.builtin.copy:
         src: '{{ domestic_stage }}/etc/haproxy/haproxy.cfg'
@@ -139,7 +168,7 @@
         src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
         dest: '/usr/local/lib/keyholder-admin/{{ item }}'
         mode: '0755'
-      loop: [domestic_guard.py, gate_status.py, monitor.py]
+      loop: [domestic_guard.py, backhaul_guard.py, gate_status.py, monitor.py]
     - name: Install guard arm file
       ansible.builtin.copy:
         content: ''
@@ -162,7 +191,7 @@
         name: '{{ item }}'
         state: started
         enabled: true
-      loop: [marzban-node, keyholder-rathole-server, keyholder-domestic-guard.timer]
+      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) }}'
       when:
         - domestic_activate | default(false) | bool
         - domestic_old_node_stopped | default(false) | bool

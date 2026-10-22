@@ -441,6 +441,15 @@ def remote_hosts(items: list[dict[str, str]]) -> tuple[dict[str, str], dict[str,
             failed = [key for key, value in snapshot["services"].items() if value != "active"]
             if failed or not snapshot["guard"]["entry_permitted"]:
                 alerts[prefix + ":service"] = f"{name}: entry/control services unhealthy"
+            if "backhauls" in snapshot:
+                paths = snapshot["backhauls"]
+                if not isinstance(paths, dict):
+                    raise ValueError("Invalid backhaul telemetry")
+                healthy = sum(str(value).partition(" ")[0] == "UP" for value in paths.values())
+                if not healthy:
+                    alerts[prefix + ":backhaul"] = f"{name}: no healthy foreign backhaul"
+                elif healthy < 2:
+                    alerts[prefix + ":redundancy"] = f"{name}: foreign backhaul redundancy lost"
             disk = 100 * metrics["disk_used_gib"] / metrics["disk_total_gib"]
             if disk >= 80:
                 alerts[prefix + ":disk"] = f"{name}: root disk is {disk:.0f}% full"
@@ -688,7 +697,7 @@ def rule_for_key(key: str) -> str:
 
 
 def severity_for_key(key: str) -> str:
-    if key.startswith("remote:") and key.endswith((":unavailable", ":service")):
+    if key.startswith("remote:") and key.endswith((":unavailable", ":service", ":backhaul")):
         return "critical"
     if (
         key == "backup:offsite"

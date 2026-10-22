@@ -126,6 +126,38 @@
         state: started
       loop: [keyholder-foreign-exit, keyholder-rathole-client]
       when: domestic_connector.stat.exists
+    - name: Detect the optional TLS reverse connector
+      ansible.builtin.stat:
+        path: /etc/keyholder-frp/client.toml
+      register: foreign_frp
+    - name: Restore optional TLS connector ownership and startup
+      when: foreign_frp.stat.exists and domestic_connector.stat.exists
+      block:
+        - name: Restore private TLS connector directory ownership
+          ansible.builtin.file:
+            path: /etc/keyholder-frp
+            state: directory
+            owner: root
+            group: keyholder-tunnel
+            mode: '0750'
+        - name: Find private TLS connector files
+          ansible.builtin.find:
+            paths: /etc/keyholder-frp
+            file_type: file
+          register: foreign_frp_files
+        - name: Restore TLS connector file ownership
+          ansible.builtin.file:
+            path: '{{ item.path }}'
+            owner: root
+            group: '{{ "root" if item.path.endswith("/ca.key") else "keyholder-tunnel" }}'
+            mode: '{{ "0600" if item.path.endswith("/ca.key") else "0640" }}'
+          loop: '{{ foreign_frp_files.files }}'
+          no_log: true
+        - name: Start the restored TLS connector
+          ansible.builtin.systemd_service:
+            name: keyholder-frp-client
+            enabled: true
+            state: started
     - name: Restore the optional domestic backup preflight
       ansible.builtin.stat:
         path: '{{ recovery_stage }}/rootfs/etc/systemd/system/keyholder-recovery.service.d/domestic.conf'

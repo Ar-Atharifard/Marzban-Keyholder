@@ -22,6 +22,8 @@ all:
         recovery_rootfs_paths:
           - etc/keyholder
           - etc/keyholder-rathole
+          - etc/keyholder-frp
+          - usr/local/bin/frpc
           - etc/keyholder-foreign-exit
           - usr/local/bin/rathole
           - usr/local/bin/lego

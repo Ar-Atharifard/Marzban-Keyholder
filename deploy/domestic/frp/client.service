@@ -1,0 +1,25 @@
+[Unit]
+Description=TLS reverse backhaul (foreign connector)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=keyholder-tunnel
+Group=keyholder-tunnel
+Environment=GOMEMLIMIT=32MiB
+ExecStart=/usr/local/bin/frpc -c /etc/keyholder-frp/client.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=8192
+MemoryHigh=64M
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

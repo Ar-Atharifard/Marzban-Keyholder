@@ -1,0 +1,30 @@
+serverAddr = "DOMESTIC_IPV4"
+serverPort = 443
+loginFailExit = false
+transport.tcpMux = false
+transport.dialServerKeepalive = 20
+transport.poolCount = 2
+transport.tls.enable = true
+transport.tls.disableCustomTLSFirstByte = true
+transport.tls.serverName = "BACKHAUL_SNI"
+transport.tls.certFile = "/etc/keyholder-frp/client.crt"
+transport.tls.keyFile = "/etc/keyholder-frp/client.key"
+transport.tls.trustedCaFile = "/etc/keyholder-frp/ca.crt"
+auth.method = "token"
+auth.token = "REPLACE_TOKEN"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+log.to = "console"
+log.level = "warn"
+log.disablePrintColor = true
+
+[[proxies]]
+name = "foreign_exit"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 19981
+remotePort = 19984
+transport.useCompression = false
+healthCheck.type = "tcp"
+healthCheck.timeoutSeconds = 3
+healthCheck.maxFailed = 3
+healthCheck.intervalSeconds = 10

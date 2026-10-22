@@ -1,0 +1,19 @@
+bindAddr = "127.0.0.1"
+bindPort = 24431
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ single = 19984 }]
+maxPortsPerClient = 1
+detailedErrorsToClient = false
+transport.tcpMux = false
+transport.tcpKeepalive = 20
+transport.maxPoolCount = 2
+transport.tls.force = true
+transport.tls.certFile = "/etc/keyholder-frp/server.crt"
+transport.tls.keyFile = "/etc/keyholder-frp/server.key"
+transport.tls.trustedCaFile = "/etc/keyholder-frp/ca.crt"
+auth.method = "token"
+auth.token = "REPLACE_TOKEN"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+log.to = "console"
+log.level = "warn"
+log.disablePrintColor = true

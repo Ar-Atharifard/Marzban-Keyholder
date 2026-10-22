@@ -16,13 +16,17 @@
       ansible.builtin.command:
         argv: [/usr/sbin/haproxy, -c, -f, /etc/haproxy/haproxy.cfg]
       changed_when: false
+    - name: Detect the optional restored TLS backhaul
+      ansible.builtin.stat:
+        path: /etc/systemd/system/keyholder-frp-server.service
+      register: domestic_frp
     - name: Enable node and reverse listener under the prepared firewall
       ansible.builtin.systemd_service:
         name: '{{ item }}'
         enabled: true
         state: started
         daemon_reload: true
-      loop: [marzban-node, keyholder-rathole-server, keyholder-domestic-guard.timer]
+      loop: '{{ ["marzban-node", "keyholder-rathole-server", "keyholder-domestic-guard.timer"] + (["keyholder-frp-server", "keyholder-backhaul-guard.timer"] if domestic_frp.stat.exists else []) }}'
     - name: Wait for the heartbeat guard to open the customer listener
       ansible.builtin.wait_for:
         host: 127.0.0.1

@@ -5,6 +5,25 @@ Iranian public destinations exit locally; other destinations use an authenticate
 SOCKS exit over a Noise-encrypted Rathole reverse tunnel. Quota remains Marzban's
 ordinary per-user byte count. ISP domestic billing discounts must be verified separately.
 
+An optional FRP backhaul uses mutual TLS on domestic TCP 443, with a source-restricted
+SNI route to a loopback-only listener. Disable FRP TCP multiplexing so packet loss
+on one connection does not stall unrelated TCP connections. Keep certificate
+verification enabled and restrict exported ports to the required loopback endpoints.
+Templates are in `deploy/domestic/frp/`; pin the binary and verify its release digest.
+
+HAProxy can keep the same authenticated SOCKS endpoint while checking both paths
+using the SOCKS authentication greeting. This verifies the remote exit is reachable,
+not merely that a local port is open. Existing profiles then use the selected
+backhaul without duplicated credentials, accounting or customer configuration.
+Failover applies to new connections; established streams cannot migrate between
+TCP tunnels. Profile probes must still check real HTTP traffic.
+
+The optional backhaul guard restarts a running Rathole listener only after three
+failed minute checks, with the alternate healthy and the panel lease valid. It
+allows at most one restart per 30 minutes and respects intentional service stops.
+Backhaul telemetry distinguishes total failure from lost redundancy. The backup
+and restore flows include the optional FRP binaries, credentials and units.
+
 Enable XUDP on the internal SOCKS outbound (`mux.enabled: true`, `concurrency: -1`,
 `xudpConcurrency: 8`). This carries application UDP inside the existing TCP tunnel;
 ordinary TCP multiplexing stays disabled. It does not open public UDP ports.
@@ -40,7 +59,7 @@ Changing a target/SNI may require customers to refresh their existing subscripti
 
 An optional fragmentation pilot is controlled by `KEYHOLDER_FRAGMENTATION_ACCOUNTS`
 (backend/username identities) and `KEYHOLDER_FRAGMENTATION_KINDS`. It appends `FRAG`
-variants of selected VLESS profiles, preserving originals and ECH fallbacks. REALITY
+variants of selected VLESS profiles, preserving originals. REALITY
 uses TCP-stream slicing to preserve SNI routing; TLS uses ClientHello record splitting.
 Both remain encrypted. URI clients must import `fm`; Xray JSON includes `finalmask`.
 These presets avoid empty TLS records and `unsafe` fingerprints. Test on the actual
