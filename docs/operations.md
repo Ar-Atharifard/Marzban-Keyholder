@@ -7,12 +7,49 @@ checks DB connectivity. See [CLI reference](../scripts/admin/README.md).
 
 ## Release and recovery
 
-1. Test locally, including migrations and packaging; build an immutable image.
-2. Back up DB, vault key and affected configuration. Record current image/downtime,
-   exact deployment, rollback and validation steps before changing production.
-3. Recreate only the affected service. Never build on the constrained VPS, restart
-   Docker globally, migrate at startup or pull over production-only Git changes.
-4. Check health, existing subscriptions and real proxy traffic without printing tokens.
+GitHub Actions runs checks for pushes and pull requests. To prepare a release,
+merge reviewed changes into the default branch (`master` here), set a new
+`project.version` in `pyproject.toml`, and refresh `uv.lock` with `uv lock`. In GitHub open **Actions →
+Prepare release → Run workflow**, selecting that default branch. Other branches cannot publish. No production SSH
+key or server credential belongs in GitHub. The workflow runs all CI jobs before it:
+
+- Builds the amd64 API image on the hosted runner and pushes it to GHCR.
+- Packages the Python wheel/sdist and reviewed source archive, including operational
+  helpers and deployment files. The wheel itself does not install system services.
+- Records the commit, immutable image digest and artifact hashes in `release.json`
+  and `SHA256SUMS`, then creates a **draft** GitHub release.
+
+The workflow uses the repository's temporary `GITHUB_TOKEN`. Repository settings
+must allow its package/release writes. GHCR package visibility is separate from
+repository visibility; maintainers choose it explicitly. An existing version is
+refused, including drafts. A failure after image publication may leave an unused
+image, but never changes production. Review the draft and publish it deliberately.
+The first hosted run still needs validation in your GitHub repository. Protect the
+default branch with required CI checks before merging; branch protection is a
+repository setting, not something this workflow enables automatically.
+
+Deploy **from the laptop**, as a separately reviewed operation:
+
+1. Select a release and verify its downloaded files with `sha256sum -c SHA256SUMS`
+   in the release directory. Use `api_image` from its manifest, not a mutable tag.
+2. Inspect installed versions and server-local changes. Back up the DB, vault key
+   and affected configuration; record current images, migration state and rollback.
+3. Pull the image on the target, or transfer a saved image from the laptop if the
+   registry is unreachable. Recreate only the affected service using its actual
+   Compose project/overlays. Never build on the constrained VPS, restart Docker
+   globally, migrate at startup or pull over production-only Git changes.
+4. Install only changed operational helpers/configuration from the same release,
+   using the relevant reviewed Ansible playbook. Do not extract the archive over
+   `/usr/local` or assume an API deployment updates bots, the Worker or tunnels.
+5. Check health, existing subscriptions and real proxy traffic without printing
+   tokens. Record the release commit/image and component changes privately.
+
+There is currently no single general-purpose live-upgrade command. The
+`restore-foreign` / `restore-domestic` commands are for empty-host recovery, not
+release updates. Publishing a release never updates `/srv/keyholder`, installed
+helpers or running containers. Keep that checkout as a reference to the deployed
+source; installed components may differ only when that is explicitly recorded.
+Database rollback is separate from reverting an image and must be planned.
 
 `keyholder system backup` creates a root-only local SQLite snapshot/key/config set;
 latest two complete sets are retained by default (`backup_retention_count`, minimum

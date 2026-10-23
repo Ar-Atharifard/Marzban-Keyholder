@@ -1,5 +1,8 @@
 name: Checks
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -31,7 +34,6 @@ jobs:
         run: |
           sh -n deploy/ansible/recover
           for playbook in deploy/ansible/playbooks/*.yml; do
-            case "$playbook" in */restore-volume.yml|*/activate-jobs.yml) continue ;; esac
             ansible-playbook -i deploy/ansible/inventory/example.yml "$playbook" --syntax-check
           done
   checks:

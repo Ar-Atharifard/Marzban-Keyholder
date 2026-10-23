@@ -122,7 +122,7 @@
         that: item.matched == 0
       loop: '{{ existing_volume_files.results }}'
     - name: Restore declared volume data preserving captured ownership
-      ansible.builtin.include_tasks: restore-volume.yml
+      ansible.builtin.include_tasks: ../tasks/restore-volume.yml
       loop: '{{ volume_locations.results }}'
       loop_control:
         loop_var: volume

@@ -1,0 +1,80 @@
+name: Prepare release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: validate
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Select version and refuse an existing release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          # The full list also includes drafts. An API failure must stop this job.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > "$RUNNER_TEMP/release-tags"
+          if grep -Fxq "v$version" "$RUNNER_TEMP/release-tags"; then
+            echo 'This version already has a release; choose a new project version.' >&2
+            exit 1
+          fi
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-$GITHUB_SHA" >> "$GITHUB_ENV"
+      - name: Package reviewed source and Python distributions
+        run: |
+          python -m pip install uv==0.13.0
+          uv sync --frozen --extra dev
+          uv build --out-dir dist/release
+          uv run python scripts/export_source.py --output dist/release/keyholder-source.tar.gz
+      - name: Build and publish the API image
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$RELEASE_TAG" \
+            --tag "$IMAGE" .
+          docker push "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}' > "$RUNNER_TEMP/image-reference"
+      - name: Record exact source, image and artifact checksums
+        run: |
+          python scripts/release_manifest.py \
+            --directory dist/release --commit "$GITHUB_SHA" \
+            --image "$(cat "$RUNNER_TEMP/image-reference")"
+      - name: Create a draft for maintainer review
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-notes" <<'NOTES'
+          Review the manifest and generated checksums before publishing or deploying.
+          The source archive includes operational tools and Ansible files. The wheel
+          contains the backend/CLI; it does not install system services or migrate a database.
+          Building this release did not deploy either server. Use the image digest,
+          not a mutable tag, and review database migration and rollback requirements.
+          NOTES
+          gh release create "$RELEASE_TAG" dist/release/* \
+            --target "$GITHUB_SHA" --title "Keyholder $RELEASE_TAG" \
+            --draft --notes-file "$RUNNER_TEMP/release-notes"

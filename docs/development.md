@@ -26,6 +26,33 @@ CLI / Telegram management → host dispatcher → explicit panel/local operation
 | `migrations/`, `tests/contracts/` | Ordered DB upgrades and frozen API/output fixtures |
 | `deploy/` | Optional deployment examples, services, Ansible and Worker |
 
+The folder boundaries are:
+
+```text
+.github/workflows/       CI checks and manually requested release builds
+src/keyholder/           Installed backend and application CLI
+migrations/              Ordered application database migrations
+scripts/admin/           Host administration dispatcher and installer
+scripts/                 Standalone operational tools and generators
+deploy/ansible/playbooks/ Executable orchestration playbooks
+deploy/ansible/tasks/     Shared task includes; not executable playbooks
+deploy/ansible/templates/ Ansible templates
+deploy/systemd/          General service and timer definitions
+deploy/domestic/         Paired-node and backhaul service/configuration assets
+deploy/recovery/         Backup entry point and capture examples
+deploy/cloudflare-subscription/ Worker, configuration and runtime tests
+tests/                   Python tests; contracts/ holds compatibility fixtures
+docs/                    Public installation, development and operation guides
+.private/                Ignored inventories, personal handbook and release records
+```
+
+Operational helpers stay outside the application wheel and API image. They are
+standalone because each host installs only what it uses; moving them changes
+systemd, imports and backup capture paths. Keep those install contracts explicit
+rather than duplicating helpers into per-host source trees. Service-specific assets
+stay together; generated configurations and credentials belong outside public Git.
+[Release procedure](operations.md#release-and-recovery) covers delivery to servers.
+
 Database tables: `customers` stores private name, nullable unique Telegram/phone,
 status, token hash/ciphertext and timestamps; `customer_mappings` links identities
 to backend/account; `registrations` enforces canonical registration; `backends`

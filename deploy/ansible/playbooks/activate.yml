@@ -247,7 +247,7 @@
         state: started
       when: dnstt_unit.stat.exists and recovery_enable_personal_dnstt | default(false) | bool
     - name: Activate jobs only after handover
-      ansible.builtin.include_tasks: activate-jobs.yml
+      ansible.builtin.include_tasks: ../tasks/activate-jobs.yml
       when: recovery_activate_jobs | default(false) | bool
     - name: Explain the public cutover boundary
       ansible.builtin.debug:

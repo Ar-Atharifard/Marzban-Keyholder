@@ -38,6 +38,6 @@ private inventory. It checks the target without restarting, configures schedulin
 and adds the helper, JSON and both generated units to existing recovery inventories
 and monitoring where present. Existing application paths must already be installed.
 During recovery the captured units remain inactive until the production handover;
-`activate-jobs.yml` then applies the captured JSON, respecting `enabled: false`.
+`deploy/ansible/tasks/activate-jobs.yml` then applies the captured JSON, respecting `enabled: false`.
 The next regular backup captures changes; installing a timer does not create or
 verify an offsite backup. Rehearse restoration separately on a disposable host.
