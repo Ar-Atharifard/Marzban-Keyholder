@@ -3,4 +3,4 @@ services:
   api:
     network_mode: host
     ports: !reset []
-    command: [/app/.venv/bin/uvicorn, "keyholder.main:create_app", --factory, --host, "127.0.0.1", --port, "18000", --workers, "1", --no-access-log, --no-proxy-headers, --log-level, info]
+    command: [/app/.venv/bin/uvicorn, "keyholder.main:create_app", --factory, --host, "${KEYHOLDER_BIND_HOST:-127.0.0.1}", --port, "${KEYHOLDER_API_PORT:-18000}", --workers, "1", --no-access-log, --no-proxy-headers, --log-level, "${KEYHOLDER_LOG_LEVEL:-info}"]

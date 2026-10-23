@@ -1,7 +1,12 @@
 """Build an authenticated REALITY backhaul around the existing foreign SOCKS exit."""
 
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
 
 
 def configurations(
@@ -18,13 +23,33 @@ def configurations(
         raise ValueError("Complete peer identity required")
     if not account.get("user") or not account.get("pass"):
         raise ValueError("Authenticated SOCKS exit required")
-    mux = {"enabled": True, "concurrency": -1, "xudpConcurrency": 8, "xudpProxyUDP443": "allow"}
+    options = component_settings(
+        "forward",
+        {
+            "server_listen": "::",
+            "server_port": 24432,
+            "exit_port": 19981,
+            "client_port": 19987,
+            "keepalive_idle_seconds": 30,
+            "keepalive_interval_seconds": 10,
+            "tcp_user_timeout_ms": 90000,
+            "xudp_concurrency": 8,
+            "fingerprint": "chrome",
+            "reality_target_port": 443,
+        },
+    )
+    mux = {
+        "enabled": True,
+        "concurrency": -1,
+        "xudpConcurrency": options["xudp_concurrency"],
+        "xudpProxyUDP443": "allow",
+    }
     server: dict[str, Any] = {
         "log": {"loglevel": "warning"},
         "inbounds": [
             {
-                "listen": "::",
-                "port": 24432,
+                "listen": options["server_listen"],
+                "port": options["server_port"],
                 "tag": "FORWARD_BACKHAUL",
                 "protocol": "vless",
                 "settings": {
@@ -35,12 +60,12 @@ def configurations(
                     "network": "tcp",
                     "security": "reality",
                     "sockopt": {
-                        "tcpKeepAliveIdle": 30,
-                        "tcpKeepAliveInterval": 10,
-                        "tcpUserTimeout": 90000,
+                        "tcpKeepAliveIdle": options["keepalive_idle_seconds"],
+                        "tcpKeepAliveInterval": options["keepalive_interval_seconds"],
+                        "tcpUserTimeout": options["tcp_user_timeout_ms"],
                     },
                     "realitySettings": {
-                        "dest": server_name + ":443",
+                        "dest": server_name + ":" + str(options["reality_target_port"]),
                         "serverNames": [server_name],
                         "privateKey": private_key,
                         "shortIds": [short_id],
@@ -55,7 +80,13 @@ def configurations(
                 "protocol": "socks",
                 "mux": deepcopy(mux),
                 "settings": {
-                    "servers": [{"address": "127.0.0.1", "port": 19981, "users": [dict(account)]}]
+                    "servers": [
+                        {
+                            "address": "127.0.0.1",
+                            "port": options["exit_port"],
+                            "users": [dict(account)],
+                        }
+                    ]
                 },
             }
         ],
@@ -65,7 +96,7 @@ def configurations(
         "inbounds": [
             {
                 "listen": "127.0.0.1",
-                "port": 19987,
+                "port": options["client_port"],
                 "protocol": "socks",
                 "settings": {"auth": "password", "accounts": [dict(account)], "udp": True},
             }
@@ -79,7 +110,7 @@ def configurations(
                     "vnext": [
                         {
                             "address": address,
-                            "port": 24432,
+                            "port": options["server_port"],
                             "users": [
                                 {"id": identity, "encryption": "none", "flow": "xtls-rprx-vision"}
                             ],
@@ -90,13 +121,13 @@ def configurations(
                     "network": "tcp",
                     "security": "reality",
                     "sockopt": {
-                        "tcpKeepAliveIdle": 30,
-                        "tcpKeepAliveInterval": 10,
-                        "tcpUserTimeout": 90000,
+                        "tcpKeepAliveIdle": options["keepalive_idle_seconds"],
+                        "tcpKeepAliveInterval": options["keepalive_interval_seconds"],
+                        "tcpUserTimeout": options["tcp_user_timeout_ms"],
                     },
                     "realitySettings": {
                         "serverName": server_name,
-                        "fingerprint": "chrome",
+                        "fingerprint": options["fingerprint"],
                         "publicKey": public_key,
                         "shortId": short_id,
                     },

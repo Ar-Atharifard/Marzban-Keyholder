@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "on_calendar": "*-*-* 04:00:00 UTC",
+  "target_service": "keyholder-foreign-exit.service",
+  "xray_binary": "/var/lib/marzban/xray-core/xray",
+  "xray_config": "/etc/keyholder-foreign-exit/config.json",
+  "asset_directory": "/var/lib/marzban/xray-core",
+  "listeners": [{"host": "127.0.0.1", "port": 19981}, {"host": "127.0.0.1", "port": 19980}],
+  "readiness_timeout_seconds": 15,
+  "command_timeout_seconds": 30
+}

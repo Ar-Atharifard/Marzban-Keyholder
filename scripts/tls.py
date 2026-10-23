@@ -9,10 +9,31 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-ROOT = Path("/etc/keyholder/acme")
-CERTS = Path("/opt/braavos-gateway/certs")
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
+
+
+OPTIONS = component_settings(
+    "tls",
+    {
+        "root": "/etc/keyholder/acme",
+        "certificates_directory": "/opt/braavos-gateway/certs",
+        "gateway_container": "braavos-gateway",
+        "lego_binary": "/usr/local/bin/lego",
+        "service": "keyholder-tls.service",
+        "timer": "keyholder-tls.timer",
+        "renew_days": 30,
+        "minimum_validity_seconds": 604800,
+        "issue_timeout_seconds": 600,
+        "certificate_basename": "subscription",
+    },
+)
+ROOT = Path(OPTIONS["root"])
+CERTS = Path(OPTIONS["certificates_directory"])
 
 
 def private_write(path: Path, value: str) -> None:
@@ -46,13 +67,13 @@ def configure(settings: dict[str, Any]) -> dict[str, Any]:
     private_write(ROOT / "settings.json", json.dumps({"domain": domain, "email": email}))
     (ROOT / "setup-error.json").unlink(missing_ok=True)
     subprocess.run(
-        ["systemctl", "enable", "--now", "keyholder-tls.timer"],
+        ["systemctl", "enable", "--now", OPTIONS["timer"]],
         check=True,
         capture_output=True,
         timeout=15,
     )
     subprocess.run(
-        ["systemctl", "start", "--no-block", "keyholder-tls.service"],
+        ["systemctl", "start", "--no-block", OPTIONS["service"]],
         check=True,
         capture_output=True,
         timeout=15,
@@ -64,7 +85,7 @@ def issue() -> None:
     settings = json.loads((ROOT / "settings.json").read_text())
     domain = settings["domain"]
     command = [
-        "/usr/local/bin/lego",
+        OPTIONS["lego_binary"],
         "run",
         "--path",
         str(ROOT / "state"),
@@ -79,9 +100,11 @@ def issue() -> None:
         "--accept-tos",
     ]
     source = ROOT / "state/certificates" / (domain + ".crt")
-    command += ["--renew-days", "30"]
+    command += ["--renew-days", str(OPTIONS["renew_days"])]
     environment = dict(os.environ, CF_DNS_API_TOKEN_FILE=str(ROOT / "token"))
-    result = subprocess.run(command, capture_output=True, timeout=600, env=environment)
+    result = subprocess.run(
+        command, capture_output=True, timeout=OPTIONS["issue_timeout_seconds"], env=environment
+    )
     if result.returncode:
         private_write(ROOT / "last-error.txt", result.stderr.decode(errors="replace"))
         raise RuntimeError("Certificate issuance/renewal failed; private diagnostics retained")
@@ -96,7 +119,7 @@ def issue() -> None:
             "-checkhost",
             domain,
             "-checkend",
-            "604800",
+            str(OPTIONS["minimum_validity_seconds"]),
         ],
         check=True,
         capture_output=True,
@@ -104,19 +127,22 @@ def issue() -> None:
     )
     before = [
         (path, path.read_bytes() if path.exists() else None)
-        for path in [CERTS / "subscription.crt", CERTS / "subscription.key"]
+        for path in [
+            CERTS / (OPTIONS["certificate_basename"] + ".crt"),
+            CERTS / (OPTIONS["certificate_basename"] + ".key"),
+        ]
     ]
     try:
         private_write(before[0][0], source.read_text())
         private_write(before[1][0], key.read_text())
         subprocess.run(
-            ["docker", "exec", "braavos-gateway", "nginx", "-t"],
+            ["docker", "exec", OPTIONS["gateway_container"], "nginx", "-t"],
             check=True,
             capture_output=True,
             timeout=10,
         )
         subprocess.run(
-            ["docker", "exec", "braavos-gateway", "nginx", "-s", "reload"],
+            ["docker", "exec", OPTIONS["gateway_container"], "nginx", "-s", "reload"],
             check=True,
             capture_output=True,
             timeout=10,
@@ -137,7 +163,7 @@ def status() -> dict[str, Any]:
         "configured": (ROOT / "settings.json").exists(),
         "certificate_ready": False,
     }
-    certificate = CERTS / "subscription.crt"
+    certificate = CERTS / (OPTIONS["certificate_basename"] + ".crt")
     if certificate.exists():
         response = subprocess.run(
             ["openssl", "x509", "-in", str(certificate), "-noout", "-enddate"],
@@ -150,7 +176,7 @@ def status() -> dict[str, Any]:
             certificate_ready=True, expires=response.stdout.strip().removeprefix("notAfter=")
         )
     response = subprocess.run(
-        ["systemctl", "show", "keyholder-tls.service", "-p", "ActiveState", "-p", "Result"],
+        ["systemctl", "show", OPTIONS["service"], "-p", "ActiveState", "-p", "Result"],
         capture_output=True,
         text=True,
         timeout=5,

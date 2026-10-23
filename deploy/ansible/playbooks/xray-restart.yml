@@ -1,0 +1,77 @@
+---
+- name: Configure an optional exit-only Xray maintenance schedule
+  hosts: recovery_targets
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require an explicit reviewed scheduler configuration
+      ansible.builtin.assert:
+        that:
+          - xray_restart_config is defined
+          - xray_restart_config is mapping
+    - name: Create private settings directory
+      ansible.builtin.file:
+        path: /etc/keyholder
+        state: directory
+        mode: '0700'
+    - name: Install scheduler helper
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/xray_restart.py'
+        dest: /usr/local/lib/keyholder-admin/xray_restart.py
+        mode: '0755'
+      notify: Apply restart schedule
+    - name: Install validated operator configuration
+      ansible.builtin.copy:
+        content: '{{ xray_restart_config | to_nice_json }}'
+        dest: /etc/keyholder/xray-restart.json
+        mode: '0600'
+        backup: true
+      notify: Apply restart schedule
+    - name: Validate identity and Xray configuration without restarting
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-admin/xray_restart.py, check]
+      changed_when: false
+    - name: Apply changes before adding recovery references
+      ansible.builtin.meta: flush_handlers
+    - name: Include installed scheduler in existing capture and failed-unit monitoring
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import json, os, tempfile
+            from pathlib import Path
+            paths = ['/etc/keyholder/xray-restart.json',
+                     '/usr/local/lib/keyholder-admin/xray_restart.py',
+                     '/etc/systemd/system/keyholder-xray-restart.service',
+                     '/etc/systemd/system/keyholder-xray-restart.timer']
+            changed = False
+            for name in ['/etc/keyholder/recovery.json', '/etc/keyholder/recovery-seed.json',
+                         '/etc/keyholder/monitor.json']:
+                p = Path(name)
+                if not p.exists():
+                    continue
+                old = p.read_bytes(); data = json.loads(old)
+                if name.endswith('monitor.json'):
+                    units = data.setdefault('systemd_failed_units', [])
+                    if 'keyholder-xray-restart.service' not in units:
+                        units.append('keyholder-xray-restart.service')
+                else:
+                    for path in paths:
+                        data['files']['rootfs' + path] = path
+                content = (json.dumps(data, indent=2) + '\n').encode()
+                if json.loads(old) == data:
+                    continue
+                fd, tmp = tempfile.mkstemp(dir=p.parent)
+                with os.fdopen(fd, 'wb') as out:
+                    out.write(content); os.fchmod(out.fileno(), p.stat().st_mode & 0o777)
+                os.replace(tmp, p); changed = True
+            print('changed' if changed else 'unchanged')
+      register: restart_inventory
+      changed_when: restart_inventory.stdout == 'changed'
+      no_log: true
+  handlers:
+    - name: Apply restart schedule
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/keyholder-admin/xray_restart.py, apply]
+      changed_when: true

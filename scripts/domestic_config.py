@@ -1,7 +1,12 @@
 """Add a managed domestic entry without changing existing foreign routing."""
 
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
 
 
 def add_transport(
@@ -66,7 +71,15 @@ def add_entry(
         raise ValueError("Foreign exit authentication required")
     if core.get("dns"):
         raise ValueError("Review existing DNS before adding the shared trusted resolver")
-    result["dns"] = {"servers": ["https://1.1.1.1/dns-query"], "tag": "TRUSTED_DNS"}
+    options = component_settings(
+        "domestic_routing",
+        {
+            "trusted_dns_servers": ["https://1.1.1.1/dns-query"],
+            "local_geoip": ["geoip:ir"],
+            "xudp_concurrency": 8,
+        },
+    )
+    result["dns"] = {"servers": options["trusted_dns_servers"], "tag": "TRUSTED_DNS"}
     routing = result.setdefault("routing", {})
     if routing.get("domainStrategy", "AsIs") != "IPIfNonMatch":
         raise ValueError("Review routing: IPIfNonMatch is required")
@@ -85,7 +98,12 @@ def add_entry(
             "domain": ["geosite:private"],
             "outboundTag": "BLOCK",
         },
-        {"type": "field", "inboundTag": [tag], "ip": ["geoip:ir"], "outboundTag": old_default},
+        {
+            "type": "field",
+            "inboundTag": [tag],
+            "ip": options["local_geoip"],
+            "outboundTag": old_default,
+        },
         *routing.get("rules", []),
         {"type": "field", "inboundTag": old_tags, "outboundTag": old_default},
     ]
@@ -93,7 +111,7 @@ def add_entry(
     tunnel["mux"] = {
         "enabled": True,
         "concurrency": -1,
-        "xudpConcurrency": 8,
+        "xudpConcurrency": options["xudp_concurrency"],
         "xudpProxyUDP443": "allow",
     }
     result["outbounds"].insert(0, tunnel)

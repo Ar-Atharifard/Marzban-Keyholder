@@ -157,3 +157,44 @@ def test_udp_canary_uses_only_loopback_and_matching_profile() -> None:
     udp = next(i for i in config["inbounds"] if i["protocol"] == "dokodemo-door")
     assert udp["listen"] == "127.0.0.1" and udp["port"] == ports[0]
     assert config["routing"]["rules"][-1]["outboundTag"] == "probe-0"
+
+
+@pytest.mark.parametrize("healthy", [True, False])
+def test_probe_journal_retains_safe_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    healthy: bool,
+) -> None:
+    monkeypatch.setattr("sys.argv", ["probe", "--state", str(tmp_path / "proxy.json")])
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess([], 0, '{"private": "credential"}'),
+    )
+    monkeypatch.setattr(
+        proxy_probe,
+        "probe",
+        lambda *a: {
+            "example profile": {
+                "healthy": healthy,
+                "reason": "Policy check failed",
+                "policy_checks": {"foreign": True, "udp": healthy},
+                "unexpected_private_field": "credential",
+            },
+        },
+    )
+    assert proxy_probe.main() == (0 if healthy else 1)
+    output = capsys.readouterr().out
+    summary = json.loads(output)
+    assert "credential" not in output
+    assert summary["failed"] == (
+        {}
+        if healthy
+        else {
+            "example profile": {
+                "reason": "Policy check failed",
+                "policy_checks": {"foreign": True, "udp": False},
+            },
+        }
+    )

@@ -6,6 +6,7 @@ workers_dev = true
 [vars]
 # Replace before deployment. No tokens or administrator credentials belong here.
 UPSTREAM_ORIGIN = "https://subscription.example.invalid"
+UPSTREAM_TIMEOUT_MS = "10000"
 
 [observability]
 # Invocation paths contain bearer tokens. Do not enable request or console logs.

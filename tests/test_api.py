@@ -387,3 +387,12 @@ def test_all_current_families_through_subscription_api(client: TestClient, outpu
         configs = json.loads(response.text)
         assert len(configs) == 5
         assert sum(c["outbounds"][0]["protocol"] == "shadowsocks" for c in configs) == 1
+
+
+def test_exported_client_port_is_configurable_but_stays_loopback(client: TestClient) -> None:
+    token = str(create(client)["token"])
+    cast(FastAPI, client.app).state.settings.xray_client_socks_port = 10900
+    response = client.get(f"/s/{token}?format=xray")
+    assert response.status_code == 200
+    inbounds = [inbound for profile in response.json() for inbound in profile["inbounds"]]
+    assert inbounds and all(i["port"] == 10900 and i["listen"] == "127.0.0.1" for i in inbounds)

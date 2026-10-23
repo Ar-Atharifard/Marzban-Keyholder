@@ -1,15 +1,19 @@
 # Keyholder
 
-Keyholder gives customers a stable `/s/{token}` subscription URL while the upstream
-account or panel changes. It runs on FastAPI and SQLite with one worker.
+Keyholder is a lightweight backend for managing proxy subscriptions. It integrates
+with Marzban to manage customer accounts and deliver connection profiles through
+a consistent API, CLI and Telegram management bot. Optional tools cover monitoring,
+alerts, deployment and recovery.
 
-Attach an upstream account once, then retrieve the same URL whenever needed.
-Tokens have no scheduled expiry. Delivery still depends on account status, quota,
-expiry and service availability; administrators can explicitly revoke or rotate a URL.
+Each customer gets a stable subscription URL that can stay the same when the
+upstream account, panel or server changes. Subscription tokens have no scheduled
+expiry; access follows the account's status, quota and expiry. Administrators can
+explicitly revoke or rotate a URL.
 
 The backend lives in `src/keyholder/`; `migrations/` holds its database history.
 `scripts/` and `deploy/` contain optional administration, monitoring and recovery
 tools. You can run the backend without installing those tools or a domestic node.
+The application uses FastAPI and SQLite with one worker.
 
 Keyholder was developed with substantial direct assistance from **OpenAI Codex**
 in implementation, testing, documentation and infrastructure tooling. Human
@@ -67,6 +71,8 @@ Docker, TLS routing and operator setup. Do not expose the administrator API publ
 | [API](docs/api.md) | Endpoints, authentication, schemas and errors |
 | [CLI reference](scripts/admin/README.md) | Installation and daily commands |
 | [Development](docs/development.md) | Code map, DB, adapters, compatibility and publishing |
+| [Configuration](docs/configuration.md) | Settings by component, defaults and fixed contracts |
+| [Xray restart](docs/xray-restart.md) | Optional configurable exit-only restart schedule |
 | [Operations](docs/operations.md) | Releases, private panel, monitoring and bots |
 | [Alerts](docs/alerts.md) | Deduplication, thresholds, suppression and repairs |
 | [Recovery](docs/disaster-recovery.md) | Offsite backup, Ansible and VM rehearsal |

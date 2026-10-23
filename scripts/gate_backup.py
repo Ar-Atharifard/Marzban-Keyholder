@@ -22,6 +22,8 @@ FILES = [
     "etc/systemd/system/keyholder-backhaul-guard.timer",
     "usr/local/lib/keyholder-admin/gate_status.py",
     "usr/local/lib/keyholder-admin/monitor.py",
+    "usr/local/lib/keyholder-admin/component_config.py",
+    "usr/local/lib/keyholder-admin/components.json",
     "usr/local/libexec/keyholder-gate-backup",
     "usr/local/libexec/keyholder-gate-readonly",
     "etc/keyholder-rathole/server.toml",

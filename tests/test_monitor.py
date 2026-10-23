@@ -168,7 +168,9 @@ def test_alert_configuration_writes_private_file_without_returning_token(
     monitor_config = tmp_path / "monitor.json"
     monitor_config.write_text(json.dumps({"secrets_file": str(destination)}))
     destination.write_text("KEYHOLDER_HEARTBEAT_URL=https://heartbeat.example/original\n")
-    monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
+    monkeypatch.setattr(
+        host, "discover_chat_id", lambda token, api_base="https://api.telegram.org": "123456789"
+    )
     result = host.configure_alerts(
         {"monitor_config": str(monitor_config)},
         {"bot_token": "123456789:" + "a" * 40, "chat_id": ""},
@@ -199,7 +201,9 @@ def test_management_bot_configuration_is_private_and_starts_service(
         calls.append(command)
         return object()
 
-    monkeypatch.setattr(host, "discover_chat_id", lambda token: "123456789")
+    monkeypatch.setattr(
+        host, "discover_chat_id", lambda token, api_base="https://api.telegram.org": "123456789"
+    )
     monkeypatch.setattr(subprocess, "run", run)
     result = host.configure_management_bot(
         {

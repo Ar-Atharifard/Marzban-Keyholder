@@ -203,7 +203,18 @@
         src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
         dest: '/usr/local/lib/keyholder-admin/{{ item }}'
         mode: '0755'
-      loop: [domestic_guard.py, backhaul_guard.py, backhaul_probe.py, gate_status.py, monitor.py]
+      loop: [domestic_guard.py, backhaul_guard.py, backhaul_probe.py, gate_status.py, monitor.py, component_config.py]
+    - name: Detect captured component overrides
+      ansible.builtin.stat:
+        path: '{{ domestic_stage }}/usr/local/lib/keyholder-admin/components.json'
+      register: domestic_components
+    - name: Restore optional non-secret component overrides
+      ansible.builtin.copy:
+        src: '{{ domestic_components.stat.path }}'
+        dest: /usr/local/lib/keyholder-admin/components.json
+        remote_src: true
+        mode: '0644'
+      when: domestic_components.stat.exists
     - name: Restore and validate gateway routing
       ansible.builtin.copy:
         src: '{{ domestic_stage }}/etc/haproxy/haproxy.cfg'

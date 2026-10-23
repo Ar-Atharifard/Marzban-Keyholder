@@ -34,7 +34,12 @@ export async function deliver(request, env, fetcher = (...args) => globalThis.fe
   }
 
   let origin;
+  let timeout;
   try {
+    timeout = Number(env.UPSTREAM_TIMEOUT_MS ?? 10000);
+    if (!Number.isInteger(timeout) || timeout < 100 || timeout > 60000) {
+      throw new Error("Invalid timeout");
+    }
     origin = new URL(env.UPSTREAM_ORIGIN);
     if (origin.protocol !== "https:" || origin.username || origin.password ||
         origin.port || origin.pathname !== "/" || origin.search || origin.hash ||
@@ -54,7 +59,7 @@ export async function deliver(request, env, fetcher = (...args) => globalThis.fe
     // Do not forward cookies, Authorization, caller Host or client-supplied URLs.
     const upstream = await fetcher(target.toString(), {
       method: "GET", headers, redirect: "manual", cache: "no-store",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeout),
       // workerd rejects any cacheTtl override combined with cache: no-store.
       cf: { cacheEverything: false },
     });

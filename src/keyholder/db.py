@@ -2,11 +2,11 @@ from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 
-def make_database(url: str) -> tuple[Engine, sessionmaker[Session]]:
+def make_database(url: str, *, busy_timeout: float = 5) -> tuple[Engine, sessionmaker[Session]]:
     sqlite = url.startswith("sqlite:")
     engine = create_engine(
         url,
-        connect_args={"check_same_thread": False, "timeout": 5} if sqlite else {},
+        connect_args={"check_same_thread": False, "timeout": busy_timeout} if sqlite else {},
         pool_pre_ping=True,
     )
     if sqlite:

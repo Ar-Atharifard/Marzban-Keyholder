@@ -1,0 +1,147 @@
+{
+  "management_bot": {
+    "telegram_api_base": "https://api.telegram.org",
+    "poll_http_timeout_seconds": 35,
+    "request_timeout_seconds": 10,
+    "poll_timeout_seconds": 25,
+    "dispatch_timeout_seconds": 70,
+    "queue_size": 4,
+    "poll_batch_size": 10,
+    "command_max_age_seconds": 300,
+    "confirmation_seconds": 300,
+    "send_interval_seconds": 1.05,
+    "retry_max_delay_seconds": 30,
+    "retry_max_exponent": 5
+  },
+  "proxy_probe": {
+    "urls": [
+      "https://www.gstatic.com/generate_204",
+      "https://example.com/"
+    ],
+    "foreign_urls": [
+      "https://www.youtube.com/generate_204",
+      "https://www.facebook.com/robots.txt"
+    ],
+    "domestic_urls": [
+      "https://www.aparat.com/",
+      "https://www.digikala.com/"
+    ],
+    "dns_address": "1.1.1.1",
+    "dns_port": 53,
+    "dns_query_name": "example.com",
+    "connect_timeout_seconds": 2,
+    "request_timeout_seconds": 4,
+    "process_timeout_seconds": 6,
+    "udp_timeout_seconds": 4,
+    "workers": 4,
+    "startup_attempts": 40,
+    "startup_interval_seconds": 0.1,
+    "max_response_bytes": 65536
+  },
+  "domestic_routing": {
+    "trusted_dns_servers": [
+      "https://1.1.1.1/dns-query"
+    ],
+    "local_geoip": [
+      "geoip:ir"
+    ],
+    "xudp_concurrency": 8
+  },
+  "domestic_guard": {
+    "armed_file": "/etc/keyholder-domestic/armed",
+    "state_file": "/var/lib/keyholder-domestic/guard.json",
+    "node_service": "marzban-node.service",
+    "gateway_service": "haproxy.service",
+    "journal_window_minutes": 6,
+    "journal_records": 2000,
+    "heartbeat_max_age_seconds": 300
+  },
+  "gate_status": {
+    "socket": "/run/haproxy/keyholder.sock",
+    "socket_timeout_seconds": 2,
+    "backhaul_backend": "foreign_backhaul_paths",
+    "backhaul_paths": [
+      "rathole",
+      "frp",
+      "forward"
+    ],
+    "guard_file": "/var/lib/keyholder-domestic/guard.json",
+    "units": [
+      "ssh",
+      "ufw",
+      "marzban-node",
+      "keyholder-rathole-server",
+      "keyholder-domestic-guard.timer",
+      "haproxy"
+    ],
+    "optional_units": {
+      "/etc/systemd/system/keyholder-frp-server.service": [
+        "keyholder-frp-server",
+        "keyholder-backhaul-guard.timer"
+      ],
+      "/etc/systemd/system/keyholder-forward-client.service": [
+        "keyholder-forward-client"
+      ]
+    },
+    "backhaul_config": "/etc/keyholder-frp/server.toml"
+  },
+  "gate_snapshot": {
+    "target": "/var/lib/keyholder-recovery/domestic/gate.tar",
+    "ssh_config": "/etc/keyholder/domestic-monitor.ssh",
+    "ssh_alias": "domestic",
+    "connect_timeout_seconds": 3,
+    "transfer_timeout_seconds": 120
+  },
+  "tls": {
+    "root": "/etc/keyholder/acme",
+    "certificates_directory": "/opt/braavos-gateway/certs",
+    "gateway_container": "braavos-gateway",
+    "lego_binary": "/usr/local/bin/lego",
+    "service": "keyholder-tls.service",
+    "timer": "keyholder-tls.timer",
+    "renew_days": 30,
+    "minimum_validity_seconds": 604800,
+    "issue_timeout_seconds": 600,
+    "certificate_basename": "subscription"
+  },
+  "backhaul_guard": {
+    "failure_threshold": 3,
+    "cooldown_seconds": 1800,
+    "state_directory": "/var/lib/keyholder-domestic",
+    "target_service": "keyholder-rathole-server",
+    "target_path": "rathole",
+    "alternate_paths": [
+      "frp",
+      "forward"
+    ]
+  },
+  "forward": {
+    "server_listen": "::",
+    "server_port": 24432,
+    "exit_port": 19981,
+    "client_port": 19987,
+    "keepalive_idle_seconds": 30,
+    "keepalive_interval_seconds": 10,
+    "tcp_user_timeout_ms": 90000,
+    "xudp_concurrency": 8,
+    "fingerprint": "chrome",
+    "reality_target_port": 443
+  },
+  "backhaul_probe": {
+    "ports": [
+      19984,
+      19986,
+      19987
+    ],
+    "urls": [
+      "https://1.1.1.1/cdn-cgi/trace",
+      "https://www.gstatic.com/generate_204"
+    ],
+    "credentials_file": "/etc/keyholder-backhaul/probe.json",
+    "curl_binary": "/usr/bin/curl",
+    "connect_timeout_seconds": 2,
+    "request_timeout_seconds": 3,
+    "process_timeout_seconds": 4,
+    "max_response_bytes": 4096
+  }
+}

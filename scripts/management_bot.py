@@ -19,10 +19,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 MAX_MESSAGE = 3500
-CONFIRM_SECONDS = 300
 SEND_LOCK = threading.Lock()
 LAST_SEND = 0.0
 TOKEN_PATTERN = re.compile(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}")
@@ -42,6 +41,32 @@ BOT_COMMANDS = [
     {"command": "config", "description": "Retrieve one configuration URI by ID"},
     {"command": "cancel", "description": "Cancel a pending destructive operation"},
 ]
+
+
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
+
+
+OPTIONS = component_settings(
+    "management_bot",
+    {
+        "telegram_api_base": "https://api.telegram.org",
+        "poll_http_timeout_seconds": 35,
+        "request_timeout_seconds": 10,
+        "poll_timeout_seconds": 25,
+        "dispatch_timeout_seconds": 70,
+        "queue_size": 4,
+        "poll_batch_size": 10,
+        "command_max_age_seconds": 300,
+        "confirmation_seconds": 300,
+        "send_interval_seconds": 1.05,
+        "retry_max_delay_seconds": 30,
+        "retry_max_exponent": 5,
+    },
+)
+CONFIRM_SECONDS = OPTIONS["confirmation_seconds"]
 
 
 def private_state(path: Path) -> dict[str, Any]:
@@ -74,11 +99,16 @@ def save_state(path: Path, value: dict[str, Any]) -> None:
 def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
     data = urllib.parse.urlencode(values).encode()
     request = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/{method}", data=data, method="POST"
+        f"{OPTIONS['telegram_api_base'].rstrip('/')}/bot{token}/{method}", data=data, method="POST"
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(request, timeout=35 if method == "getUpdates" else 10) as response:
+        with opener.open(
+            request,
+            timeout=OPTIONS["poll_http_timeout_seconds"]
+            if method == "getUpdates"
+            else OPTIONS["request_timeout_seconds"],
+        ) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:
         if error.code != 429 or method != "sendMessage":
@@ -88,7 +118,7 @@ def telegram(token: str, method: str, values: dict[str, str]) -> dict[str, Any]:
         if not math.isfinite(delay) or delay < 0 or delay > 30:
             raise ValueError("Telegram rate limit requires a later retry") from None
         time.sleep(delay + 0.1)
-        with opener.open(request, timeout=10) as response:
+        with opener.open(request, timeout=OPTIONS["request_timeout_seconds"]) as response:
             payload = json.load(response)
     if not payload.get("ok"):
         raise RuntimeError("Telegram request failed")
@@ -104,7 +134,7 @@ def dispatch(operation: str, args: dict[str, Any]) -> Any:
         ["/usr/bin/python3", dispatcher],
         input=payload,
         capture_output=True,
-        timeout=70,
+        timeout=OPTIONS["dispatch_timeout_seconds"],
         check=False,
     )
     try:
@@ -615,7 +645,7 @@ def send_reply(token: str, admin_id: int, text: str) -> None:
     global LAST_SEND
     for page in pages:
         with SEND_LOCK:
-            delay = 1.05 - (time.monotonic() - LAST_SEND)
+            delay = OPTIONS["send_interval_seconds"] - (time.monotonic() - LAST_SEND)
             if delay > 0:
                 time.sleep(delay)
             try:
@@ -644,7 +674,7 @@ def main() -> None:
     )
     state = private_state(path)
     state_lock = threading.Lock()
-    work: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
+    work: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=OPTIONS["queue_size"])
 
     def process() -> None:
         while True:
@@ -653,7 +683,7 @@ def main() -> None:
             with state_lock:
                 local = {key: state[key] for key in ("pending", "picker") if key in state}
             try:
-                if time.time() - created_at > 300:
+                if time.time() - created_at > OPTIONS["command_max_age_seconds"]:
                     raise ValueError("Queued command expired; send it again")
                 reply = command(text, local)
             except ValueError as error:
@@ -693,9 +723,9 @@ def main() -> None:
                 "getUpdates",
                 {
                     "offset": str(int(state.get("offset", 0))),
-                    "timeout": "25",
+                    "timeout": str(OPTIONS["poll_timeout_seconds"]),
                     "allowed_updates": json.dumps(["message"]),
-                    "limit": "10",
+                    "limit": str(OPTIONS["poll_batch_size"]),
                 },
             )
             failures = 0
@@ -718,11 +748,14 @@ def main() -> None:
                     send_reply(token, admin_id, reply)
                     logging.info("Quick command completed in %.2fs", time.monotonic() - started)
                     continue
-                if time.time() - float(message.get("date", time.time())) > 300:
+                if (
+                    time.time() - float(message.get("date", time.time()))
+                    > OPTIONS["command_max_age_seconds"]
+                ):
                     send_reply(
                         token,
                         admin_id,
-                        "This queued command is over five minutes old. Please send it again.",
+                        "This queued command has expired. Please send it again.",
                     )
                     continue
                 try:
@@ -731,13 +764,18 @@ def main() -> None:
                     send_reply(
                         token,
                         admin_id,
-                        "Four commands are already queued. Wait for their results before retrying.",
+                        "The command queue is full. Wait for results before retrying.",
                     )
         except Exception as error:
             failures += 1
             if failures == 1 or failures % 10 == 0:
                 logging.warning("Telegram polling failed (%d): %s", failures, type(error).__name__)
-            time.sleep(min(30, 2 ** min(failures, 5)))
+            time.sleep(
+                min(
+                    OPTIONS["retry_max_delay_seconds"],
+                    2 ** min(failures, OPTIONS["retry_max_exponent"]),
+                )
+            )
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import argparse
 import datetime as dt
 import fcntl
 import json
+import math
 import os
 import re
 import shutil
@@ -572,11 +573,32 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
             os.unlink(temporary)
 
 
+def request_timeout(env: dict[str, str], key: str) -> float:
+    value = float(env.get(key, "10"))
+    if not math.isfinite(value) or not 1 <= value <= 60:
+        raise ValueError("Monitor request timeout must be 1–60 seconds")
+    return value
+
+
 def telegram(env: dict[str, str], text: str) -> bool:
     token = env.get("KEYHOLDER_ALERT_BOT_TOKEN")
     chat = env.get("KEYHOLDER_ALERT_CHAT_ID")
     if not token or not chat:
         return False
+    base = env.get("KEYHOLDER_ALERT_API_BASE", "https://api.telegram.org").rstrip("/")
+    endpoint = urllib.parse.urlsplit(base)
+    local = endpoint.hostname in {"127.0.0.1", "::1", "localhost"}
+    if (
+        endpoint.scheme not in {"http", "https"}
+        or not endpoint.hostname
+        or (endpoint.scheme != "https" and not local)
+        or endpoint.username
+        or endpoint.password
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise ValueError("Alert API endpoint requires HTTPS or loopback HTTP")
+    timeout = request_timeout(env, "KEYHOLDER_ALERT_REQUEST_TIMEOUT")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for offset in range(0, len(text), 3500):
         body = urllib.parse.urlencode(
@@ -586,10 +608,8 @@ def telegram(env: dict[str, str], text: str) -> bool:
                 "disable_web_page_preview": "true",
             }
         ).encode()
-        request = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage", data=body, method="POST"
-        )
-        with opener.open(request, timeout=10) as response:
+        request = urllib.request.Request(f"{base}/bot{token}/sendMessage", data=body, method="POST")
+        with opener.open(request, timeout=timeout) as response:
             if not json.load(response).get("ok"):
                 raise ValueError("Telegram rejected alert delivery")
 
@@ -601,7 +621,9 @@ def heartbeat(env: dict[str, str]) -> None:
     if not url:
         return
     request = urllib.request.Request(url, headers={"User-Agent": "keyholder-monitor/1"})
-    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=10):
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+        request, timeout=request_timeout(env, "KEYHOLDER_HEARTBEAT_REQUEST_TIMEOUT")
+    ):
         pass
 
 

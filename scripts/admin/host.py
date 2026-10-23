@@ -25,6 +25,8 @@ def configuration() -> dict[str, Any]:
         "env_file": "/etc/keyholder/keyholder.env",
         "extra_backups": {},
         "sqlite_backups": {},
+        "tls_tool": "/usr/local/lib/keyholder-admin/tls.py",
+        "telegram_api_base": "https://api.telegram.org",
         "monitor_tool": "/usr/local/lib/keyholder-admin/monitor.py",
         "monitor_config": "/etc/keyholder/monitor.json",
         "management_bot_env": "/etc/keyholder/management-bot.env",
@@ -39,6 +41,18 @@ def configuration() -> dict[str, Any]:
         if not isinstance(supplied, dict) or not supplied.keys() <= defaults.keys():
             raise ValueError("Unknown host configuration field")
         defaults.update(supplied)
+    endpoint = urllib.parse.urlsplit(defaults["telegram_api_base"])
+    local = endpoint.hostname in {"127.0.0.1", "::1", "localhost"}
+    if (
+        endpoint.scheme not in {"http", "https"}
+        or not endpoint.hostname
+        or (endpoint.scheme != "https" and not local)
+        or endpoint.username
+        or endpoint.password
+        or endpoint.query
+        or endpoint.fragment
+    ):
+        raise ValueError("Telegram API base requires HTTPS or loopback HTTP")
     return defaults
 
 
@@ -49,9 +63,9 @@ def inspect(name: str) -> dict[str, Any]:
     return json.loads(result.stdout)[0]  # type: ignore[no-any-return]
 
 
-def discover_chat_id(token: str) -> str:
+def discover_chat_id(token: str, api_base: str = "https://api.telegram.org") -> str:
     request = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/getUpdates",
+        f"{api_base.rstrip('/')}/bot{token}/getUpdates",
         headers={"User-Agent": "keyholder-alert-setup/1"},
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -76,7 +90,9 @@ def configure_alerts(config: dict[str, Any], args: dict[str, Any]) -> dict[str, 
     if not re.fullmatch(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}", token):
         raise ValueError("Invalid Telegram bot token")
     if not chat_id:
-        chat_id = discover_chat_id(token)
+        chat_id = discover_chat_id(
+            token, config.get("telegram_api_base", "https://api.telegram.org")
+        )
     if not re.fullmatch(r"-?[0-9]{5,20}", chat_id):
         raise ValueError("Invalid Telegram chat ID")
     write_monitor_env(
@@ -152,7 +168,9 @@ def configure_management_bot(config: dict[str, Any], args: dict[str, Any]) -> di
     if not re.fullmatch(r"[0-9]{6,15}:[A-Za-z0-9_-]{30,100}", token):
         raise ValueError("Invalid Telegram bot token")
     if not chat_id:
-        chat_id = discover_chat_id(token)
+        chat_id = discover_chat_id(
+            token, config.get("telegram_api_base", "https://api.telegram.org")
+        )
     if not re.fullmatch(r"[0-9]{5,20}", chat_id):
         raise ValueError("Management bot requires one private Telegram account")
     write_env(
@@ -186,7 +204,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             )
             return {"ok": True, "result": {"started": True}}
         result = subprocess.run(
-            [sys.executable, "/usr/local/lib/keyholder-admin/tls.py", action],
+            [sys.executable, config["tls_tool"], action],
             input=json.dumps(payload.get("args", {})).encode(),
             capture_output=True,
             check=True,
@@ -336,7 +354,8 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         ).encode()
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
             urllib.request.Request(
-                "https://api.telegram.org/bot"
+                config["telegram_api_base"].rstrip("/")
+                + "/bot"
                 + env["KEYHOLDER_MANAGEMENT_BOT_TOKEN"]
                 + "/sendMessage",
                 data=body,

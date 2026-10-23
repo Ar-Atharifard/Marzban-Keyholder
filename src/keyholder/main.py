@@ -32,7 +32,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # HTTP libraries may log URLs at INFO; keep adapter diagnostics secret-safe.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    engine, sessions = make_database(settings.database_url)
+    engine, sessions = make_database(
+        settings.database_url, busy_timeout=settings.sqlite_busy_timeout
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -46,8 +48,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ):
                         raise RuntimeError("Registered backend identity differs from configuration")
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(settings.upstream_timeout, connect=5),
-                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                timeout=httpx.Timeout(
+                    settings.upstream_timeout, connect=settings.upstream_connect_timeout
+                ),
+                limits=httpx.Limits(
+                    max_connections=settings.upstream_max_connections,
+                    max_keepalive_connections=settings.upstream_max_keepalive_connections,
+                    keepalive_expiry=settings.upstream_keepalive_expiry,
+                ),
                 follow_redirects=False,
                 trust_env=False,
             ) as client:
@@ -62,7 +70,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessions = sessions
-    app.state.limiter = MemoryRateLimiter(settings.rate_limit_per_minute)
+    app.state.limiter = MemoryRateLimiter(
+        settings.rate_limit_per_minute, max_keys=settings.rate_limit_max_keys
+    )
     app.include_router(public.router)
     app.include_router(admin.router)
 

@@ -348,7 +348,12 @@ def parser() -> KeyholderParser:
         default=operator_config().get("masque_state"),
         help="Private identity directory (default: user data directory)",
     )
-    masque.add_argument("--port", type=int, default=1819, help="Loopback SOCKS port")
+    masque.add_argument(
+        "--port",
+        type=int,
+        default=int(operator_config().get("masque_port", "1819")),
+        help="Loopback SOCKS port",
+    )
     masque.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
     masque.add_argument("--no-fragment", action="store_true", help="Try ordinary HTTP2 TLS")
     masque.add_argument(
@@ -427,7 +432,12 @@ def parser() -> KeyholderParser:
 
     _, panel_commands = group("panel")
     panel = leaf("panel", panel_commands, "open", "panel")
-    panel.add_argument("--port", type=int, default=28080, help="Local tunnel port")
+    panel.add_argument(
+        "--port",
+        type=int,
+        default=int(operator_config().get("panel_port", "28080")),
+        help="Local tunnel port",
+    )
     panel.add_argument(
         "--no-browser", action="store_true", help="Print URL without opening browser"
     )

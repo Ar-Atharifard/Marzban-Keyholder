@@ -114,7 +114,11 @@ async def subscription(
         profiles = delivery_profiles(profiles, settings, account_key)
         if not profiles:
             raise ValueError("No compatible profiles")
-        renderer = select_renderer(output, request.headers.get("user-agent", ""))
+        renderer = select_renderer(
+            output,
+            request.headers.get("user-agent", ""),
+            socks_port=settings.xray_client_socks_port,
+        )
         if data.info is not None and isinstance(renderer, URIRenderer):
             profiles.insert(0, information_profile(data.info, data.status))
         content = renderer.render(profiles)

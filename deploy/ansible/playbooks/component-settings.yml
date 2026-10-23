@@ -1,0 +1,81 @@
+---
+- name: Install matched operational helpers and non-secret overrides
+  hosts: component_targets
+  become: true
+  gather_facts: false
+  vars:
+    helper_sets:
+      foreign: [proxy_probe.py, management_bot.py, tls.py, gate_snapshot.py, monitor.py]
+      domestic: [domestic_guard.py, backhaul_guard.py, backhaul_probe.py, gate_status.py, monitor.py]
+  tasks:
+    - name: Require a selected role and explicit settings dictionary
+      ansible.builtin.assert:
+        that:
+          - component_role | default('') in ['foreign', 'domestic']
+          - component_settings is defined
+          - component_settings is mapping
+    - name: Install shared settings loader before dependent helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/component_config.py'
+        dest: /usr/local/lib/keyholder-admin/component_config.py
+        mode: '0644'
+    - name: Install matched operational helper sources
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
+        dest: '/usr/local/lib/keyholder-admin/{{ item }}'
+        mode: '0755'
+        backup: true
+      loop: '{{ helper_sets[component_role] }}'
+    - name: Install non-secret operational settings
+      ansible.builtin.copy:
+        dest: /usr/local/lib/keyholder-admin/components.json
+        content: '{{ component_settings | to_nice_json }}'
+        validate: /usr/bin/python3 /usr/local/lib/keyholder-admin/component_config.py --check %s
+        mode: '0644'
+        backup: true
+    - name: Add settings dependency to existing foreign backup inventories
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import json, os, tempfile
+            from pathlib import Path
+            changed = False
+            paths = ['/usr/local/lib/keyholder-admin/' + name for name in
+                     ['component_config.py', 'components.json', 'proxy_probe.py',
+                      'management_bot.py', 'tls.py', 'gate_snapshot.py', 'monitor.py']]
+            for name in ['/etc/keyholder/recovery.json', '/etc/keyholder/recovery-seed.json']:
+                p = Path(name)
+                if not p.exists():
+                    continue
+                data = json.loads(p.read_text()); old = dict(data['files'])
+                for path in paths:
+                    data['files']['rootfs' + path] = path
+                if data['files'] == old:
+                    continue
+                fd, tmp = tempfile.mkstemp(dir=p.parent)
+                with os.fdopen(fd, 'w') as out:
+                    json.dump(data, out, indent=2); out.write('\n')
+                    os.fchmod(out.fileno(), p.stat().st_mode & 0o777)
+                os.replace(tmp, p); changed = True
+            print('changed' if changed else 'unchanged')
+      when: component_role == 'foreign'
+      register: component_inventory
+      changed_when: component_inventory.stdout == 'changed'
+      no_log: true
+    - name: Update the fixed domestic recovery exporter with the new dependencies
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../scripts/gate_backup.py'
+        dest: /usr/local/libexec/keyholder-gate-backup
+        mode: '0755'
+        backup: true
+      when: component_role == 'domestic'
+    - name: Explain when settings become active
+      ansible.builtin.debug:
+        msg: >-
+          No service was restarted. Oneshots use settings on their next invocation;
+          long-running management bots need a separately scheduled restart. This
+          does not deploy the API image, Cloudflare Worker, generated tunnel configs
+          or gateway configuration. The matching domestic exporter includes the
+          shared settings dependency in the next recovery capture.

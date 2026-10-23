@@ -99,3 +99,10 @@ test("platform fetch retains its global receiver",async()=>{
   finally{globalThis.fetch=previous;}
 });
 
+
+for (const timeout of ["0", "-1", "NaN", "100000", "1.5", ""]) {
+  const result = await deliver(request(), {...env, UPSTREAM_TIMEOUT_MS: timeout}, () => {
+    throw Error("Invalid configuration must not contact upstream");
+  });
+  assert.equal(result.status, 503);
+}

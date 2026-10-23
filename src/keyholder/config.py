@@ -71,7 +71,20 @@ class Settings(BaseSettings):
     allowed_cdn_networks: tuple[str, ...] = ()
     enabled_profiles: tuple[str, ...] = SUPPORTED_KINDS
     upstream_timeout: float = Field(default=10, ge=1, le=60)
+    upstream_connect_timeout: float = Field(default=5, ge=0.1, le=60)
+    upstream_max_connections: int = Field(default=20, ge=1, le=10000)
+    upstream_max_keepalive_connections: int = Field(default=10, ge=0, le=10000)
+    upstream_keepalive_expiry: float = Field(default=5, ge=0.1, le=300)
+    sqlite_busy_timeout: float = Field(default=5, ge=0.1, le=60)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
+    rate_limit_max_keys: int = Field(default=10000, ge=1, le=1000000)
+    xray_client_socks_port: int = Field(default=10808, ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_connection_limits(self) -> "Settings":
+        if self.upstream_max_keepalive_connections > self.upstream_max_connections:
+            raise ValueError("Keepalive connections cannot exceed total connections")
+        return self
 
     @field_validator("backends")
     @classmethod

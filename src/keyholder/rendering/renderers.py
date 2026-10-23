@@ -88,6 +88,11 @@ class URIRenderer:
 
 
 class XrayRenderer:
+    def __init__(self, socks_port: int = 10808) -> None:
+        if not 1 <= socks_port <= 65535:
+            raise ValueError("Invalid client SOCKS port")
+        self.socks_port = socks_port
+
     media_type = "application/json"
 
     def render(self, profiles: list[Profile]) -> str:
@@ -173,7 +178,7 @@ class XrayRenderer:
                         {
                             "tag": "socks",
                             "listen": "127.0.0.1",
-                            "port": 10808,
+                            "port": self.socks_port,
                             "protocol": "socks",
                             "settings": {"udp": True},
                         }
@@ -186,8 +191,8 @@ class XrayRenderer:
         return json.dumps(configs, ensure_ascii=False)
 
 
-def select_renderer(output: str | None, user_agent: str) -> Renderer:
+def select_renderer(output: str | None, user_agent: str, *, socks_port: int = 10808) -> Renderer:
     # JSON import is opt-in; client version is never guessed from its name.
     if output == "xray" or (output is None and "keyholder-xray" in user_agent.lower()):
-        return XrayRenderer()
+        return XrayRenderer(socks_port=socks_port)
     return URIRenderer()

@@ -15,10 +15,44 @@ else:
     from monitor import system_metrics
 
 
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
+
+
+OPTIONS = component_settings(
+    "gate_status",
+    {
+        "socket": "/run/haproxy/keyholder.sock",
+        "socket_timeout_seconds": 2,
+        "backhaul_backend": "foreign_backhaul_paths",
+        "backhaul_paths": ["rathole", "frp", "forward"],
+        "guard_file": "/var/lib/keyholder-domestic/guard.json",
+        "units": [
+            "ssh",
+            "ufw",
+            "marzban-node",
+            "keyholder-rathole-server",
+            "keyholder-domestic-guard.timer",
+            "haproxy",
+        ],
+        "optional_units": {
+            "/etc/systemd/system/keyholder-frp-server.service": [
+                "keyholder-frp-server",
+                "keyholder-backhaul-guard.timer",
+            ],
+            "/etc/systemd/system/keyholder-forward-client.service": ["keyholder-forward-client"],
+        },
+        "backhaul_config": "/etc/keyholder-frp/server.toml",
+    },
+)
+
+
 def backhaul_status() -> dict[str, str]:
     with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(2)
-        client.connect("/run/haproxy/keyholder.sock")
+        client.settimeout(OPTIONS["socket_timeout_seconds"])
+        client.connect(OPTIONS["socket"])
         client.sendall(b"show stat\n")
         data = bytearray()
         while chunk := client.recv(65536):
@@ -29,24 +63,16 @@ def backhaul_status() -> dict[str, str]:
     return {
         row["svname"]: row["status"]
         for row in rows
-        if row.get("pxname") == "foreign_backhaul_paths"
-        and row.get("svname") in {"rathole", "frp", "forward"}
+        if row.get("pxname") == OPTIONS["backhaul_backend"]
+        and row.get("svname") in OPTIONS["backhaul_paths"]
     }
 
 
 def main() -> None:
-    units = [
-        "ssh",
-        "ufw",
-        "marzban-node",
-        "keyholder-rathole-server",
-        "keyholder-domestic-guard.timer",
-        "haproxy",
-    ]
-    if Path("/etc/systemd/system/keyholder-frp-server.service").exists():
-        units.extend(["keyholder-frp-server", "keyholder-backhaul-guard.timer"])
-    if Path("/etc/systemd/system/keyholder-forward-client.service").exists():
-        units.append("keyholder-forward-client")
+    units = list(OPTIONS["units"])
+    for file, extra_units in OPTIONS["optional_units"].items():
+        if Path(file).exists():
+            units.extend(extra_units)
     services = {}
     for unit in units:
         response = subprocess.run(
@@ -56,9 +82,9 @@ def main() -> None:
             timeout=5,
         )
         services[unit] = response.stdout.strip()
-    guard = json.loads(Path("/var/lib/keyholder-domestic/guard.json").read_text())
+    guard = json.loads(Path(OPTIONS["guard_file"]).read_text())
     result = {"metrics": system_metrics(), "services": services, "guard": guard}
-    if Path("/etc/keyholder-frp/server.toml").exists():
+    if Path(OPTIONS["backhaul_config"]).exists():
         try:
             result["backhauls"] = backhaul_status()
         except (OSError, ValueError):

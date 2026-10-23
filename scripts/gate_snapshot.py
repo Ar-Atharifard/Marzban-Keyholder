@@ -6,6 +6,12 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
 
 
 def validate_archive(path: Path) -> None:
@@ -24,7 +30,17 @@ def validate_archive(path: Path) -> None:
 
 
 def main() -> None:
-    target = Path("/var/lib/keyholder-recovery/domestic/gate.tar")
+    options = component_settings(
+        "gate_snapshot",
+        {
+            "target": "/var/lib/keyholder-recovery/domestic/gate.tar",
+            "ssh_config": "/etc/keyholder/domestic-monitor.ssh",
+            "ssh_alias": "domestic",
+            "connect_timeout_seconds": 3,
+            "transfer_timeout_seconds": 120,
+        },
+    )
+    target = Path(options["target"])
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=target.parent, prefix=".gate-")
     try:
@@ -33,17 +49,17 @@ def main() -> None:
                 [
                     "ssh",
                     "-F",
-                    "/etc/keyholder/domestic-monitor.ssh",
+                    options["ssh_config"],
                     "-o",
                     "BatchMode=yes",
                     "-o",
-                    "ConnectTimeout=3",
-                    "domestic",
+                    "ConnectTimeout=" + str(options["connect_timeout_seconds"]),
+                    options["ssh_alias"],
                     "backup",
                 ],
                 stdout=output,
                 stderr=subprocess.DEVNULL,
-                timeout=120,
+                timeout=options["transfer_timeout_seconds"],
                 check=True,
             )
         path = Path(temporary)

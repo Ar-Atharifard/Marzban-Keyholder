@@ -15,15 +15,38 @@ else:
     from gate_status import backhaul_status
 
 
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
+
+
+def guard_settings() -> dict[str, Any]:
+    return component_settings(
+        "backhaul_guard",
+        {
+            "failure_threshold": 3,
+            "cooldown_seconds": 1800,
+            "state_directory": "/var/lib/keyholder-domestic",
+            "target_service": "keyholder-rathole-server",
+            "target_path": "rathole",
+            "alternate_paths": ["frp", "forward"],
+        },
+    )
+
+
 def advance(
     paths: dict[str, str], state: dict[str, Any], now: float, permitted: bool
 ) -> tuple[dict[str, Any], bool]:
-    failures = 0 if paths.get("rathole", "").startswith("UP") else state.get("failures", 0) + 1
+    policy = guard_settings()
+    failures = (
+        0 if paths.get(policy["target_path"], "").startswith("UP") else state.get("failures", 0) + 1
+    )
     restart = (
         permitted
-        and failures >= 3
-        and any(paths.get(name, "").startswith("UP") for name in ["frp", "forward"])
-        and now - state.get("last_restart", 0) >= 1800
+        and failures >= policy["failure_threshold"]
+        and any(paths.get(name, "").startswith("UP") for name in policy["alternate_paths"])
+        and now - state.get("last_restart", 0) >= policy["cooldown_seconds"]
     )
     return {
         "failures": 0 if restart else failures,
@@ -33,7 +56,8 @@ def advance(
 
 
 def main() -> None:
-    root = Path("/var/lib/keyholder-domestic")
+    options = guard_settings()
+    root = Path(options["state_directory"])
     path = root / "backhaul-health.json"
     state = json.loads(path.read_text()) if path.exists() else {}
     guard = json.loads((root / "guard.json").read_text())
@@ -45,7 +69,7 @@ def main() -> None:
         return
     active = (
         subprocess.run(
-            ["systemctl", "is-active", "keyholder-rathole-server"],
+            ["systemctl", "is-active", options["target_service"]],
             capture_output=True,
             timeout=5,
         ).returncode
@@ -58,9 +82,9 @@ def main() -> None:
     temporary.replace(path)
     if restart:
         subprocess.run(
-            ["systemctl", "try-restart", "keyholder-rathole-server"], check=True, timeout=20
+            ["systemctl", "try-restart", options["target_service"]], check=True, timeout=20
         )
-        print("Rathole listener restarted after three failed probes; alternate backhaul healthy")
+        print("Backhaul listener restarted after configured failures; alternate path healthy")
 
 
 if __name__ == "__main__":

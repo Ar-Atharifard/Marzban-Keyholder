@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 EXPORT = """
 import asyncio, inspect, sys, httpx
@@ -41,6 +41,36 @@ async def main():
         print(XrayRenderer().render(profiles))
 asyncio.run(main())
 """
+
+
+if TYPE_CHECKING or __package__:
+    from scripts.component_config import settings as component_settings
+else:
+    from component_config import settings as component_settings
+
+
+OPTIONS = component_settings(
+    "proxy_probe",
+    {
+        "urls": ["https://www.gstatic.com/generate_204", "https://example.com/"],
+        "foreign_urls": [
+            "https://www.youtube.com/generate_204",
+            "https://www.facebook.com/robots.txt",
+        ],
+        "domestic_urls": ["https://www.aparat.com/", "https://www.digikala.com/"],
+        "dns_address": "1.1.1.1",
+        "dns_port": 53,
+        "dns_query_name": "example.com",
+        "connect_timeout_seconds": 2,
+        "request_timeout_seconds": 4,
+        "process_timeout_seconds": 6,
+        "udp_timeout_seconds": 4,
+        "workers": 4,
+        "startup_attempts": 40,
+        "startup_interval_seconds": 0.1,
+        "max_response_bytes": 65536,
+    },
+)
 
 
 def client_config(
@@ -92,7 +122,11 @@ def client_config(
                     "listen": "127.0.0.1",
                     "port": port,
                     "protocol": "dokodemo-door",
-                    "settings": {"address": "1.1.1.1", "port": 53, "network": "udp"},
+                    "settings": {
+                        "address": OPTIONS["dns_address"],
+                        "port": OPTIONS["dns_port"],
+                        "network": "udp",
+                    },
                 }
             )
             config["routing"]["rules"].append(
@@ -103,7 +137,7 @@ def client_config(
 
 def check(
     port: int,
-    urls: tuple[str, ...] = ("https://www.gstatic.com/generate_204", "https://example.com/"),
+    urls: tuple[str, ...] = tuple(OPTIONS["urls"]),
 ) -> dict[str, Any]:
     start = time.monotonic()
     # Either destination succeeding is sufficient; one website's outage must not page us.
@@ -117,11 +151,11 @@ def check(
                     "--proxy",
                     f"http://127.0.0.1:{port}",
                     "--connect-timeout",
-                    "2",
+                    str(OPTIONS["connect_timeout_seconds"]),
                     "--max-time",
-                    "4",
+                    str(OPTIONS["request_timeout_seconds"]),
                     "--max-filesize",
-                    "65536",
+                    str(OPTIONS["max_response_bytes"]),
                     "--silent",
                     "--output",
                     "/dev/null",
@@ -131,7 +165,7 @@ def check(
                 ],
                 capture_output=True,
                 text=True,
-                timeout=6,
+                timeout=OPTIONS["process_timeout_seconds"],
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
@@ -142,10 +176,14 @@ def check(
 
 
 def udp_check(port: int) -> bool:
-    query = struct.pack("!6H", 19272, 256, 1, 0, 0, 0) + b"\x07example\x03com\x00\x00\x01\x00\x01"
+    labels = str(OPTIONS["dns_query_name"]).rstrip(".").encode("idna").split(b".")
+    if not labels or any(not 1 <= len(label) <= 63 for label in labels):
+        raise ValueError("Invalid DNS probe name")
+    question = b"".join(bytes([len(label)]) + label for label in labels) + b"\x00\x00\x01\x00\x01"
+    query = struct.pack("!6H", 19272, 256, 1, 0, 0, 0) + question
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
-            connection.settimeout(4)
+            connection.settimeout(OPTIONS["udp_timeout_seconds"])
             connection.connect(("127.0.0.1", port))
             connection.send(query)
             response = connection.recv(4096)
@@ -164,10 +202,8 @@ def check_entry(port: int, domestic: bool) -> dict[str, Any]:
     result = check(port)
     if not domestic or not result["healthy"]:
         return result
-    foreign = check(
-        port, ("https://www.youtube.com/generate_204", "https://www.facebook.com/robots.txt")
-    )
-    local = check(port, ("https://www.aparat.com/", "https://www.digikala.com/"))
+    foreign = check(port, tuple(OPTIONS["foreign_urls"]))
+    local = check(port, tuple(OPTIONS["domestic_urls"]))
     udp = udp_check(port)
     result["policy_checks"] = {
         "foreign": foreign["healthy"],
@@ -197,17 +233,17 @@ def _probe_group(
             stderr=subprocess.DEVNULL,
         )
         try:
-            for _ in range(40):
+            for _ in range(OPTIONS["startup_attempts"]):
                 if process.poll() is not None:
                     raise ValueError("Probe client could not start")
                 try:
                     with socket.create_connection(("127.0.0.1", ports[-1]), timeout=0.1):
                         break
                 except OSError:
-                    time.sleep(0.1)
+                    time.sleep(OPTIONS["startup_interval_seconds"])
             else:
                 raise ValueError("Probe client startup timed out")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=OPTIONS["workers"]) as pool:
                 results = pool.map(
                     check_entry,
                     ports,
@@ -300,7 +336,20 @@ def main() -> int:
     with tempfile.NamedTemporaryFile(mode="w", dir=args.state.parent, delete=False) as output:
         json.dump(report, output)
     os.replace(output.name, args.state)
-    print(json.dumps({"healthy": report["healthy"], "profiles": len(report["profiles"])}))
+    print(
+        json.dumps(
+            {
+                "healthy": report["healthy"],
+                "profiles": len(report["profiles"]),
+                "failed": {
+                    name: {key: item[key] for key in ("reason", "policy_checks") if key in item}
+                    for name, item in report["profiles"].items()
+                    if not item["healthy"]
+                },
+                **({"error": report["error"]} if "error" in report else {}),
+            }
+        )
+    )
     return 0 if report["healthy"] else 1
 
 

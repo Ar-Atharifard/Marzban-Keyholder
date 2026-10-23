@@ -41,3 +41,14 @@
   when:
     - recovery_activate_jobs | default(false) | bool
     - recovery_tls_timer.stat.exists
+- name: Detect optional captured Xray restart configuration
+  ansible.builtin.stat:
+    path: /etc/keyholder/xray-restart.json
+  register: recovery_xray_restart
+- name: Restore optional Xray scheduler state only after production handover
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /usr/local/lib/keyholder-admin/xray_restart.py, apply]
+  changed_when: true
+  when:
+    - recovery_activate_jobs | default(false) | bool
+    - recovery_xray_restart.stat.exists
