@@ -6,7 +6,14 @@ import os
 import tempfile
 from pathlib import Path
 
-MODULES = ("__init__.py", "profile_types.py", "inbounds.py", "personal.py", "cli.py")
+MODULES = (
+    "__init__.py",
+    "profile_types.py",
+    "inbounds.py",
+    "personal.py",
+    "cli.py",
+    "billing_cli.py",
+)
 WRAPPER = """#!/usr/bin/env python3
 import sys
 from pathlib import Path

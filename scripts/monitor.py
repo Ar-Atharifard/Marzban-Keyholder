@@ -86,6 +86,8 @@ def load_config(path: Path) -> dict[str, Any]:
         "backup_max_age_hours": 26,
         "offsite_backup_status_file": "",
         "offsite_backup_max_age_hours": 24,
+        "storage_status_file": "",
+        "storage_status_max_age_hours": 26,
         "expiry_warning_days": [7, 3, 1],
         "quota_warning_percent": [80, 95],
         "terminal_reminder_hours": 24,
@@ -383,6 +385,44 @@ def offsite_backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
     except (OSError, ValueError, KeyError, TypeError):
         pass
     return {"backup:offsite": "Encrypted off-server recovery backup is missing, invalid or overdue"}
+
+
+def storage_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
+    filename = config.get("storage_status_file", "")
+    if not filename:
+        return {}
+    try:
+        value = json.loads(Path(filename).read_text())
+        checked = dt.datetime.fromisoformat(value["checked_at"])
+        if (
+            checked.tzinfo is None
+            or not 0
+            <= now - checked.timestamp()
+            <= float(config.get("storage_status_max_age_hours", 26)) * 3600
+        ):
+            raise ValueError("Stale storage report")
+        alerts = {}
+        if value.get("blocked") or value.get("operation_blocked"):
+            alerts["storage:blocked"] = (
+                "B2 upload blocked; inspect budgets, protected data and unfinished reservations"
+            )
+        for scope, state in value["scopes"].items():
+            percent = state.get("percent")
+            if state.get("stale") or percent is None:
+                alerts["storage:" + scope + ":critical"] = (
+                    "B2 " + scope + " usage measurement is missing or stale"
+                )
+            elif percent >= 90:
+                alerts["storage:" + scope + ":critical"] = (
+                    "B2 " + scope + " storage critical; safe cleanup or capacity review required"
+                )
+            elif percent >= 80:
+                alerts["storage:" + scope] = (
+                    "B2 " + scope + " storage warning; review growth and retention"
+                )
+        return alerts
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"storage:status": "B2 capacity report is missing, invalid or stale"}
 
 
 def baseline_by_user(db: sqlite3.Connection, current_hour: str) -> dict[int, float]:
@@ -723,6 +763,7 @@ def severity_for_key(key: str) -> str:
         return "critical"
     if (
         key == "backup:offsite"
+        or key in {"storage:blocked", "storage:status"}
         or key.endswith(":critical")
         or key.startswith(("container:", "systemd:", "http:", "tcp:", "marzban:", "proxy:"))
     ):
@@ -842,6 +883,7 @@ def run_locked(config: dict[str, Any], notify: bool = True) -> dict[str, Any]:
     alerts.update(proxy_alerts(config, now.timestamp()))
     alerts.update(backup_alerts(config, now.timestamp()))
     alerts.update(offsite_backup_alerts(config, now.timestamp()))
+    alerts.update(storage_alerts(config, now.timestamp()))
     remote_alerts, remote_snapshots = remote_hosts(config.get("remote_hosts", []))
     alerts.update(remote_alerts)
     try:

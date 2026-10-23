@@ -1,0 +1,7 @@
+{
+  "api_url": "http://127.0.0.1:18000",
+  "api_env_file": "/etc/keyholder/keyholder.env",
+  "status_file": "/var/lib/keyholder-recovery/storage.json",
+  "keep_daily": 7,
+  "keep_weekly": 4
+}

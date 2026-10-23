@@ -1,6 +1,10 @@
 {
   "service_id": "keyholder-production",
-  "containers": ["keyholder-api-1", "marzban-marzban-1", "braavos-gateway"],
+  "containers": [
+    "keyholder-api-1",
+    "marzban-marzban-1",
+    "braavos-gateway"
+  ],
   "files": {
     "rootfs/srv/keyholder/.env": "/srv/keyholder/.env",
     "rootfs/opt/marzban/.env": "/opt/marzban/.env",
@@ -33,7 +37,9 @@
     "rootfs/etc/systemd/system/keyholder-recovery.service": "/etc/systemd/system/keyholder-recovery.service",
     "rootfs/etc/systemd/system/keyholder-recovery.timer": "/etc/systemd/system/keyholder-recovery.timer",
     "rootfs/etc/systemd/system/keyholder-recovery-maintenance.service": "/etc/systemd/system/keyholder-recovery-maintenance.service",
-    "rootfs/etc/systemd/system/keyholder-recovery-maintenance.timer": "/etc/systemd/system/keyholder-recovery-maintenance.timer"
+    "rootfs/etc/systemd/system/keyholder-recovery-maintenance.timer": "/etc/systemd/system/keyholder-recovery-maintenance.timer",
+    "rootfs/usr/local/lib/keyholder-recovery/storage_budget.py": "/usr/local/lib/keyholder-recovery/storage_budget.py",
+    "rootfs/usr/local/lib/keyholder-admin/billing_bot.py": "/usr/local/lib/keyholder-admin/billing_bot.py"
   },
   "trees": {
     "rootfs/usr/local/lib/keyholder-admin/keyholder": "/usr/local/lib/keyholder-admin/keyholder",

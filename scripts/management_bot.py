@@ -44,8 +44,10 @@ BOT_COMMANDS = [
 
 
 if TYPE_CHECKING or __package__:
+    from scripts import billing_bot
     from scripts.component_config import settings as component_settings
 else:
+    import billing_bot
     from component_config import settings as component_settings
 
 
@@ -211,6 +213,7 @@ Inspect
 /runmonitor — Run checks now without sending alerts.
 /alerts — Alert bot and timer status.
 /backends — Configured panel/provider namespaces.
+/billinghelp — Payments, purchases, referrals, gifts and receipt images.
 
 Customers and links
 /users — Marzban accounts, quotas and selections.
@@ -293,6 +296,17 @@ def command(text: str, state: dict[str, Any]) -> str:
     if not words or not words[0].startswith("/"):
         return help_text()
     name = words.pop(0).split("@", 1)[0].removeprefix("/").lower()
+    if name in {
+        "purchase",
+        "payment",
+        "referral",
+        "gift",
+        "receipt",
+        "storage",
+        "billing",
+        "billinghelp",
+    }:
+        return billing_bot.command(name, words, state, dispatch, CONFIRM_SECONDS)
     if name == "ping":
         return "Online."
     if name in {"start", "help"}:
@@ -615,6 +629,7 @@ def command(text: str, state: dict[str, Any]) -> str:
             raise ValueError("This command takes no arguments")
         existed = state.pop("pending", None) is not None
         existed = state.pop("picker", None) is not None or existed
+        existed = state.pop("receipt_upload", None) is not None or existed
         return "Pending operation cancelled." if existed else "No operation is pending."
     elif name == "confirm":
         pending = state.pop("pending", None)
@@ -674,25 +689,34 @@ def main() -> None:
     )
     state = private_state(path)
     state_lock = threading.Lock()
-    work: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=OPTIONS["queue_size"])
+    work: queue.Queue[tuple[Any, float]] = queue.Queue(maxsize=OPTIONS["queue_size"])
 
     def process() -> None:
         while True:
             text, created_at = work.get()
             started = time.monotonic()
             with state_lock:
-                local = {key: state[key] for key in ("pending", "picker") if key in state}
+                local = {
+                    key: state[key]
+                    for key in ("pending", "picker", "receipt_upload")
+                    if key in state
+                }
             try:
                 if time.time() - created_at > OPTIONS["command_max_age_seconds"]:
                     raise ValueError("Queued command expired; send it again")
-                reply = command(text, local)
+                if isinstance(text, dict):
+                    reply = billing_bot.receive(
+                        token, text, local, telegram, dispatch, OPTIONS["telegram_api_base"]
+                    )
+                else:
+                    reply = command(text, local)
             except ValueError as error:
                 reply = f"Error: {error}"
             except Exception as error:
                 logging.warning("Command execution failed: %s", type(error).__name__)
                 reply = "Operation failed or timed out. Check state before retrying a change."
             with state_lock:
-                for key in ("pending", "picker"):
+                for key in ("pending", "picker", "receipt_upload"):
                     state.pop(key, None)
                     if key in local:
                         state[key] = local[key]
@@ -759,7 +783,12 @@ def main() -> None:
                     )
                     continue
                 try:
-                    work.put_nowait((text, float(message.get("date", time.time()))))
+                    work.put_nowait(
+                        (
+                            message if message.get("photo") or message.get("document") else text,
+                            float(message.get("date", time.time())),
+                        )
+                    )
                 except queue.Full:
                     send_reply(
                         token,

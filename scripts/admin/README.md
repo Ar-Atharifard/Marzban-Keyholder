@@ -125,3 +125,11 @@ a pending change. HTTP-source providers support customer/link operations, not pa
 provisioning. Local disable/revoke stops delivery, not previously imported proxies;
 enforce access in the panel. `upstream reconcile --confirm` is a legacy recovery
 operation that can rotate links, not routine maintenance.
+
+## Purchases, payments and referrals
+
+The `purchase`, `payment`, `referral`, `gift`, `receipt`, `billing` and `storage`
+resources use the same SSH transport and customer selectors. See
+[ledger operations](../../docs/billing.md) for payment verification, partial
+allocations, gift batches, image retention and recovery capacity. The bot provides
+`/billinghelp`. Install the matching `billing_cli.py` and `billing_bot.py` dependencies.

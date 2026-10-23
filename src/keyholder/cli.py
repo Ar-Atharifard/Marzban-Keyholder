@@ -136,6 +136,10 @@ GROUP_HELP = {
     "personal": "Access owner-only tools outside customer subscriptions.",
 }
 
+from keyholder import billing_cli  # noqa: E402
+
+GROUP_HELP.update(billing_cli.GROUP_HELP)
+
 LEGACY_COMMANDS = {
     "init-config": ("config", "init"),
     "status": ("system", "status"),
@@ -494,6 +498,7 @@ def parser() -> KeyholderParser:
             command.add_argument("--info", action="store_true", help="Show the usage-page URL")
         if op in {"rotate-token", "link", "config"}:
             command.add_argument("--save-link", type=Path, help="New private JSON file")
+    billing_cli.add_parsers(group, leaf)
     help_command = resources.add_parser(
         "help", help="Show complete help, or help for one resource/action path"
     )
@@ -752,6 +757,12 @@ def main(argv: list[str] | None = None) -> int:
             p.error("Specify at least one customer identity change.")
     if args.local and (os.geteuid() != 0 or args.operation == "panel"):
         p.error("--local is for root on the VPS; panel forwarding runs on the workstation.")
+    if args.operation.startswith("billing-"):
+        try:
+            return billing_cli.run(args, request)
+        except CLIError as error:
+            print(str(error), file=sys.stderr)
+            return 1
     if args.operation in {"user-create", "user-update"}:
         import math
 

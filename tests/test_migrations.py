@@ -132,10 +132,28 @@ def test_backup_restore_rehearsal_preserves_complete_legacy_state(
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert after == before
     with sqlite3.connect(database) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0004",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0005",)
         assert db.execute("SELECT telegram,phone FROM customers").fetchall() == [
             (None, None),
             (None, None),
         ]
         indexes = {row[1] for row in db.execute("PRAGMA index_list('customers')")}
         assert {"uq_customers_telegram", "uq_customers_phone"} <= indexes
+
+
+def test_financial_history_prevents_destructive_downgrade(
+    migrated_database: tuple[Config, Path],
+) -> None:
+    config, database = migrated_database
+    command.upgrade(config, "head")
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "INSERT INTO purchases "
+            "(id,customer_id,description,price_minor,currency,purchased_at,created_at) "
+            "VALUES ('purchase','first','Agreed sale',100,'IRR','2026-10-23','2026-10-23')"
+        )
+    with pytest.raises(RuntimeError, match="Ledger history exists"):
+        command.downgrade(config, "0004")
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT price_minor FROM purchases").fetchone() == (100,)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0005",)

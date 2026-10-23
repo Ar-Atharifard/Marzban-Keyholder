@@ -76,6 +76,23 @@ class Settings(BaseSettings):
     upstream_max_keepalive_connections: int = Field(default=10, ge=0, le=10000)
     upstream_keepalive_expiry: float = Field(default=5, ge=0.1, le=300)
     sqlite_busy_timeout: float = Field(default=5, ge=0.1, le=60)
+    storage_enabled: bool = False
+    storage_cleanup_enabled: bool = False
+    storage_recovery_cleanup_enabled: bool = False
+    storage_total_bytes: int = Field(default=10_000_000_000, gt=0)
+    storage_receipt_bytes: int = Field(default=2_000_000_000, gt=0)
+    storage_recovery_bytes: int = Field(default=6_000_000_000, gt=0)
+    storage_headroom_bytes: int = Field(default=2_000_000_000, ge=0)
+    storage_other_bytes: int = Field(default=0, ge=0)
+    storage_usage_max_age_seconds: int = Field(default=86400, ge=60, le=604800)
+    receipt_max_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=5 * 1024 * 1024)
+    receipt_retention_days: int = Field(default=180, ge=30, le=3650)
+    receipt_protect_days: int = Field(default=30, ge=1, le=3650)
+    receipt_s3_endpoint: str = ""
+    receipt_s3_region: str = ""
+    receipt_s3_bucket: str = ""
+    receipt_s3_access_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    receipt_s3_secret_key: SecretStr = Field(default=SecretStr(""), repr=False)
     rate_limit_per_minute: int = Field(default=60, ge=1, le=10000)
     rate_limit_max_keys: int = Field(default=10000, ge=1, le=1000000)
     xray_client_socks_port: int = Field(default=10808, ge=1, le=65535)
@@ -84,6 +101,45 @@ class Settings(BaseSettings):
     def validate_connection_limits(self) -> "Settings":
         if self.upstream_max_keepalive_connections > self.upstream_max_connections:
             raise ValueError("Keepalive connections cannot exceed total connections")
+        return self
+
+    @model_validator(mode="after")
+    def validate_storage(self) -> "Settings":
+        if (
+            self.storage_receipt_bytes
+            + self.storage_recovery_bytes
+            + self.storage_headroom_bytes
+            + self.storage_other_bytes
+            > self.storage_total_bytes
+        ):
+            raise ValueError("Storage budgets and other usage exceed total capacity")
+        if self.receipt_protect_days > self.receipt_retention_days:
+            raise ValueError("Receipt protection exceeds retention")
+        values = [
+            self.receipt_s3_endpoint,
+            self.receipt_s3_region,
+            self.receipt_s3_bucket,
+            self.receipt_s3_access_key.get_secret_value(),
+            self.receipt_s3_secret_key.get_secret_value(),
+        ]
+        if any(values) and not all(values):
+            raise ValueError("Complete receipt storage configuration is required")
+        if self.storage_cleanup_enabled and not all(values):
+            raise ValueError("Automatic receipt cleanup requires receipt storage configuration")
+        if self.receipt_s3_endpoint:
+            u = urlsplit(self.receipt_s3_endpoint)
+            if (
+                u.scheme != "https"
+                or not u.hostname
+                or u.username
+                or u.password
+                or u.query
+                or u.fragment
+                or u.path not in {"", "/"}
+            ):
+                raise ValueError("Receipt storage requires a trusted HTTPS S3 endpoint")
+            if not self.storage_enabled:
+                raise ValueError("Enable storage budgets before configuring receipts")
         return self
 
     @field_validator("backends")

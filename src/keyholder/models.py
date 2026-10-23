@@ -78,3 +78,7 @@ class Registration(Base):
     backend_id: Mapped[str] = mapped_column(ForeignKey("backends.id"), primary_key=True)
     upstream_username: Mapped[str] = mapped_column(String(32), primary_key=True)
     customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"), unique=True)
+
+
+# Register the private ledger on the same metadata for migrations and recovery.
+from keyholder import billing_models as billing_models  # noqa: E402

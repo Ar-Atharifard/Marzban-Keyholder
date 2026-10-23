@@ -479,10 +479,13 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
 def main() -> None:
     os.umask(0o077)
     try:
-        raw = sys.stdin.buffer.read(16385)
-        if len(raw) > 16384:
+        raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
             raise ValueError("Request too large")
-        print(json.dumps(execute(json.loads(raw))))
+        payload = json.loads(raw)
+        if len(raw) > 16384 and payload.get("operation") != "billing-receipt-upload":
+            raise ValueError("Request too large")
+        print(json.dumps(execute(payload)))
     except Exception:
         print(
             json.dumps(
