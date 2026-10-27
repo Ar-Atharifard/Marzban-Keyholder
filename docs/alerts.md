@@ -20,6 +20,13 @@ resources. [Installation and bots](operations.md).
 - Failed service/inventory/DB probes, overdue configured offsite backups and critical
   disk/inode pressure are critical; other conditions are warnings. No automatic repair.
 
+Quota notices show used, total and remaining traffic with explicit binary units
+(KiB/MiB/GiB); remaining traffic never goes below zero. Expiry notices include
+days/hours/minutes and an exact UTC date. Recovery messages label the previous
+condition, and active notifications include a next step and the incident key.
+The management bot renders monitoring, metrics and usage as labeled text while
+the CLI/dispatcher JSON contract retains numeric values.
+
 ## Control notifications
 
 Copy the exact incident key. These examples use synthetic `user:12:quota`.

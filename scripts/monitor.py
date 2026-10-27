@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -28,6 +29,37 @@ from pathlib import Path
 from typing import Any
 
 GIB = 1024**3
+
+
+def human_bytes(value: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+        if abs(value) < 1024 or unit == "PiB":
+            return f"{value:,.0f} B" if unit == "B" else f"{value:,.2f} {unit}"
+        value /= 1024
+    raise AssertionError("unreachable")
+
+
+def utc_label(timestamp: float) -> str:
+    return dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).strftime(  # noqa: UP017
+        "%Y-%m-%d %H:%M UTC"
+    )
+
+
+def human_duration(seconds: float) -> str:
+    remaining = max(1, math.ceil(max(0, seconds) / 60))
+    days, remaining = divmod(remaining, 1440)
+    hours, minutes = divmod(remaining, 60)
+    parts = []
+    for amount, unit in ((days, "day"), (hours, "hour"), (minutes, "minute")):
+        if amount:
+            parts.append(f"{amount} {unit}{'s' if amount != 1 else ''}")
+    return " ".join(parts)
+
+
+def quota_details(used: int, limit: int) -> str:
+    total = human_bytes(limit) if limit else "Unlimited"
+    left = human_bytes(max(0, limit - used)) if limit else "Unlimited"
+    return f"Used: {human_bytes(used)}; allowance: {total}; remaining: {left}"
 
 
 def utc_now() -> dt.datetime:
@@ -217,17 +249,27 @@ def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
     disk = shutil.disk_usage("/")
     disk_percent = 100 * disk.used / disk.total
     if disk_percent >= float(config["disk_critical_percent"]):
-        alerts["disk:critical"] = f"Root disk is {disk_percent:.1f}% full"
+        alerts["disk:critical"] = (
+            f"Root disk is {disk_percent:.1f}% full; "
+            f"{human_bytes(disk.free)} free of {human_bytes(disk.total)}"
+        )
     elif disk_percent >= float(config["disk_warning_percent"]):
-        alerts["disk:warning"] = f"Root disk is {disk_percent:.1f}% full"
+        alerts["disk:warning"] = (
+            f"Root disk is {disk_percent:.1f}% full; "
+            f"{human_bytes(disk.free)} free of {human_bytes(disk.total)}"
+        )
 
     filesystem = os.statvfs("/")
     if filesystem.f_files:
         inode_percent = 100 * (filesystem.f_files - filesystem.f_ffree) / filesystem.f_files
         if inode_percent >= float(config["inode_critical_percent"]):
-            alerts["inode:critical"] = f"Root filesystem inodes are {inode_percent:.1f}% used"
+            alerts["inode:critical"] = (
+                f"Root filesystem file slots (inodes) are {inode_percent:.1f}% used"
+            )
         elif inode_percent >= float(config["inode_warning_percent"]):
-            alerts["inode:warning"] = f"Root filesystem inodes are {inode_percent:.1f}% used"
+            alerts["inode:warning"] = (
+                f"Root filesystem file slots (inodes) are {inode_percent:.1f}% used"
+            )
 
     memory = read_meminfo()
     available_mib = memory.get("MemAvailable", 0) / 1024**2
@@ -237,7 +279,11 @@ def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
     if swap_total:
         swap_percent = 100 * (swap_total - memory.get("SwapFree", 0)) / swap_total
         if swap_percent >= float(config["swap_warning_percent"]):
-            alerts["swap:used"] = f"Swap usage is {swap_percent:.1f}%"
+            alerts["swap:used"] = (
+                f"Swap usage is {swap_percent:.1f}%; "
+                f"{human_bytes(swap_total - memory.get('SwapFree', 0))} "
+                f"of {human_bytes(swap_total)}"
+            )
 
     cpu_count = os.cpu_count() or 1
     load = os.getloadavg()[0]
@@ -247,9 +293,15 @@ def resource_alerts(config: dict[str, Any]) -> dict[str, str]:
     if tracking.get("conntrack_limit", 0):
         percent = 100 * tracking["conntrack_entries"] / tracking["conntrack_limit"]
         if percent >= 90:
-            alerts["conntrack:critical"] = f"Connection tracking table is {percent:.1f}% full"
+            alerts["conntrack:critical"] = (
+                f"Connection tracking table is {percent:.1f}% full; "
+                f"{tracking['conntrack_entries']:,} of {tracking['conntrack_limit']:,} entries"
+            )
         elif percent >= 75:
-            alerts["conntrack:warning"] = f"Connection tracking table is {percent:.1f}% full"
+            alerts["conntrack:warning"] = (
+                f"Connection tracking table is {percent:.1f}% full; "
+                f"{tracking['conntrack_entries']:,} of {tracking['conntrack_limit']:,} entries"
+            )
     return alerts
 
 
@@ -270,7 +322,15 @@ def network_alerts(config: dict[str, Any]) -> dict[str, str]:
                 if marker and str(marker).encode() not in response.read(65536):
                     raise ValueError("expected response marker is missing")
         except Exception as error:
-            alerts[f"http:{name}"] = f"HTTP check {name} failed: {type(error).__name__}"
+            alerts[f"http:{name}"] = f"Web check {name} failed: " + (
+                "request timed out"
+                if isinstance(error, TimeoutError)
+                else "unexpected response"
+                if isinstance(error, ValueError)
+                else f"server returned HTTP {error.code}"
+                if isinstance(error, urllib.error.HTTPError)
+                else "connection, DNS or TLS failure"
+            )
     for item in config["tcp_checks"]:
         name = str(item["name"])
         try:
@@ -414,11 +474,12 @@ def storage_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
                 )
             elif percent >= 90:
                 alerts["storage:" + scope + ":critical"] = (
-                    "B2 " + scope + " storage critical; safe cleanup or capacity review required"
+                    "B2 " + scope + f" storage critical ({percent:.1f}% full); "
+                    "safe cleanup or capacity review required"
                 )
             elif percent >= 80:
                 alerts["storage:" + scope] = (
-                    "B2 " + scope + " storage warning; review growth and retention"
+                    "B2 " + scope + f" storage {percent:.1f}% full; review growth and retention"
                 )
         return alerts
     except (OSError, ValueError, KeyError, TypeError):
@@ -547,7 +608,14 @@ def user_alerts(
         if str(row["status"]) in {"limited", "expired"} and not reasons:
             reasons.append(str(row["status"]))
         if reasons:
-            alerts[f"user:{user_id}:account"] = f"User {username}: {', '.join(reasons)}"
+            alerts[f"user:{user_id}:account"] = (
+                f"User {username}: {', '.join(reasons)}. {quota_details(used, limit)}"
+                + (
+                    f"; expired at {utc_label(expire)}"
+                    if expire and expire <= now.timestamp()
+                    else ""
+                )
+            )
             continue
         if str(row["status"]) not in {"active", "on_hold"}:
             alerts[f"user:{user_id}:status"] = f"User {username} status is {row['status']}"
@@ -558,7 +626,8 @@ def user_alerts(
             if crossed:
                 threshold = max(crossed)
                 alerts[f"user:{user_id}:quota"] = (
-                    f"User {username} has used {percent:.1f}% of quota (threshold {threshold}%)"
+                    f"User {username} has used {percent:.1f}% of quota (threshold {threshold}%). "
+                    f"{quota_details(used, limit)}"
                 )
         expire = int(row["expire"] or 0)
         if expire > 0:
@@ -567,7 +636,8 @@ def user_alerts(
             if crossed_days:
                 threshold = min(crossed_days)
                 alerts[f"user:{user_id}:expiry"] = (
-                    f"User {username} expires in {max(days, 0):.1f} days "
+                    f"User {username} expires in {human_duration(expire - now.timestamp())} "
+                    f"at {utc_label(expire)} "
                     f"(threshold {threshold} days)"
                 )
         old = int(old_counters.get(user_id, used))
@@ -582,7 +652,9 @@ def user_alerts(
             )
         ):
             alerts[f"user:{user_id}:traffic"] = (
-                f"User {username} traffic rate is approximately {rate / GIB:.1f} GiB/hour"
+                f"User {username} traffic rate is approximately {human_bytes(rate)}/hour; "
+                f"{human_bytes(delta)} used in {human_duration(elapsed)}; "
+                f"hourly baseline: {human_bytes(historical) if historical else 'not available'}"
             )
     db.close()
     return alerts, counters
@@ -668,11 +740,20 @@ def heartbeat(env: dict[str, str]) -> None:
 
 
 def summarize(prefix: str, alerts: dict[str, str]) -> str:
+    recovered = prefix == "RECOVERED"
     lines = [f"{prefix} on {socket.gethostname()}"]
-    lines.extend(
-        f"• [{severity_for_key(key).upper()}] {key}: {message}"
-        for key, message in sorted(alerts.items())
-    )
+    for key, message in sorted(alerts.items()):
+        lines.append("")
+        lines.append(
+            f"{severity_for_key(key).title()}: {message}"
+            if not recovered
+            else f"Resolved. Previous alert: {message}"
+        )
+        lines.append(f"Incident key: {key}")
+        if not recovered:
+            lines.append(
+                "Next step: " + RULES.get(rule_for_key(key), "Inspect the affected component.")
+            )
     return "\n".join(lines)
 
 
@@ -722,7 +803,7 @@ RULES = {
     "user.status": "Inactive upstream account; inspect the panel status.",
     "user.traffic": "High traffic versus baseline; investigate usage before taking action.",
     "host.disk": "Disk space pressure; remove verified stale artifacts or expand storage.",
-    "host.inode": "Inode pressure; inspect excessive small files.",
+    "host.inode": "Filesystem file slots are running low; inspect excessive small files.",
     "host.memory": "Low available RAM; inspect resident processes and memory limits.",
     "host.swap": "High swap use; inspect memory pressure and paging.",
     "host.cpu": "High CPU load; inspect processes and host contention.",

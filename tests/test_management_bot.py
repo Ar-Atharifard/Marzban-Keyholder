@@ -488,3 +488,20 @@ def test_link_commands_reject_wrong_arguments_and_oversized_credentials(
     )
     with pytest.raises(ValueError, match="message size"):
         management_bot.command("/link alice", {})
+
+
+@pytest.mark.parametrize(
+    "used,limit,expected",
+    [
+        (96 * 1024**3, 100 * 1024**3, "4.00 GiB"),
+        (101 * 1024**3, 100 * 1024**3, "0 B"),
+        (1024, 0, "Unlimited"),
+        (1024, None, "Unlimited"),
+    ],
+)
+def test_usage_display_has_readable_quota(used: int, limit: int | None, expected: str) -> None:
+    text = management_bot.readable_result({"used_traffic": used, "data_limit": limit, "expire": 0})
+    assert f"Remaining quota: {expected}" in text
+    assert "Expire: Unlimited" in text
+    assert "Used traffic:" in text
+    assert "GiB" in text or "KiB" in text

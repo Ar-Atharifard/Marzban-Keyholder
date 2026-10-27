@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import math
@@ -20,6 +21,64 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+
+def readable_result(value: Any, key: str = "") -> str:
+    """Human display only; dispatcher results retain their machine-readable units."""
+    if isinstance(value, dict):
+        rows = [
+            f"{str(k).replace('_', ' ').capitalize()}: {readable_result(v, str(k))}"
+            for k, v in value.items()
+        ]
+        used, limit = value.get("used_traffic"), value.get("data_limit")
+        if isinstance(used, (int, float)) and (limit is None or isinstance(limit, (int, float))):
+            rows.append(
+                "Remaining quota: "
+                + (
+                    readable_result(max(0, limit - used), "remaining_bytes")
+                    if limit
+                    else "Unlimited"
+                )
+            )
+        return "\n".join(rows) or "None"
+    if isinstance(value, list):
+        return "\n".join("• " + readable_result(v, key) for v in value) or "None"
+    if value is None:
+        return "Unlimited" if key in {"expire", "data_limit"} else "Not available"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (int, float)):
+        if key == "expire":
+            return (
+                dt.datetime.fromtimestamp(value, dt.timezone.utc).strftime(  # noqa: UP017
+                    "%Y-%m-%d %H:%M UTC"
+                )
+                if value
+                else "Unlimited"
+            )
+        if key.endswith("_bytes") or key in {"used_traffic", "data_limit"}:
+            if key == "data_limit" and not value:
+                return "Unlimited"
+            size = float(value)
+            for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
+                if abs(size) < 1024 or unit == "PiB":
+                    return f"{size:,.0f} B" if unit == "B" else f"{size:,.2f} {unit}"
+                size /= 1024
+        for suffix, unit in (
+            ("_percent", "%"),
+            ("_mib", " MiB"),
+            ("_gib", " GiB"),
+            ("_seconds", " seconds"),
+        ):
+            if key.endswith(suffix):
+                return f"{value:,.1f}{unit}"
+        if key in {"first_seen", "last_seen", "sampled_at"}:
+            return dt.datetime.fromtimestamp(value, dt.timezone.utc).strftime(  # noqa: UP017
+                "%Y-%m-%d %H:%M UTC"
+            )
+        return f"{value:,}"
+    return str(value)
+
 
 MAX_MESSAGE = 3500
 SEND_LOCK = threading.Lock()
@@ -645,7 +704,11 @@ def command(text: str, state: dict[str, Any]) -> str:
             state.pop("picker", None)
     else:
         raise ValueError("Unknown command; use /help")
-    output = json.dumps(redact(result), ensure_ascii=False, indent=2)
+    output = (
+        readable_result(redact(result))
+        if name in {"monitor", "runmonitor", "alerts", "alertcontrols", "metrics", "usage", "users"}
+        else json.dumps(redact(result), ensure_ascii=False, indent=2)
+    )
     return output
 
 
