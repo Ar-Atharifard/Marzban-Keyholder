@@ -21,7 +21,12 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING or __package__:
+    from scripts.storage_budget import Budget
+else:
+    from storage_budget import Budget  # type: ignore[import-not-found,no-redef]
 
 try:
     from scripts.backup_database import backup_database
@@ -220,6 +225,7 @@ def discover(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def capture(config: dict[str, Any], output: Path) -> None:
+    config = {k: v for k, v in config.items() if k != "storage"}
     if config.keys() - {"files", "trees", "sqlite", "containers", "service_id", "compose_files"}:
         raise ValueError("Unknown capture field")
     if config.get("containers"):
@@ -429,9 +435,19 @@ def upload(config: dict[str, Any], work: Path, status: Path) -> None:
             # A failed run may retain secrets. Refuse implicit deletion of unknown data.
             raise ValueError("Previous bundle requires operator review")
         started = dt.datetime.now(dt.timezone.utc).isoformat()  # noqa: UP017
+        budget = Budget(config["storage"], work) if config.get("storage") else None
+        uploaded = False
+        finished = False
         try:
+            if budget:
+                budget.start()
             capture(config, bundle)
-            run(
+            if budget:
+                budget.capture_receipts(bundle)
+                verify(bundle)
+                budget.release_capture()
+                budget.admit(bundle)
+            backup_output = run(
                 [
                     "restic",
                     "backup",
@@ -440,10 +456,54 @@ def upload(config: dict[str, Any], work: Path, status: Path) -> None:
                     "--tag",
                     "keyholder-recovery-v1",
                     "--json",
+                    *(["--ignore-ctime"] if budget else []),
                     str(bundle),
                 ],
                 timeout=1800,
             )
+            uploaded = True
+            if budget:
+                summaries = [
+                    json.loads(line) for line in backup_output.splitlines() if line.strip()
+                ]
+                snapshot_id = next(
+                    (
+                        s.get("snapshot_id")
+                        for s in reversed(summaries)
+                        if s.get("message_type") == "summary"
+                    ),
+                    None,
+                )
+                if isinstance(snapshot_id, str) and re.fullmatch(r"[0-9a-f]{8}", snapshot_id):
+                    # restic 0.12 reports abbreviated IDs; never tag an ambiguous prefix.
+                    matches = json.loads(
+                        run(
+                            [
+                                "restic",
+                                "snapshots",
+                                "--json",
+                                "--host",
+                                config["service_id"],
+                                "--tag",
+                                "keyholder-recovery-v1",
+                                snapshot_id,
+                            ],
+                            timeout=60,
+                        )
+                    )
+                    candidates = [
+                        s["id"]
+                        for s in matches
+                        if isinstance(s.get("id"), str) and s["id"].startswith(snapshot_id)
+                    ]
+                    snapshot_id = candidates[0] if len(candidates) == 1 else None
+                if not isinstance(snapshot_id, str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", snapshot_id
+                ):
+                    raise ValueError(
+                        "Successful backup did not report a complete snapshot identity"
+                    )
+                run(["restic", "tag", "--add", "keyholder-complete", snapshot_id], timeout=60)
             # Retention is logical deletion only; repository compaction is separate.
             run(
                 [
@@ -452,13 +512,17 @@ def upload(config: dict[str, Any], work: Path, status: Path) -> None:
                     "--host",
                     config["service_id"],
                     "--tag",
-                    "keyholder-recovery-v1",
+                    "keyholder-recovery-v1,keyholder-complete"
+                    if budget
+                    else "keyholder-recovery-v1",
                     "--group-by",
                     "host,tags",
                     "--keep-daily",
-                    "7",
+                    str(config.get("storage", {}).get("keep_daily", 7)),
                     "--keep-weekly",
-                    "4",
+                    str(config.get("storage", {}).get("keep_weekly", 4)),
+                    "--keep-last",
+                    "2",
                 ],
                 timeout=300,
             )
@@ -478,12 +542,25 @@ def upload(config: dict[str, Any], work: Path, status: Path) -> None:
                 os.replace(temporary, status)
             finally:
                 Path(temporary).unlink(missing_ok=True)
+            if budget:
+                budget.finish(True)
+                finished = True
+                state = budget.api("GET", "/storage")
+                if state["scopes"]["recovery"]["percent"] >= 90:
+                    run(["restic", "check"], timeout=1800)
+                    budget.maintain(run, config["service_id"])
         finally:
+            if budget and not finished:
+                try:
+                    budget.finish(uploaded)
+                except Exception:
+                    # Uncertain reservations remain visible and block further uploads.
+                    pass
             if bundle.exists():
                 shutil.rmtree(bundle)
 
 
-def maintain(work: Path) -> None:
+def maintain(work: Path, config: dict[str, Any] | None = None) -> None:
     """Hold the shared lock across repository checks and compaction."""
     if work.is_symlink() or not work.is_dir() or work.stat().st_mode & 0o077:
         raise ValueError("Work directory must be private")
@@ -491,7 +568,14 @@ def maintain(work: Path) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         full = dt.datetime.now(dt.timezone.utc).day <= 7  # noqa: UP017
         run(["restic", "check", "--read-data" if full else "--read-data-subset=5%"], timeout=1800)
+        budget = Budget(config["storage"], work) if config and config.get("storage") else None
+        if budget:
+            budget.maintain(run, config["service_id"] if config else "")
         run(["restic", "prune", "--max-repack-size=256M", "--max-unused=10%"], timeout=1800)
+        run(["restic", "check"], timeout=1800)
+        if budget:
+            budget.measure()
+            budget.save_status(cleanup="checked-and-pruned")
 
 
 def main() -> None:
@@ -523,6 +607,22 @@ def main() -> None:
     remote.add_argument("--status", type=Path, required=True)
     maintenance = commands.add_parser("maintain", help="Check and compact the existing repository")
     maintenance.add_argument("--work", type=Path, required=True)
+    maintenance.add_argument("--config", type=Path, default=Path("/etc/keyholder/recovery.json"))
+    receipts = commands.add_parser(
+        "restore-receipts",
+        help="Rehydrate verified receipt objects into configured private storage",
+    )
+    receipts.add_argument("--bundle", type=Path, required=True)
+    receipts.add_argument("--config", type=Path, required=True)
+    receipts.add_argument("--work", type=Path, required=True)
+    receipts.add_argument("--environment", type=Path, default=Path("/etc/keyholder/recovery.env"))
+    capacity = commands.add_parser(
+        "capacity-preview",
+        help="Preview protected snapshots and safe capacity cleanup without deleting data",
+    )
+    capacity.add_argument("--config", type=Path, required=True)
+    capacity.add_argument("--work", type=Path, required=True)
+    capacity.add_argument("--environment", type=Path, default=Path("/etc/keyholder/recovery.env"))
     args = parser.parse_args()
     os.umask(0o077)
     try:
@@ -539,14 +639,43 @@ def main() -> None:
         elif args.action == "prepare-s3":
             prepare_s3(args.environment)
         elif args.action == "maintain":
-            maintain(args.work)
+            maintain(args.work, private_json(args.config) if args.config.exists() else None)
+        elif args.action == "restore-receipts":
+            os.environ.update(repository_environment(args.environment))
+            manifest = verify(args.bundle)
+            config = private_json(args.config)
+            budget = Budget(config["storage"], args.work)
+            count = budget.restore_receipts(args.bundle, manifest)
+            print(f"Verified {count} restored receipt objects.")
+        elif args.action == "capacity-preview":
+            os.environ.update(repository_environment(args.environment))
+            if args.work.is_symlink() or not args.work.is_dir() or args.work.stat().st_mode & 0o077:
+                raise ValueError("Work directory must be private")
+            config = private_json(args.config)
+            with (args.work / "backup.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                budget = Budget(config["storage"], args.work)
+                print(json.dumps(budget.preview(run, config["service_id"]), indent=2))
         elif args.action == "inventory":
             config = discover(private_json(args.seed))
             with args.output.open("x") as stream:
                 json.dump(config, stream, indent=2)
             args.output.chmod(0o600)
         elif args.action == "capture":
-            capture(private_json(args.config), args.output)
+            config = private_json(args.config)
+            if config.get("storage"):
+                # Manual captures include the same immutable receipt inventory as scheduled backups.
+                os.environ.update(repository_environment(Path("/etc/keyholder/recovery.env")))
+                budget = Budget(config["storage"], args.output.parent)
+                try:
+                    budget.start()
+                    capture(config, args.output)
+                    budget.capture_receipts(args.output)
+                    verify(args.output)
+                finally:
+                    budget.release_capture()
+            else:
+                capture(config, args.output)
         elif args.action == "verify":
             verify(args.bundle)
         elif args.action == "stage":

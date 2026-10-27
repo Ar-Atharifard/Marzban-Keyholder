@@ -33,20 +33,31 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def api(method: str, path: str, body: dict[str, Any] | None = None, *, raw: bool = False) -> Any:
+def api(
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+    *,
+    raw: bool = False,
+    key: str | None = None,
+    data: bytes | None = None,
+    media_type: str = "application/json",
+    maximum: int = 1024 * 1024,
+) -> Any:
     request = Request(
         os.getenv("KEYHOLDER_OPERATOR_API_URL", "http://127.0.0.1:18000").rstrip("/") + path,
-        data=json.dumps(body).encode() if body is not None else None,
+        data=data if data is not None else json.dumps(body).encode() if body is not None else None,
         headers={
             "Authorization": "Bearer " + os.environ["KEYHOLDER_ADMIN_KEY"],
-            "Content-Type": "application/json",
+            "Content-Type": media_type,
+            **({"Idempotency-Key": key} if key else {}),
         },
         method=method,
     )
     try:
         with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=15) as response:
-            data = response.read(1024 * 1024 + 1)
-            if len(data) > 1024 * 1024:
+            data = response.read(maximum + 1)
+            if len(data) > maximum:
                 raise OperatorError("API response exceeds the operator limit.")
             return data if raw else json.loads(data)
     except HTTPError as error:
@@ -153,6 +164,10 @@ def execute(operation: str, args: dict[str, Any]) -> Any:
 
 
 def _execute(operation: str, args: dict[str, Any]) -> Any:
+    if operation.startswith("billing-"):
+        from keyholder.billing_operator import execute as billing_execute
+
+        return billing_execute(operation, args, api, resolve)
     if operation == "backends":
         return api("GET", "/admin/backends")
     if operation == "backend-register":
@@ -718,7 +733,12 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
 def main() -> None:
     logging.disable(logging.CRITICAL)
     try:
-        payload = json.loads(sys.stdin.buffer.read(16385))
+        raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError("Request too large")
+        payload = json.loads(raw)
+        if len(raw) > 16384 and payload.get("operation") != "billing-receipt-upload":
+            raise ValueError("Request too large")
         result = execute(payload["operation"], payload["args"])
         print(json.dumps({"ok": True, "result": result}))
     except OperatorError as error:

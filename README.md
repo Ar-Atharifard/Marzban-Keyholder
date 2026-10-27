@@ -68,6 +68,7 @@ Docker, TLS routing and operator setup. Do not expose the administrator API publ
 | Guide | Contents |
 |---|---|
 | [Installation](docs/getting-started.md) | Setup, environment and multiple providers |
+| [Payments and referrals](docs/billing.md) | Private ledger, receipt retention and storage budgets |
 | [API](docs/api.md) | Endpoints, authentication, schemas and errors |
 | [CLI reference](scripts/admin/README.md) | Installation and daily commands |
 | [Development](docs/development.md) | Code map, DB, adapters, compatibility and publishing |

@@ -241,3 +241,37 @@ keyholder help user inbounds
 .BR ssh (1),
 .BR systemctl (1),
 .BR ufw (8)
+
+.SH PAYMENTS AND REFERRALS
+.B purchase create SELECTOR --description TEXT --amount DECIMAL
+records an agreed sale; --currency IRR|USDT|LTC defaults to IRR.
+Explicit --unit toman converts to rial. Quota/duration terms do not modify Marzban.
+.B payment create SELECTOR --amount DECIMAL --receiving-account ALIAS
+records a pending bank receipt. Confirm funds with
+.B payment confirm PAYMENT_ID --reason TEXT --confirm
+before allocating them with
+.B payment allocate PAYMENT_ID --purchase-id PURCHASE_ID --amount DECIMAL --confirm .
+.B billing balances SELECTOR
+shows separate currency balances.
+.PP
+.B referral create SELECTOR --referrer SELECTOR
+records a recommendation, eligible after the first positive confirmed payment.
+.B referral list --customer SELECTOR --state eligible
+lists unconsidered recommendations.
+.B gift create --referrer SELECTOR --description TEXT --referral-ids ID... --confirm
+records exactly which referrals a delivered gift covers.
+.PP
+.B receipt upload PAYMENT_ID FILE
+stores a private JPEG/PNG up to 5 MiB. It never verifies funds.
+.B receipt download RECEIPT_ID --output NEW_FILE
+retrieves the original privately.
+.B receipt keep|release RECEIPT_ID --reason TEXT --confirm
+controls retention protection.
+.B storage status
+shows configured budgets, usage and reservations.
+.B storage cleanup
+previews image expiry; --execute --confirm applies reviewed deletion.
+.PP
+Financial mutations print a retry key. Reuse --key SAME_KEY after uncertain responses.
+Confirmed history is corrected through reasoned reversals/refunds, never deletion.
+Use help RESOURCE ACTION for all arguments and docs/billing.md for storage setup.

@@ -5,7 +5,7 @@
   gather_facts: false
   vars:
     helper_sets:
-      foreign: [proxy_probe.py, management_bot.py, tls.py, gate_snapshot.py, monitor.py]
+      foreign: [proxy_probe.py, management_bot.py, billing_bot.py, tls.py, gate_snapshot.py, monitor.py]
       domestic: [domestic_guard.py, backhaul_guard.py, backhaul_probe.py, gate_status.py, monitor.py]
   tasks:
     - name: Require a selected role and explicit settings dictionary
@@ -44,7 +44,7 @@
             changed = False
             paths = ['/usr/local/lib/keyholder-admin/' + name for name in
                      ['component_config.py', 'components.json', 'proxy_probe.py',
-                      'management_bot.py', 'tls.py', 'gate_snapshot.py', 'monitor.py']]
+                      'management_bot.py', 'billing_bot.py', 'tls.py', 'gate_snapshot.py', 'monitor.py']]
             for name in ['/etc/keyholder/recovery.json', '/etc/keyholder/recovery-seed.json']:
                 p = Path(name)
                 if not p.exists():

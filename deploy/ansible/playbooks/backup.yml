@@ -25,7 +25,7 @@
         owner: root
         group: root
         mode: '0700'
-      loop: [recovery.py, backup_database.py]
+      loop: [recovery.py, backup_database.py, storage_budget.py]
     - name: Install recovery command
       ansible.builtin.copy:
         src: '{{ playbook_dir }}/../../recovery/keyholder-recovery'

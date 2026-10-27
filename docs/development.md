@@ -106,8 +106,9 @@ must not rotate it. Explicit rotation/revocation remains explicit. Preserve XHTT
 `extra` removal, certificate verification and credential redaction. Local revocation
 stops delivery, not previously downloaded proxy access: enforce that in the panel.
 
-Run one worker with SQLite. Shared rate limits, replicas, PostgreSQL and billing
-are not implemented. `/health` checks the DB, not upstream or ISP reachability.
+Run one worker with SQLite. Shared rate limits, replicas, PostgreSQL and automated billing
+are not implemented. The private purchase/payment and referral ledger is documented in
+[billing](billing.md). `/health` checks the DB, not upstream or ISP reachability.
 
 Public docs describe reusable behavior. Keep real inventories, personal guides,
 network tests and credentials in ignored `.private/`; ignored does not mean encrypted.

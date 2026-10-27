@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from starlette.exceptions import HTTPException
 
-from keyholder.api import admin, public
+from keyholder.api import admin, billing, public, storage
 from keyholder.backends.registry import backend_configs, build_backends
 from keyholder.config import Settings
 from keyholder.db import make_database
@@ -32,6 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # HTTP libraries may log URLs at INFO; keep adapter diagnostics secret-safe.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    for library in ("boto3", "botocore", "s3transfer"):
+        logging.getLogger(library).setLevel(logging.WARNING)
     engine, sessions = make_database(
         settings.database_url, busy_timeout=settings.sqlite_busy_timeout
     )
@@ -70,11 +72,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.sessions = sessions
+    from keyholder.object_storage import ObjectStorage
+
+    app.state.receipt_store = ObjectStorage(settings) if settings.receipt_s3_bucket else None
     app.state.limiter = MemoryRateLimiter(
         settings.rate_limit_per_minute, max_keys=settings.rate_limit_max_keys
     )
     app.include_router(public.router)
     app.include_router(admin.router)
+    app.include_router(billing.router)
+    app.include_router(storage.router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> Response:

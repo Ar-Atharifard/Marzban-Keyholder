@@ -52,6 +52,9 @@ def test_user_quota_expiry_and_status_come_from_marzban(tmp_path: Path) -> None:
     db.commit()
     db.close()
     alerts, counters = monitor.user_alerts(config(path), {}, now)
+    assert "Used: 96.00 GiB; allowance: 100.00 GiB; remaining: 4.00 GiB" in alerts["user:1:quota"]
+    assert "2 days" in alerts["user:1:expiry"]
+    assert "2026-01-03 00:00 UTC" in alerts["user:1:expiry"]
     assert counters == {"1": 96 * monitor.GIB}
     assert set(alerts) == {"user:1:status", "user:1:quota", "user:1:expiry"}
     assert "alice" in " ".join(alerts.values())
@@ -292,7 +295,9 @@ def test_exhausted_account_has_one_combined_warning(tmp_path: Path) -> None:
     db.commit()
     db.close()
     alerts, _ = monitor.user_alerts(config(path), {}, dt.datetime.now(dt.UTC))
-    assert alerts == {"user:1:account": "User alice: quota exhausted, expired"}
+    assert set(alerts) == {"user:1:account"}
+    assert "quota exhausted, expired" in alerts["user:1:account"]
+    assert "Used: 100 B; allowance: 100 B; remaining: 0 B" in alerts["user:1:account"]
 
 
 def test_operator_backup_does_not_mask_stale_database_recovery(tmp_path: Path) -> None:

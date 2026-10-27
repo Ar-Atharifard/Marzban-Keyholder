@@ -136,5 +136,37 @@ are read-only and must enforce availability; see [provider boundary](development
 
 `/docs`, `/redoc`, `/openapi.json` and retired `/admin/settings/ech` are unavailable.
 Generate offline OpenAPI with `scripts/export_openapi.py` (no production secrets,
-DB creation or lifespan startup). No delete-customer, billing, node-management,
+DB creation or lifespan startup). No delete-customer, automated billing, node-management,
 plan, provisioning or application-settings API is implemented.
+
+## Private ledger and storage
+
+See [payments and referrals](billing.md) for business rules and administrator examples.
+New routes require the existing admin bearer key. Monetary request/response amounts
+are decimal strings; mutation requests require `Idempotency-Key` (16–128 ASCII
+letters/digits/`._:-`). Reuse it with identical input after uncertain responses.
+
+| Resource | Routes |
+|---|---|
+| Purchases | POST/GET `/admin/purchases`; GET `/{id}`; POST `/{id}/cancel` |
+| Payments | POST/GET `/admin/payments`; GET `/{id}`; POST `/{id}/confirm`, `/void`, `/refunds`, `/allocations`; GET `/{id}/refunds`, `/allocations` |
+| Allocations | POST `/admin/allocations/{id}/reverse` |
+| Balances | GET `/admin/customers/{id}/balances` |
+| Referrals | POST/GET `/admin/referrals`; filters `referrer_id`, `state`, `since`, `until` |
+| Gifts | POST/GET `/admin/gifts`; POST `/{id}/reverse` |
+| Audit | GET `/admin/billing/actions` |
+| Receipts | POST/GET `/admin/payments/{id}/receipts`; GET `/admin/receipts/{id}/content`; POST `/{id}/protection`, `/{id}/restore` |
+| Capacity | GET `/admin/storage`, `/admin/storage/reservations`; POST `/admin/storage/reconcile`, `/receipts/cleanup`; PUT `/admin/storage/usage/recovery` |
+| Coordination | POST `/admin/storage/reservations/{id}`, `/{id}/release`, `/admin/storage/capture/start`; GET `/admin/storage/receipt-manifest` |
+
+Lists use `limit` 1–100 and `offset` ≥0. Confirm/cancel/reverse/refund/protection
+requests include a nonempty `reason`. Receipt uploads/restores use raw `image/png`
+or `image/jpeg` bodies, bounded at 5 MiB; downloads return authenticated attachment
+bytes. Upload retries are bound to payment, key and checksum. Images cannot verify
+funds or change panel service. Usage/reservation endpoints are trusted host
+coordination interfaces: never expose them or use customer-supplied measurements.
+
+Conflicts return 409; invalid money/images 422; oversized upload 413; expired content
+410; stale usage/unconfigured storage 503; exhausted budgets 507. Existing public
+subscription/customer schemas remain unchanged. Offline OpenAPI includes the new
+request schemas; no live documentation endpoint is enabled.

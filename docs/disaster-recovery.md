@@ -178,3 +178,11 @@ No old server is stopped and no public DNS record changed without your action.
 Preserve old hosts until acceptance; after new writes, rollback must account for
 changed data. Stage-specific commands above remain for contributors and incident
 recovery, not the normal paired procedure. A fresh paired rehearsal is still required.
+
+## Bounded storage and receipt objects
+
+[Ledger storage and recovery](billing.md#coordinate-recovery) describes the optional
+shared 10 GB budget, 6 GB recovery allocation, protected restore points, receipt
+capture/rehydration and activation gates. Without its private `storage` configuration,
+legacy backup capture does not enforce that capacity limit. Install the matched
+`storage_budget.py` helper and include it in the recovery inventory.
