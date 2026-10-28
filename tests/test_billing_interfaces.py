@@ -65,7 +65,7 @@ def test_operator_round_trip_and_bot_confirmation(
     )
     confirmation = state["pending"]["code"]
     assert "confirmed" in management_bot.command("/confirm " + confirmation, state)
-    assert "1000" in management_bot.command("/billing balances alice", {})
+    assert "1,000 IRR" in management_bot.command("/billing balances alice", {})
 
 
 def test_cli_payload_preserves_retry_key_and_rejects_unconfirmed_action(tmp_path: Path) -> None:
@@ -121,3 +121,51 @@ def test_receipt_download_refuses_overwrite_before_request(tmp_path: Path) -> No
 
     assert billing_cli.run(args, request) == 1
     assert output.read_bytes() == b"original"
+
+
+def test_receipt_upload_reply_uses_human_format_and_hides_binary_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+    import urllib.request
+
+    from keyholder.operator_output import render
+    from scripts import billing_bot
+
+    class Opener:
+        def open(self, *args: Any, **kwargs: Any) -> io.BytesIO:
+            return io.BytesIO(b"synthetic-image")
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *a: Opener())
+    state = {
+        "receipt_upload": {
+            "expires": time.time() + 300,
+            "payment_id": "payment-id",
+            "key": "retry-key",
+        }
+    }
+
+    def telegram(*args: Any) -> Any:
+        return {"result": {"file_path": "photos/synthetic.png"}}
+
+    def dispatch(operation: str, args: dict[str, Any]) -> Any:
+        assert operation == "billing-receipt-upload"
+        assert base64.b64decode(args["content"]) == b"synthetic-image"
+        return {
+            "id": "receipt-id",
+            "size_bytes": 2048,
+            "created_at": "2026-01-01T00:00:00Z",
+            "content": "hidden-image",
+        }
+
+    text = billing_bot.receive(
+        "synthetic",
+        {"photo": [{"file_id": "synthetic"}]},
+        state,
+        telegram,
+        dispatch,
+        "https://example.invalid",
+        render,
+    )
+    assert "Size: 2.00 KiB" in text and "2026-01-01 00:00:00 UTC" in text
+    assert "hidden-image" not in text and "receipt_upload" not in state

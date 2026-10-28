@@ -121,6 +121,38 @@ grace. A dead VPS cannot send Telegram itself. Customer quota warnings do not
 suppress infrastructure heartbeat health.
 
 `keyholder monitor status` reads state; `monitor run` checks without notifications.
+Operator replies use the shared `operator_output.py` formatter. For an operational
+helper update, inspect and back up the installed files, then install the matched
+CLI, bot dependencies, monitor and worker from the reviewed checkout:
+
+```sh
+sudo python3 scripts/admin/install_cli.py
+sudo install -o root -g root -m 0755 \
+  scripts/management_bot.py scripts/billing_bot.py scripts/component_config.py \
+  scripts/monitor.py scripts/admin/worker.py /usr/local/lib/keyholder-admin/
+```
+
+The CLI installer also installs the bot's standalone `operator_output.py`; copying
+only `management_bot.py` is insufficient. Before restarting, verify imports using
+the host Python:
+
+```sh
+cd /usr/local/lib/keyholder-admin
+sudo env PYTHONDONTWRITEBYTECODE=1 python3 -c 'import management_bot; print("Bot imports OK")'
+sudo systemctl restart keyholder-management-bot.service
+sudo systemctl status keyholder-management-bot.service --no-pager
+```
+
+The next scheduled monitor run uses its updated script. Verify `/ping`, `/usage USER`,
+`/monitor` and `/metrics`, and verify an intended update's reply when performing
+that update normally. Usage needs the matching `worker.py`: it fetches the account
+plan in addition to per-node counters. No API rebuild or migration is needed for
+this presentation/usage change. Billing features themselves still require a matching
+API/schema deployment; installing helper files does not deploy those features.
+Keep these installed files in the private recovery inventory, and record helper
+versions separately from the running API image. Restore saved files and restart
+the bot if validation fails.
+
 Bot `/help` lists commands; `/metrics`, `/monitor`, `/alerts` and `/ping` are read-only.
 Mutations use a bounded serial queue and expire after five minutes. Lost replies
 are not replayed: inspect state before retrying. Destructive commands require

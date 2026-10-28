@@ -207,7 +207,9 @@ def run(args: argparse.Namespace, request: Any) -> int:
                 stream.write(raw)
             print("Receipt saved privately.")
         else:
-            print(json.dumps(result, indent=2, ensure_ascii=False))
+            from keyholder.operator_output import render
+
+            print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else render(result))
         return 0
     except (OSError, ValueError, RuntimeError) as error:
         print(str(error), file=sys.stderr)
