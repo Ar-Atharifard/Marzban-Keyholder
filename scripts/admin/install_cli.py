@@ -13,6 +13,7 @@ MODULES = (
     "personal.py",
     "cli.py",
     "billing_cli.py",
+    "operator_output.py",
 )
 WRAPPER = """#!/usr/bin/env python3
 import sys
@@ -49,6 +50,7 @@ def install(checkout: Path, prefix: Path) -> None:
     directory = prefix / "lib/keyholder-admin"
     for name, contents in modules.items():
         write_atomic(directory / "keyholder" / name, contents)
+    write_atomic(directory / "operator_output.py", modules["operator_output.py"])
     write_atomic(directory / "cli.py", WRAPPER.encode(), 0o755)
     write_atomic(prefix / "share/man/man1/keyholder.1", manual)
     link = prefix / "bin/keyholder"

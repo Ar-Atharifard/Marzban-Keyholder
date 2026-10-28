@@ -248,12 +248,27 @@ def test_all_regular_command_contracts(
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    def dispatch(op: str, args: dict[str, Any]) -> dict[str, bool]:
+    def dispatch(op: str, args: dict[str, Any]) -> dict[str, Any]:
         calls.append((op, args))
-        return {"ok": True}
+        return {
+            "ok": True,
+            "account": {
+                "username": "alice",
+                "data_limit": 5 * 1024**3,
+                "used_traffic": 1024**3,
+                "expire": 1767225600,
+            },
+            "token": "private-token",
+        }
 
     monkeypatch.setattr(management_bot, "dispatch", dispatch)
-    management_bot.command(text, {})
+    output = management_bot.command(text, {})
+    assert "Traffic allowance: 5.00 GiB" in output
+    assert "Traffic used: 1.00 GiB" in output
+    assert "Remaining quota: 4.00 GiB" in output
+    assert "2026-01-01 00:00:00 UTC" in output
+    assert "private-token" not in output
+    assert '"data_limit"' not in output
     assert calls == [(operation, expected)]
 
 
@@ -496,12 +511,50 @@ def test_link_commands_reject_wrong_arguments_and_oversized_credentials(
         (96 * 1024**3, 100 * 1024**3, "4.00 GiB"),
         (101 * 1024**3, 100 * 1024**3, "0 B"),
         (1024, 0, "Unlimited"),
-        (1024, None, "Unlimited"),
+        (1024, None, "Not available"),
     ],
 )
-def test_usage_display_has_readable_quota(used: int, limit: int | None, expected: str) -> None:
-    text = management_bot.readable_result({"used_traffic": used, "data_limit": limit, "expire": 0})
+def test_usage_display_has_readable_quota(
+    monkeypatch: pytest.MonkeyPatch, used: int, limit: int | None, expected: str
+) -> None:
+    monkeypatch.setattr(
+        management_bot,
+        "dispatch",
+        lambda *a: {
+            "username": "alice",
+            "used_traffic": used,
+            "data_limit": limit,
+            "expire": 0,
+            "usages": [{"node_name": "Gate", "node_id": 1, "used_traffic": 1024}],
+        },
+    )
+    text = management_bot.command("/usage alice", {})
     assert f"Remaining quota: {expected}" in text
-    assert "Expire: Unlimited" in text
-    assert "Used traffic:" in text
+    assert "Expires: No expiry" in text
+    assert "Traffic used:" in text
+    assert text.count("Remaining quota:") == 1
     assert "GiB" in text or "KiB" in text
+
+
+def test_config_listing_is_readable_and_keeps_copyable_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        management_bot,
+        "dispatch",
+        lambda *a: {
+            "configs": [
+                {
+                    "id": "abc123",
+                    "name": "IR | REALITY | T1",
+                    "protocol": "vless",
+                    "transport": "tcp",
+                    "security": "reality",
+                    "ech": False,
+                    "config_uri": "vless://private",
+                }
+            ]
+        },
+    )
+    output = management_bot.command("/configs alice", {})
+    assert "ID: abc123" in output and "Name: IR | REALITY | T1" in output
+    assert "ECH enabled: No" in output
+    assert "private" not in output and '"configs"' not in output

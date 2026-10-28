@@ -189,3 +189,61 @@ def test_lookup_distinguishes_missing_registration_from_duplicates(
     expected = "No Keyholder registration" if count == 0 else "selector is ambiguous"
     with pytest.raises(worker.OperatorError, match=expected):
         worker.resolve("ALICE")
+
+
+def test_usage_fetches_account_plan_without_summing_node_counters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    import httpx
+
+    from keyholder.backends.marzban import MarzbanBackend
+    from scripts.admin import worker
+    from tests.support import ADMIN_KEY
+
+    monkeypatch.setenv("KEYHOLDER_ADMIN_KEY", ADMIN_KEY)
+    calls: list[str] = []
+    account = {
+        "username": "alice",
+        "status": "active",
+        "data_limit": 100 * 1024**3,
+        "used_traffic": 96 * 1024**3,
+        "expire": 1767398400,
+        "inbounds": {"vless": ["T1"]},
+        "proxies": {"vless": {"id": "private-id"}},
+        "subscription_url": "https://example.invalid/private",
+    }
+    usage = {
+        "username": "alice",
+        "usages": [
+            {"node_id": 1, "node_name": "Gate", "used_traffic": 5 * 1024**3},
+        ],
+    }
+
+    async def login(self: MarzbanBackend) -> None:
+        self.token = "synthetic"
+
+    async def request(
+        self: MarzbanBackend, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response:
+        assert method == "GET"
+        calls.append(path)
+        return httpx.Response(200, json=usage if path.endswith("/usage") else account)
+
+    monkeypatch.setattr(MarzbanBackend, "login", login)
+    monkeypatch.setattr(MarzbanBackend, "request", request)
+    result = asyncio.run(worker.panel_operation("user-usage", {"username": "alice"}))
+    assert set(calls) == {"/api/user/alice", "/api/user/alice/usage"}
+    assert result["data_limit"] == 100 * 1024**3
+    assert result["used_traffic"] == 96 * 1024**3
+    assert result["usages"] == usage["usages"]
+    assert result["expire"] == account["expire"]
+    assert "private" not in str(result)
+
+
+def test_panel_summary_distinguishes_explicit_no_limit_from_missing_fields() -> None:
+    from scripts.admin.worker import summary
+
+    assert summary({"data_limit": None, "expire": None}) == {"data_limit": 0, "expire": 0}
+    assert summary({"username": "alice"}) == {"username": "alice"}

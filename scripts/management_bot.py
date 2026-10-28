@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import json
 import logging
 import math
@@ -21,64 +20,6 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-
-def readable_result(value: Any, key: str = "") -> str:
-    """Human display only; dispatcher results retain their machine-readable units."""
-    if isinstance(value, dict):
-        rows = [
-            f"{str(k).replace('_', ' ').capitalize()}: {readable_result(v, str(k))}"
-            for k, v in value.items()
-        ]
-        used, limit = value.get("used_traffic"), value.get("data_limit")
-        if isinstance(used, (int, float)) and (limit is None or isinstance(limit, (int, float))):
-            rows.append(
-                "Remaining quota: "
-                + (
-                    readable_result(max(0, limit - used), "remaining_bytes")
-                    if limit
-                    else "Unlimited"
-                )
-            )
-        return "\n".join(rows) or "None"
-    if isinstance(value, list):
-        return "\n".join("• " + readable_result(v, key) for v in value) or "None"
-    if value is None:
-        return "Unlimited" if key in {"expire", "data_limit"} else "Not available"
-    if isinstance(value, bool):
-        return "Yes" if value else "No"
-    if isinstance(value, (int, float)):
-        if key == "expire":
-            return (
-                dt.datetime.fromtimestamp(value, dt.timezone.utc).strftime(  # noqa: UP017
-                    "%Y-%m-%d %H:%M UTC"
-                )
-                if value
-                else "Unlimited"
-            )
-        if key.endswith("_bytes") or key in {"used_traffic", "data_limit"}:
-            if key == "data_limit" and not value:
-                return "Unlimited"
-            size = float(value)
-            for unit in ("B", "KiB", "MiB", "GiB", "TiB", "PiB"):
-                if abs(size) < 1024 or unit == "PiB":
-                    return f"{size:,.0f} B" if unit == "B" else f"{size:,.2f} {unit}"
-                size /= 1024
-        for suffix, unit in (
-            ("_percent", "%"),
-            ("_mib", " MiB"),
-            ("_gib", " GiB"),
-            ("_seconds", " seconds"),
-        ):
-            if key.endswith(suffix):
-                return f"{value:,.1f}{unit}"
-        if key in {"first_seen", "last_seen", "sampled_at"}:
-            return dt.datetime.fromtimestamp(value, dt.timezone.utc).strftime(  # noqa: UP017
-                "%Y-%m-%d %H:%M UTC"
-            )
-        return f"{value:,}"
-    return str(value)
-
 
 MAX_MESSAGE = 3500
 SEND_LOCK = threading.Lock()
@@ -103,11 +44,13 @@ BOT_COMMANDS = [
 
 
 if TYPE_CHECKING or __package__:
+    from keyholder.operator_output import render as readable_result
     from scripts import billing_bot
     from scripts.component_config import settings as component_settings
 else:
     import billing_bot
     from component_config import settings as component_settings
+    from operator_output import render as readable_result
 
 
 OPTIONS = component_settings(
@@ -365,7 +308,7 @@ def command(text: str, state: dict[str, Any]) -> str:
         "billing",
         "billinghelp",
     }:
-        return billing_bot.command(name, words, state, dispatch, CONFIRM_SECONDS)
+        return billing_bot.command(name, words, state, dispatch, CONFIRM_SECONDS, readable_result)
     if name == "ping":
         return "Online."
     if name in {"start", "help"}:
@@ -452,7 +395,7 @@ def command(text: str, state: dict[str, Any]) -> str:
             link_args["profile"] = words[1]
         result = dispatch(name, link_args)
         if name == "configs":
-            return json.dumps(redact(result), ensure_ascii=False, indent=2)
+            return readable_result(redact(result))
         value = result["subscription_url"] if name == "link" else result["config_uri"]
         if not isinstance(value, str) or any(c in value for c in "\r\n"):
             raise ValueError("Invalid private link response")
@@ -704,12 +647,7 @@ def command(text: str, state: dict[str, Any]) -> str:
             state.pop("picker", None)
     else:
         raise ValueError("Unknown command; use /help")
-    output = (
-        readable_result(redact(result))
-        if name in {"monitor", "runmonitor", "alerts", "alertcontrols", "metrics", "usage", "users"}
-        else json.dumps(redact(result), ensure_ascii=False, indent=2)
-    )
-    return output
+    return readable_result(redact(result))
 
 
 def send_reply(token: str, admin_id: int, text: str) -> None:
@@ -769,7 +707,13 @@ def main() -> None:
                     raise ValueError("Queued command expired; send it again")
                 if isinstance(text, dict):
                     reply = billing_bot.receive(
-                        token, text, local, telegram, dispatch, OPTIONS["telegram_api_base"]
+                        token,
+                        text,
+                        local,
+                        telegram,
+                        dispatch,
+                        OPTIONS["telegram_api_base"],
+                        readable_result,
                     )
                 else:
                     reply = command(text, local)

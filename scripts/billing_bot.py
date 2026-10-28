@@ -5,16 +5,21 @@ from __future__ import annotations
 import base64
 import contextlib
 import io
-import json
 import secrets
 import time
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
 
 def command(
-    name: str, words: list[str], state: dict[str, Any], dispatch: Any, confirmation_seconds: int
+    name: str,
+    words: list[str],
+    state: dict[str, Any],
+    dispatch: Any,
+    confirmation_seconds: int,
+    render: Callable[[Any], str],
 ) -> str:
     from keyholder import billing_cli
     from keyholder.cli import parser
@@ -122,16 +127,11 @@ def command(
         }
         return (
             "Review change:\n"
-            + json.dumps(payload["args"], ensure_ascii=False, indent=2)
+            + render(payload["args"])
             + f"\nConfirm within five minutes with /confirm {code}"
         )
     result = dispatch(payload["operation"], payload["args"])
-    return (
-        "Request key: "
-        + str(payload["args"]["key"])
-        + "\n"
-        + json.dumps(result, ensure_ascii=False, indent=2)
-    )
+    return "Request key: " + str(payload["args"]["key"]) + "\n" + render(result)
 
 
 def receive(
@@ -141,6 +141,7 @@ def receive(
     telegram: Any,
     dispatch: Any,
     base: str,
+    render: Callable[[Any], str],
 ) -> str:
     pending = state.get("receipt_upload", {})
     if pending.get("expires", 0) < time.time():
@@ -176,4 +177,4 @@ def receive(
         },
     )
     state.pop("receipt_upload", None)
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return render(result)

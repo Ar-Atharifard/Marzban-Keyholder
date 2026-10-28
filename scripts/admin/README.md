@@ -30,7 +30,8 @@ keyholder system doctor
 ```
 
 This updates CLI modules and the manual, without restarting services or deploying
-the API. A Git pull alone does not update installed tools. Keep CLI, worker and API
+the API. It also installs the shared `operator_output.py` display module beside
+the standalone bot. A Git pull alone does not update installed tools. Keep CLI, worker and API
 versions compatible. The old `scripts/admin/cli.py` entrypoint remains supported.
 
 The root-owned dispatcher reads mode-0600 `host.json` beside itself, or the path in
@@ -132,4 +133,7 @@ The `purchase`, `payment`, `referral`, `gift`, `receipt`, `billing` and `storage
 resources use the same SSH transport and customer selectors. See
 [ledger operations](../../docs/billing.md) for payment verification, partial
 allocations, gift batches, image retention and recovery capacity. The bot provides
-`/billinghelp`. Install the matching `billing_cli.py` and `billing_bot.py` dependencies.
+`/billinghelp`. Refresh the CLI with its installer and install the matching
+`billing_bot.py` and `component_config.py` alongside `management_bot.py`.
+[Operational helper deployment](../../docs/operations.md#lightweight-monitoring-and-bots)
+describes installation and import validation.

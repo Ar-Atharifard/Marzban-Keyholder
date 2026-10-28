@@ -24,8 +24,13 @@ Quota notices show used, total and remaining traffic with explicit binary units
 (KiB/MiB/GiB); remaining traffic never goes below zero. Expiry notices include
 days/hours/minutes and an exact UTC date. Recovery messages label the previous
 condition, and active notifications include a next step and the incident key.
-The management bot renders monitoring, metrics and usage as labeled text while
-the CLI/dispatcher JSON contract retains numeric values.
+All Telegram command results, including updates, confirmed changes, configuration
+lists, billing and receipts, use labeled text with units and UTC timestamps. The
+CLI uses the same presentation by default; `--json` retains machine-readable values.
+Usage fetches the account plan separately from per-node traffic; a missing quota
+is unavailable, never inferred to be unlimited. Explicit Marzban null quota/expiry
+values are normalized to the panel's zero/no-limit convention by the worker.
+Node counters never get a fabricated remaining quota.
 
 ## Control notifications
 

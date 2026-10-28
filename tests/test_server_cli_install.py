@@ -37,3 +37,32 @@ def test_server_wrapper_defaults_to_local_dispatch(tmp_path: Path) -> None:
         )
         assert result.returncode == 0
         assert result.stdout.count("--local") == 1
+
+
+def test_installed_standalone_bot_has_all_imports_and_formats_updates(tmp_path: Path) -> None:
+    import shutil
+
+    checkout = Path(__file__).resolve().parents[1]
+    install(checkout, tmp_path)
+    directory = tmp_path / "lib/keyholder-admin"
+    for name in ("management_bot.py", "billing_bot.py", "component_config.py"):
+        shutil.copyfile(checkout / "scripts" / name, directory / name)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys,runpy; sys.path.insert(0,sys.argv[1]); "
+            "bot=runpy.run_path(sys.argv[1]+'/management_bot.py', run_name='install_check'); "
+            "bot['command'].__globals__['dispatch']=lambda *a: "
+            "{'username':'alice','data_limit':5368709120,'used_traffic':1073741824}; "
+            "print(bot['command']('/update alice quota=5',{}))",
+            str(directory),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Traffic allowance: 5.00 GiB" in result.stdout
+    assert "Remaining quota: 4.00 GiB" in result.stdout

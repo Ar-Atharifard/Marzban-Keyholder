@@ -46,14 +46,13 @@ def utc_label(timestamp: float) -> str:
 
 
 def human_duration(seconds: float) -> str:
-    remaining = max(1, math.ceil(max(0, seconds) / 60))
-    days, remaining = divmod(remaining, 1440)
-    hours, minutes = divmod(remaining, 60)
+    remaining = max(0, int(seconds))
     parts = []
-    for amount, unit in ((days, "day"), (hours, "hour"), (minutes, "minute")):
+    for divisor, unit in ((86400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
+        amount, remaining = divmod(remaining, divisor)
         if amount:
-            parts.append(f"{amount} {unit}{'s' if amount != 1 else ''}")
-    return " ".join(parts)
+            parts.append(f"{amount:,} {unit}{'s' if amount != 1 else ''}")
+    return " ".join(parts) or "0 seconds"
 
 
 def quota_details(used: int, limit: int) -> str:
@@ -422,7 +421,7 @@ def backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
         newest = 0
     age_hours = (now - newest) / 3600 if newest else float("inf")
     if age_hours > float(config["backup_max_age_hours"]):
-        age = "missing" if newest == 0 else f"{age_hours:.1f} hours old"
+        age = "missing" if newest == 0 else f"{human_duration(now - newest)} old"
         return {"backup:age": f"Latest recovery snapshot is {age}"}
     return {}
 
@@ -442,6 +441,14 @@ def offsite_backup_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
         maximum_age = float(config.get("offsite_backup_max_age_hours", 24)) * 3600
         if now - captured.timestamp() <= maximum_age:
             return {}
+        return {
+            "backup:offsite": (
+                "Encrypted off-server backup is overdue: "
+                f"captured at {utc_label(captured.timestamp())}; "
+                f"age {human_duration(now - captured.timestamp())}; "
+                f"maximum allowed {human_duration(maximum_age)}"
+            )
+        }
     except (OSError, ValueError, KeyError, TypeError):
         pass
     return {"backup:offsite": "Encrypted off-server recovery backup is missing, invalid or overdue"}
@@ -468,6 +475,16 @@ def storage_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
             )
         for scope, state in value["scopes"].items():
             percent = state.get("percent")
+            details = ""
+            if all(
+                isinstance(state.get(field), (int, float))
+                for field in ("used_bytes", "budget_bytes")
+            ):
+                details = (
+                    f" Used: {human_bytes(state['used_bytes'])}; "
+                    f"budget: {human_bytes(state['budget_bytes'])}; "
+                    f"reserved: {human_bytes(state.get('reserved_bytes', 0))}."
+                )
             if state.get("stale") or percent is None:
                 alerts["storage:" + scope + ":critical"] = (
                     "B2 " + scope + " usage measurement is missing or stale"
@@ -475,11 +492,14 @@ def storage_alerts(config: dict[str, Any], now: float) -> dict[str, str]:
             elif percent >= 90:
                 alerts["storage:" + scope + ":critical"] = (
                     "B2 " + scope + f" storage critical ({percent:.1f}% full); "
-                    "safe cleanup or capacity review required"
+                    "safe cleanup or capacity review required." + details
                 )
             elif percent >= 80:
                 alerts["storage:" + scope] = (
-                    "B2 " + scope + f" storage {percent:.1f}% full; review growth and retention"
+                    "B2 "
+                    + scope
+                    + f" storage {percent:.1f}% full; review growth and retention."
+                    + details
                 )
         return alerts
     except (OSError, ValueError, KeyError, TypeError):
@@ -542,7 +562,19 @@ def remote_hosts(items: list[dict[str, str]]) -> tuple[dict[str, str], dict[str,
             metrics = snapshot["metrics"]
             failed = [key for key, value in snapshot["services"].items() if value != "active"]
             if failed or not snapshot["guard"]["entry_permitted"]:
-                alerts[prefix + ":service"] = f"{name}: entry/control services unhealthy"
+                alerts[prefix + ":service"] = (
+                    f"{name}: entry/control services unhealthy; "
+                    + (
+                        "inactive services: " + ", ".join(sorted(failed))
+                        if failed
+                        else "services active"
+                    )
+                    + (
+                        "; customer entry closed by heartbeat guard"
+                        if not snapshot["guard"]["entry_permitted"]
+                        else ""
+                    )
+                )
             if "backhauls" in snapshot:
                 paths = snapshot["backhauls"]
                 if not isinstance(paths, dict):
@@ -554,11 +586,21 @@ def remote_hosts(items: list[dict[str, str]]) -> tuple[dict[str, str], dict[str,
                     alerts[prefix + ":redundancy"] = f"{name}: foreign backhaul redundancy lost"
             disk = 100 * metrics["disk_used_gib"] / metrics["disk_total_gib"]
             if disk >= 80:
-                alerts[prefix + ":disk"] = f"{name}: root disk is {disk:.0f}% full"
+                alerts[prefix + ":disk"] = (
+                    f"{name}: root disk is {disk:.1f}% full; "
+                    f"{metrics['disk_used_gib']:.2f} GiB used "
+                    f"of {metrics['disk_total_gib']:.2f} GiB"
+                )
             if metrics["memory_available_mib"] < 200:
-                alerts[prefix + ":memory"] = f"{name}: available memory below 200 MiB"
+                alerts[prefix + ":memory"] = (
+                    f"{name}: available RAM is {metrics['memory_available_mib']:.1f} MiB "
+                    "(warning below 200 MiB)"
+                )
             if metrics["load_1_5_15"][1] > metrics["cpus"] * 1.5:
-                alerts[prefix + ":cpu"] = f"{name}: sustained high CPU load"
+                alerts[prefix + ":cpu"] = (
+                    f"{name}: five-minute load is {metrics['load_1_5_15'][1]:.2f} "
+                    f"across {metrics['cpus']} CPU cores"
+                )
             snapshots[name] = snapshot
         except (
             OSError,
@@ -817,6 +859,10 @@ RULES = {
     "service.tls": "Certificate needs attention; run tls status and inspect renewal service.",
     "backup.age": "Recovery snapshot overdue; run system backup and verify integrity.",
     "backup.offsite": "Offsite backup overdue; inspect recovery service, storage and credentials.",
+    "storage.blocked": "Uploads blocked; review storage budgets and unfinished reservations.",
+    "storage.status": "Storage report unavailable; inspect the capacity reporting job.",
+    "storage.receipts": "Receipt storage pressure; review retention and protected receipts.",
+    "storage.recovery": "Recovery storage pressure; inspect retention and backup capacity.",
     "marzban.usage": "Usage DB unavailable; inspect permissions and database health.",
     "marzban.users": "Inventory below expected minimum; inspect the panel inventory.",
 }

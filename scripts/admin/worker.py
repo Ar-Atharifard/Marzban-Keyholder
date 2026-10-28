@@ -416,8 +416,9 @@ def _execute(operation: str, args: dict[str, Any]) -> Any:
 
 def summary(user: dict[str, Any]) -> dict[str, Any]:
     return {
-        k: user.get(k)
+        k: (0 if user[k] is None and k in {"data_limit", "expire"} else user[k])
         for k in ["username", "status", "data_limit", "used_traffic", "expire", "inbounds"]
+        if k in user
     }
 
 
@@ -602,7 +603,9 @@ async def panel_operation(operation: str, args: dict[str, Any]) -> Any:
         name = args["username"]
         path = "/api/user/" + quote(name, safe="")
         if operation == "user-usage":
-            return await call("GET", path + "/usage")
+            usage = await call("GET", path + "/usage")
+            account = summary(await call("GET", path))
+            return {**usage, **account}
         if operation == "user-reset-usage":
             if not args.get("confirmed"):
                 raise OperatorError("Traffic reset requires --confirm; used traffic becomes zero.")

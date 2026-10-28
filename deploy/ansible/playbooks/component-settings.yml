@@ -19,6 +19,13 @@
         src: '{{ playbook_dir }}/../../../scripts/component_config.py'
         dest: /usr/local/lib/keyholder-admin/component_config.py
         mode: '0644'
+    - name: Install shared operator display for the foreign management bot
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../../src/keyholder/operator_output.py'
+        dest: /usr/local/lib/keyholder-admin/operator_output.py
+        mode: '0644'
+        backup: true
+      when: component_role == 'foreign'
     - name: Install matched operational helper sources
       ansible.builtin.copy:
         src: '{{ playbook_dir }}/../../../scripts/{{ item }}'
@@ -44,7 +51,7 @@
             changed = False
             paths = ['/usr/local/lib/keyholder-admin/' + name for name in
                      ['component_config.py', 'components.json', 'proxy_probe.py',
-                      'management_bot.py', 'billing_bot.py', 'tls.py', 'gate_snapshot.py', 'monitor.py']]
+                      'management_bot.py', 'billing_bot.py', 'operator_output.py', 'tls.py', 'gate_snapshot.py', 'monitor.py']]
             for name in ['/etc/keyholder/recovery.json', '/etc/keyholder/recovery-seed.json']:
                 p = Path(name)
                 if not p.exists():

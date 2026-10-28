@@ -542,13 +542,21 @@ def safe(value: object) -> str:
 
 
 def display(result: Any, as_json: bool) -> None:
-    if as_json or not isinstance(result, list):
+    from keyholder.operator_output import render
+
+    if as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
-        return
-    for item in result:
-        if set(item) == {"username", "name"}:
+    elif isinstance(result, list) and all(
+        isinstance(item, dict) and set(item) == {"username", "name"} for item in result
+    ):
+        for item in result:
             print(safe(item["username"]), safe(item["name"]), sep="\t")
-        elif "mapping" in item:
+    elif (
+        isinstance(result, list)
+        and result
+        and all(isinstance(item, dict) and "mapping" in item for item in result)
+    ):
+        for item in result:
             print(
                 safe(item["mapping"]["upstream_username"]),
                 "\t".join(
@@ -556,8 +564,8 @@ def display(result: Any, as_json: bool) -> None:
                 ),
                 sep="\t",
             )
-        else:
-            print(json.dumps(item, ensure_ascii=False))
+    else:
+        print(render(result))
 
 
 def pick_inbounds(args: argparse.Namespace) -> int:
